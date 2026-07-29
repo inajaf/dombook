@@ -41,6 +41,7 @@
     },
     "mac": {
       "category": "public.app-category.business",
+      "icon": "build/dombook.icns",
       "target": [
         "dmg",
         "zip"

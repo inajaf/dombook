@@ -6,6 +6,8 @@ const { DomBookDatabase } = require("./database.cjs");
 let mainWindow;
 let database;
 
+app.setName("ДомБук");
+
 function ok(data) {
   return { ok: true, data };
 }
@@ -123,6 +125,8 @@ function createMenu() {
 }
 
 app.whenReady().then(async () => {
+  const iconPath = path.join(__dirname, "assets", "dombook-icon.png");
+  if (process.platform === "darwin") app.dock.setIcon(iconPath);
   const userData = app.getPath("userData");
   database = await new DomBookDatabase({
     filePath: path.join(userData, "dombook.sqlite"),
