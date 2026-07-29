@@ -1,0 +1,64 @@
+{
+  "name": "dombook-desktop",
+  "version": "0.1.0",
+  "description": "Локальная desktop-система бронирования домов и коттеджей",
+  "main": "src/main.cjs",
+  "author": "DomBook",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "test": "node --test tests/*.test.cjs",
+    "test:smoke": "node scripts/smoke.cjs",
+    "pack": "electron-builder --dir",
+    "build": "electron-builder",
+    "build:mac": "electron-builder --mac",
+    "build:win": "electron-builder --win",
+    "build:linux": "electron-builder --linux"
+  },
+  "dependencies": {
+    "sql.js": "1.14.1"
+  },
+  "devDependencies": {
+    "electron": "43.2.0",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "com.dombook.desktop",
+    "productName": "ДомБук",
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/sql.js/dist/sql-wasm.wasm"
+    ],
+    "files": [
+      "src/**/*",
+      "node_modules/sql.js/dist/sql-wasm.wasm",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "mac": {
+      "category": "public.app-category.business",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "linux": {
+      "category": "Office",
+      "target": [
+        "AppImage",
+        "deb"
+      ]
+    },
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}"
+  }
+}

@@ -1,0 +1,43 @@
+name: Build desktop installers
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            command: build:mac
+            artifact: macOS
+          - os: windows-latest
+            command: build:win
+            artifact: Windows
+          - os: ubuntu-latest
+            command: build:linux
+            artifact: Linux
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run test:smoke
+      - run: npm run ${{ matrix.command }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ДомБук-${{ matrix.artifact }}
+          path: release/*
+          if-no-files-found: error

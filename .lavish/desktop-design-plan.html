@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ДомБук Desktop — дизайн-план</title>
+  <style>
+    :root{--bg:#f4f7f5;--surface:#fff;--surface2:#edf3ef;--ink:#17211c;--muted:#65736b;--line:#dce5df;--primary:#176b4d;--primary2:#0e543b;--soft:#dcefe6;--lime:#d7f15b;--amber:#d69a42;--danger:#b74040;--radius:18px;--shadow:0 16px 45px rgb(23 33 28/10%)}
+    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    :where(h1,h2,h3,p,li,td,th){overflow-wrap:anywhere}img{display:block;max-width:100%;height:auto}
+    .wrap{width:min(1180px,calc(100% - 40px));margin:auto}.top{position:sticky;top:0;z-index:10;background:rgb(244 247 245/92%);backdrop-filter:blur(16px);border-bottom:1px solid var(--line)}
+    .nav{min-height:66px;display:flex;align-items:center;justify-content:space-between;gap:20px}.brand{display:flex;align-items:center;gap:11px;font-weight:900}.mark{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;background:#18241e;color:var(--lime)}
+    .links{display:flex;gap:4px;flex-wrap:wrap}.links a{color:var(--muted);text-decoration:none;font-size:12px;font-weight:750;padding:8px 10px;border-radius:9px}.links a:hover{background:var(--surface);color:var(--ink)}
+    .hero{padding:70px 0 54px;background:linear-gradient(140deg,#f4f7f5 55%,#e4eee8)}.kicker{color:var(--primary);font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.15em}
+    h1{font-size:clamp(38px,6vw,72px);line-height:1.08;letter-spacing:-.045em;margin:12px 0 20px;padding:.04em .08em .06em 0;max-width:980px}h2{font-size:clamp(27px,4vw,44px);line-height:1.18;letter-spacing:-.03em;margin:8px 0 14px;padding:.03em .06em .05em 0}h3{font-size:18px;line-height:1.25;margin:0 0 8px}
+    .lead{font-size:20px;line-height:1.6;color:var(--muted);max-width:820px}.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:28px}.chip{border:1px solid var(--line);background:var(--surface);border-radius:99px;padding:7px 11px;font-size:12px;font-weight:750}.chip.recommended{background:var(--soft);border-color:#c6e2d5;color:var(--primary2)}
+    section.content{padding:64px 0}.intro{max-width:780px;margin-bottom:30px;color:var(--muted)}.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.card{min-width:0;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:22px;box-shadow:0 1px 2px rgb(23 33 28/4%)}.card p{margin:0;color:var(--muted)}.number{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:var(--soft);color:var(--primary);font-weight:900;margin-bottom:16px}
+    .dark{background:#18241e;color:#f4faf6}.dark .intro,.dark .card p{color:#a8b8af}.dark .card{background:#223129;border-color:#33443a}.dark .number{background:#34473d;color:var(--lime)}
+    .screen{background:#18241e;border-radius:24px;padding:14px;box-shadow:var(--shadow)}.screen img{border-radius:13px;border:1px solid rgb(255 255 255/10%)}.caption{display:flex;justify-content:space-between;gap:20px;color:var(--muted);font-size:12px;margin-top:10px}
+    .hierarchy{display:grid;grid-template-columns:.8fr 1fr 1fr;gap:12px;align-items:stretch}.hierarchy .level{border:1px solid var(--line);border-radius:16px;padding:18px;background:var(--surface)}.level strong{display:block;font-size:17px}.level small{display:block;color:var(--muted);margin-top:5px}.arrow{color:var(--primary);font-weight:900;margin-top:12px}
+    .swatches{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}.swatch{min-height:110px;border-radius:15px;padding:13px;display:flex;flex-direction:column;justify-content:flex-end;font-weight:800;font-size:12px}.swatch small{font-weight:600;opacity:.75}.s1{background:#18241e;color:white}.s2{background:#176b4d;color:white}.s3{background:#dcefe6}.s4{background:#d7f15b}.s5{background:#d69a42;color:#2b1d08}
+    .rule-list{display:grid;gap:10px}.rule{display:grid;grid-template-columns:48px 1fr;gap:12px;align-items:start;padding:14px;border-radius:14px;background:var(--surface2)}.rule b{width:48px;height:48px;border-radius:13px;display:grid;place-items:center;background:var(--surface);color:var(--primary);font-size:13px}.rule p{margin:2px 0 0;color:var(--muted)}
+    .table-wrap{overflow:auto;border:1px solid var(--line);border-radius:16px;background:var(--surface)}table{width:100%;border-collapse:collapse;min-width:760px}th,td{text-align:left;padding:14px 16px;border-bottom:1px solid var(--line);vertical-align:top}th{background:#f7faf8;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em}tr:last-child td{border-bottom:0}.status{display:inline-flex;border-radius:99px;padding:5px 9px;font-size:10px;font-weight:900;background:var(--soft);color:var(--primary2)}.status.next{background:#fff1d7;color:#775013}
+    .platform{display:grid;grid-template-columns:56px 1fr;gap:13px}.platform-logo{width:56px;height:56px;border-radius:16px;display:grid;place-items:center;background:var(--surface2);font-weight:900;color:var(--primary)}
+    .checklist{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.check{padding:13px 15px;border-radius:12px;background:var(--surface);border:1px solid var(--line)}.check::before{content:"✓";display:inline-grid;place-items:center;width:22px;height:22px;margin-right:9px;border-radius:7px;background:var(--soft);color:var(--primary);font-weight:900}
+    .decision{border-left:5px solid var(--primary);background:var(--surface);padding:22px;border-radius:0 var(--radius) var(--radius) 0}.decision strong{display:block;font-size:18px}.decision p{margin:6px 0 0;color:var(--muted)}
+    footer{padding:34px 0;background:#18241e;color:#a8b8af}.footer-row{display:flex;justify-content:space-between;gap:20px}.footer-row strong{color:white}
+    @media(max-width:800px){.links{display:none}.grid2,.grid3,.hierarchy,.checklist{grid-template-columns:1fr}.swatches{grid-template-columns:repeat(2,1fr)}.hero{padding-top:48px}.caption,.footer-row{flex-direction:column}}
+  </style>
+</head>
+<body>
+  <header class="top">
+    <div class="wrap nav">
+      <div class="brand"><span class="mark">ДБ</span><span>ДомБук · Desktop design plan</span></div>
+      <nav class="links" aria-label="Разделы">
+        <a href="#audience">Аудитория</a><a href="#model">Модель</a><a href="#screens">Экраны</a><a href="#system">Система</a><a href="#platforms">Платформы</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="wrap">
+        <div class="kicker">Дизайн-план desktop-версии · 0.1</div>
+        <h1>Система, которой хозяин объекта не боится пользоваться</h1>
+        <p class="lead">Один рабочий день, один календарь и понятная иерархия: дом отдыха содержит коттеджи, а отдельный дом сдаётся самостоятельно. Интерфейс рассчитан на владельца, а не на специалиста по гостиничным программам.</p>
+        <div class="chips"><span class="chip recommended">Крупные действия</span><span class="chip">Без скрытых жестов</span><span class="chip">Простые слова</span><span class="chip">macOS · Windows · Linux</span></div>
+      </div>
+    </section>
+
+    <section class="content" id="audience">
+      <div class="wrap">
+        <div class="kicker">01 · Для кого</div><h2>Хозяин объекта — главный пользователь</h2>
+        <p class="intro">Он может пользоваться компьютером только для повседневных задач, работать один, отвлекаться на звонки и записывать часть броней с телефона. Ошибка в дате или депозите стоит реальных денег, поэтому скорость не должна достигаться ценой ясности.</p>
+        <div class="grid3">
+          <article class="card"><div class="number">1</div><h3>Узнаваемые слова</h3><p>«Дом отдыха», «Коттедж», «Гость», «Получено», «Осталось». Без PMS, inventory, ledger и других профессиональных терминов.</p></article>
+          <article class="card"><div class="number">2</div><h3>Одно главное действие</h3><p>На каждом экране одна зелёная кнопка: создать бронь, добавить объект или сделать backup.</p></article>
+          <article class="card"><div class="number">3</div><h3>Ошибку можно исправить</h3><p>Архивация вместо удаления, понятное подтверждение, история денег и сохранение формы при конфликте дат.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="content dark" id="model">
+      <div class="wrap">
+        <div class="kicker">02 · Информационная модель</div><h2>Два понятных уровня</h2>
+        <p class="intro">Владелец сначала узнаёт место, затем конкретный сдаваемый объект. В бронировании выбирается коттедж или дом — не сам комплекс.</p>
+        <div class="hierarchy">
+          <div class="level"><strong>Владелец</strong><small>видит весь портфель</small><div class="arrow">→</div></div>
+          <div class="level"><strong>Дом отдыха</strong><small>«Лесная долина», общий адрес</small><div class="arrow">→ коттеджи 1–5</div></div>
+          <div class="level"><strong>Отдельный дом</strong><small>не требует группы и сдаётся целиком</small><div class="arrow">→ одна календарная строка</div></div>
+        </div>
+        <div class="grid2" style="margin-top:18px">
+          <article class="card"><h3>Комплекс хранит</h3><p>Название, адрес, общие заметки и список коттеджей. Архив комплекса не стирает коттеджи и историю.</p></article>
+          <article class="card"><h3>Сдаваемая единица хранит</h3><p>Своё название, вместимость, цену за ночь, депозит, время заезда/выезда и независимый календарь.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="content" id="screens">
+      <div class="wrap">
+        <div class="kicker">03 · Реальные экраны</div><h2>Текущее направление desktop UI</h2>
+        <p class="intro">Ниже показаны фактически запущенные экраны MVP. Дальнейшие модули должны продолжать эту иерархию, плотность и цветовой язык.</p>
+        <div class="screen"><img src="dombook-desktop-dashboard.png" alt="Текущий dashboard ДомБук с крупными показателями и быстрыми действиями"></div>
+        <div class="caption"><span><strong>Сегодня:</strong> минимум решений, только операции и деньги.</span><span>Проверено в реальном Electron-окне.</span></div>
+        <div class="screen" style="margin-top:30px"><img src="dombook-desktop-objects.png" alt="Раздел объектов с домом отдыха, двумя коттеджами и отдельным домом"></div>
+        <div class="caption"><span><strong>Объекты:</strong> визуальная группировка коттеджей по дому отдыха.</span><span>CRUD доступен рядом с сущностью.</span></div>
+      </div>
+    </section>
+
+    <section class="content" style="background:#edf3ef" id="system">
+      <div class="wrap">
+        <div class="kicker">04 · Design system</div><h2>Спокойный, контрастный, хозяйственный</h2>
+        <div class="swatches">
+          <div class="swatch s1">Навигация<small>#18241E</small></div><div class="swatch s2">Главное действие<small>#176B4D</small></div><div class="swatch s3">Безопасный фон<small>#DCEFE6</small></div><div class="swatch s4">Активный маркер<small>#D7F15B</small></div><div class="swatch s5">Ожидание / долг<small>#D69A42</small></div>
+        </div>
+        <div class="grid2" style="margin-top:24px">
+          <div class="rule-list">
+            <div class="rule"><b>44</b><div><h3>Минимальная высота</h3><p>Кнопки и поля не ниже 44 px. Иконка никогда не остаётся единственным способом понять действие.</p></div></div>
+            <div class="rule"><b>16</b><div><h3>Основной текст</h3><p>14–16 px в зависимости от плотности. Числа и важные статусы крупнее и контрастнее.</p></div></div>
+            <div class="rule"><b>1×</b><div><h3>Один экран — одна цель</h3><p>Создание брони идёт короткими смысловыми блоками, сложное раскрывается постепенно.</p></div></div>
+          </div>
+          <div class="rule-list">
+            <div class="rule"><b>Esc</b><div><h3>Всегда можно выйти</h3><p>Escape, крестик и «Отмена» закрывают форму без обязательного заполнения.</p></div></div>
+            <div class="rule"><b>AA</b><div><h3>Контраст и фокус</h3><p>Фокус видим с клавиатуры, цвет дублируется словом, ошибки объявляются рядом с полем.</p></div></div>
+            <div class="rule"><b>0</b><div><h3>Никакого drag-and-drop</h3><p>Критические изменения выполняются обычной кнопкой; точность мыши не требуется.</p></div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="content">
+      <div class="wrap">
+        <div class="kicker">05 · Карта экранов</div><h2>Приоритеты desktop-версии</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Экран</th><th>Главный вопрос хозяина</th><th>Главное действие</th><th>Состояние</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Сегодня</strong></td><td>Что мне нужно сделать сейчас?</td><td>Новая бронь</td><td><span class="status">Готов MVP</span></td></tr>
+              <tr><td><strong>Календарь</strong></td><td>Какой коттедж свободен?</td><td>Новая бронь на выбранные даты</td><td><span class="status">Готов MVP</span></td></tr>
+              <tr><td><strong>Бронирования</strong></td><td>Кто приезжает и сколько должен?</td><td>Создать / изменить бронь</td><td><span class="status">Готов MVP</span></td></tr>
+              <tr><td><strong>Объекты</strong></td><td>Какие дома и коттеджи я сдаю?</td><td>Добавить объект или дом отдыха</td><td><span class="status">Готов MVP</span></td></tr>
+              <tr><td><strong>Финансы</strong></td><td>Что оплачено, что вернуть?</td><td>Зафиксировать платёж/депозит</td><td><span class="status next">Следующий этап</span></td></tr>
+              <tr><td><strong>Настройки</strong></td><td>Мои данные в безопасности?</td><td>Создать backup</td><td><span class="status">Готов MVP</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="content" id="platforms">
+      <div class="wrap">
+        <div class="kicker">06 · Кроссплатформенность</div><h2>Одинаковая логика, знакомая рамка ОС</h2>
+        <div class="grid3">
+          <article class="card platform"><span class="platform-logo">mac</span><div><h3>macOS</h3><p>Системное меню, traffic lights, Cmd+N и нативное расположение окна.</p></div></article>
+          <article class="card platform"><span class="platform-logo">win</span><div><h3>Windows</h3><p>Обычные кнопки окна, Ctrl+N, установщик NSIS и portable-версия.</p></div></article>
+          <article class="card platform"><span class="platform-logo">lin</span><div><h3>Linux</h3><p>AppImage и deb; интерфейс не зависит от системных шрифтов или нативных SQLite-модулей.</p></div></article>
+        </div>
+        <div class="decision" style="margin-top:22px"><strong>Зафиксированное решение</strong><p>Electron + SQLite WASM. Один код интерфейса и базы работает на трёх платформах; инсталляторы собираются на соответствующих CI runners.</p></div>
+      </div>
+    </section>
+
+    <section class="content" style="background:#edf3ef">
+      <div class="wrap">
+        <div class="kicker">07 · Definition of done</div><h2>Проверка простоты перед релизом</h2>
+        <div class="checklist">
+          <div class="check">Хозяин создаёт дом отдыха и два коттеджа без инструкции</div><div class="check">Отдельный дом создаётся без лишней группы</div>
+          <div class="check">Бронь оформляется менее чем за 90 секунд</div><div class="check">Конфликт дат объясняет, что именно занято</div>
+          <div class="check">Предоплата и депозит визуально не смешиваются</div><div class="check">Крестик и Escape всегда закрывают форму</div>
+          <div class="check">Все действия доступны клавиатурой</div><div class="check">Текст читается при системном масштабе 125–150%</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer><div class="wrap footer-row"><div><strong>ДомБук Desktop</strong><br>Отдельный дизайн-план для развития приложения.</div><div>Источник дизайна: реальный Electron MVP и его локальная система токенов.</div></div></footer>
+</body>
+</html>

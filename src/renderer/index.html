@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'">
+  <title>ДомБук</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Перейти к содержимому</a>
+
+  <svg class="svg-sprite" aria-hidden="true">
+    <symbol id="i-grid" viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></symbol>
+    <symbol id="i-calendar" viewBox="0 0 24 24"><path d="M7 3v3m10-3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v14H4V6a1 1 0 0 1 1-1Z"/></symbol>
+    <symbol id="i-house" viewBox="0 0 24 24"><path d="m3 11 9-7 9 7v9h-6v-6H9v6H3z"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M6 3h12a2 2 0 0 1 2 2v16H7a3 3 0 0 1-3-3V5a2 2 0 0 1 2-2Zm1 14h13M8 7h8M8 11h6"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm8 3 2 2-2 3-3-.5-1 1.5.5 3-3 1.5-2-2-2 2-3-1.5.5-3L5 16.5 2 17l-2-3 2-2-2-2 2-3 3 .5L6.5 6 6 3l3-1.5 2 2 2-2L16 3l-.5 3L17 7.5l3-.5 2 3Z"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="m4 16-1 5 5-1L19 9l-4-4Z M13 7l4 4"/></symbol>
+    <symbol id="i-archive" viewBox="0 0 24 24"><path d="M4 8h16v13H4zM3 3h18v5H3zM9 12h6"/></symbol>
+    <symbol id="i-restore" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2-5.3L3 10M3 4v6h6"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m16 16 5 5"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m5 5 14 14M19 5 5 19"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3m-9 0 1 14h10l1-14M10 11v6m4-6v6"/></symbol>
+    <symbol id="i-database" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v7c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12v7c0 1.7 3.6 3 8 3s8-1.3 8-3v-7"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  </svg>
+
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Основная навигация">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">ДБ</div>
+        <div><strong>ДомБук</strong><span>desktop</span></div>
+      </div>
+
+      <nav class="nav-list">
+        <button class="nav-item active" data-page="dashboard">
+          <svg><use href="#i-grid"/></svg><span>Сегодня</span>
+        </button>
+        <button class="nav-item" data-page="calendar">
+          <svg><use href="#i-calendar"/></svg><span>Календарь</span>
+        </button>
+        <button class="nav-item" data-page="reservations">
+          <svg><use href="#i-book"/></svg><span>Бронирования</span>
+          <span class="nav-badge" id="reservationBadge" hidden>0</span>
+        </button>
+        <button class="nav-item" data-page="properties">
+          <svg><use href="#i-house"/></svg><span>Объекты</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-spacer"></div>
+      <nav class="nav-list nav-secondary">
+        <button class="nav-item" data-page="settings">
+          <svg><use href="#i-settings"/></svg><span>Настройки</span>
+        </button>
+      </nav>
+      <div class="local-status"><span class="status-dot"></span><span>Локальная база</span></div>
+    </aside>
+
+    <section class="workspace">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow" id="pageEyebrow">Рабочий день</p>
+          <h1 id="pageTitle">Сегодня</h1>
+        </div>
+        <div class="topbar-actions">
+          <label class="search-box" id="searchBox">
+            <svg><use href="#i-search"/></svg>
+            <span class="sr-only">Поиск</span>
+            <input id="globalSearch" type="search" placeholder="Поиск по гостю или дому" autocomplete="off">
+          </label>
+          <button class="button primary" id="primaryAction">
+            <svg><use href="#i-plus"/></svg><span>Новая бронь</span>
+          </button>
+        </div>
+      </header>
+
+      <main id="main-content" tabindex="-1">
+        <section class="page active" id="page-dashboard" aria-labelledby="dashboard-heading">
+          <h2 class="sr-only" id="dashboard-heading">Сводка на сегодня</h2>
+          <div class="stat-grid" id="dashboardStats"></div>
+          <div class="dashboard-grid">
+            <article class="panel">
+              <header class="panel-header">
+                <div><p class="eyebrow">Операции</p><h2>Заезды и выезды</h2></div>
+                <button class="text-button" data-page-jump="calendar">Открыть календарь <svg><use href="#i-arrow"/></svg></button>
+              </header>
+              <div id="todayOperations"></div>
+            </article>
+            <article class="panel quiet-panel">
+              <header class="panel-header"><div><p class="eyebrow">Быстрый старт</p><h2>Следующие действия</h2></div></header>
+              <div class="quick-actions">
+                <button data-quick="reservation"><span class="quick-icon"><svg><use href="#i-plus"/></svg></span><span><strong>Создать бронь</strong><small>Дом, даты, гость и деньги</small></span><svg><use href="#i-arrow"/></svg></button>
+                <button data-quick="property"><span class="quick-icon"><svg><use href="#i-house"/></svg></span><span><strong>Добавить объект</strong><small>Коттедж или отдельный дом</small></span><svg><use href="#i-arrow"/></svg></button>
+                <button data-page-jump="settings"><span class="quick-icon"><svg><use href="#i-database"/></svg></span><span><strong>Сделать backup</strong><small>Локальная резервная копия</small></span><svg><use href="#i-arrow"/></svg></button>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="page" id="page-calendar" aria-labelledby="calendar-heading">
+          <div class="section-head">
+            <div><p class="section-note">Занятость на ближайшие 14 ночей</p><h2 id="calendar-heading">Календарь объектов</h2></div>
+            <div class="legend"><span><i class="legend-dot confirmed"></i>Подтверждено</span><span><i class="legend-dot hold"></i>Холд</span><span><i class="legend-dot free"></i>Свободно</span></div>
+          </div>
+          <div class="panel calendar-panel" id="calendarContainer"></div>
+        </section>
+
+        <section class="page" id="page-reservations" aria-labelledby="reservations-heading">
+          <div class="section-head">
+            <div><p class="section-note">История сохраняется даже после отмены</p><h2 id="reservations-heading">Все бронирования</h2></div>
+            <div class="filter-pills" role="group" aria-label="Фильтр бронирований">
+              <button class="active" data-reservation-filter="all">Все</button>
+              <button data-reservation-filter="active">Активные</button>
+              <button data-reservation-filter="debt">С долгом</button>
+              <button data-reservation-filter="deposit">Депозит</button>
+            </div>
+          </div>
+          <div class="panel table-panel">
+            <div class="table-scroll">
+              <table>
+                <thead><tr><th>Гость</th><th>Дом</th><th>Даты</th><th>Статус</th><th>Оплата</th><th>Депозит</th><th><span class="sr-only">Действия</span></th></tr></thead>
+                <tbody id="reservationTableBody"></tbody>
+              </table>
+            </div>
+            <div class="empty-state" id="reservationEmpty" hidden>
+              <div class="empty-icon"><svg><use href="#i-book"/></svg></div>
+              <h3>Бронирований пока нет</h3><p>Создайте первую бронь — система проверит даты и рассчитает остаток.</p>
+              <button class="button primary" data-quick="reservation"><svg><use href="#i-plus"/></svg>Создать бронь</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="page" id="page-properties" aria-labelledby="properties-heading">
+          <div class="section-head">
+            <div><p class="section-note">Дом отдыха может содержать несколько сдаваемых коттеджей</p><h2 id="properties-heading">Мои объекты</h2></div>
+            <div class="section-actions">
+              <label class="toggle-row"><input id="showArchived" type="checkbox"><span>Показывать архивные</span></label>
+              <button class="button secondary compact" data-quick="place"><svg><use href="#i-plus"/></svg>Добавить дом отдыха</button>
+            </div>
+          </div>
+          <div id="propertyGroups"></div>
+          <div class="empty-state panel" id="propertyEmpty" hidden>
+            <div class="empty-icon"><svg><use href="#i-house"/></svg></div>
+            <h3>Добавьте первый объект</h3><p>Это может быть отдельный дом или коттедж внутри дома отдыха.</p>
+            <button class="button primary" data-quick="property"><svg><use href="#i-plus"/></svg>Добавить объект</button>
+          </div>
+        </section>
+
+        <section class="page" id="page-settings" aria-labelledby="settings-heading">
+          <div class="section-head">
+            <div><p class="section-note">Данные остаются под вашим контролем</p><h2 id="settings-heading">База и резервные копии</h2></div>
+          </div>
+          <div class="settings-grid">
+            <article class="panel">
+              <header class="panel-header"><div><p class="eyebrow">SQLite</p><h2>Локальное хранилище</h2></div><span class="health-badge">Работает</span></header>
+              <dl class="info-list" id="systemInfo"></dl>
+              <button class="button secondary" id="openDatabaseFolder"><svg><use href="#i-database"/></svg>Открыть папку базы</button>
+            </article>
+            <article class="panel">
+              <header class="panel-header"><div><p class="eyebrow">Backup</p><h2>Резервные копии</h2></div><button class="button primary compact" id="createBackup">Создать копию</button></header>
+              <p class="muted">Сейчас копии создаются локально. Подключение зашифрованного S3-cloud backup — следующий этап.</p>
+              <div class="backup-list" id="backupList"></div>
+            </article>
+          </div>
+        </section>
+      </main>
+    </section>
+  </div>
+
+  <dialog id="propertyDialog" class="modal">
+    <form method="dialog" id="propertyForm" class="modal-card">
+      <header class="modal-header">
+        <div><p class="eyebrow">Объект размещения</p><h2 id="propertyDialogTitle">Новый дом</h2></div>
+        <button class="icon-button" type="button" data-close-dialog aria-label="Закрыть"><svg><use href="#i-close"/></svg></button>
+      </header>
+      <div class="modal-body">
+        <input type="hidden" name="id">
+        <div class="form-grid">
+          <label class="field"><span>Тип объекта</span><select name="kind"><option value="cottage">Коттедж</option><option value="house">Отдельный дом</option></select></label>
+          <label class="field"><span>Где находится</span><select name="placeId" id="propertyPlace"><option value="">Отдельный объект</option></select><small>Выберите дом отдыха или оставьте отдельным.</small></label>
+          <label class="field span-2"><span>Наименование дома <b aria-hidden="true">*</b></span><input name="name" maxlength="120" required placeholder="Например, Сосны"><small>Это название будет видно в календаре и бронях.</small></label>
+          <label class="field span-2"><span>Адрес отдельного дома</span><input name="location" maxlength="200" placeholder="Заполняйте, только если объект не входит в дом отдыха"></label>
+          <label class="field"><span>Вместимость <b aria-hidden="true">*</b></span><input name="capacity" type="number" min="1" max="100" value="4" required></label>
+          <label class="field"><span>Валюта</span><select name="currency"><option value="AZN">AZN — манат</option><option value="USD">USD — доллар</option><option value="EUR">EUR — евро</option></select></label>
+          <label class="field"><span>Цена за ночь</span><div class="money-input"><input name="basePrice" type="number" min="0" step="0.01" value="0"><span>₼</span></div></label>
+          <label class="field"><span>Страховой депозит</span><div class="money-input"><input name="deposit" type="number" min="0" step="0.01" value="0"><span>₼</span></div></label>
+          <label class="field"><span>Заезд</span><input name="checkInTime" type="time" value="15:00"></label>
+          <label class="field"><span>Выезд</span><input name="checkOutTime" type="time" value="11:00"></label>
+          <label class="field span-2"><span>Заметки</span><textarea name="notes" maxlength="2000" rows="3" placeholder="Правила, особенности, инструкции администратору"></textarea></label>
+        </div>
+        <div class="form-error" id="propertyFormError" role="alert" hidden></div>
+      </div>
+      <footer class="modal-footer">
+        <button class="button ghost" type="button" data-close-dialog>Отмена</button>
+        <button class="button primary" type="submit" value="default" id="propertySubmit">Создать дом</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="placeDialog" class="modal">
+    <form method="dialog" id="placeForm" class="modal-card">
+      <header class="modal-header">
+        <div><p class="eyebrow">Группа объектов</p><h2 id="placeDialogTitle">Новый дом отдыха</h2></div>
+        <button class="icon-button" type="button" data-close-dialog aria-label="Закрыть"><svg><use href="#i-close"/></svg></button>
+      </header>
+      <div class="modal-body">
+        <input type="hidden" name="id">
+        <div class="form-grid">
+          <label class="field span-2"><span>Название дома отдыха <b aria-hidden="true">*</b></span><input name="name" maxlength="140" required placeholder="Например, Лесная долина"><small>Под этим названием будут сгруппированы все коттеджи.</small></label>
+          <label class="field span-2"><span>Адрес или район</span><input name="address" maxlength="240" placeholder="Габала, Нохургышлаг"></label>
+          <label class="toggle-row span-2 food-toggle"><input name="hasFoodService" type="checkbox"><span><strong>Есть кухня или ресторан</strong><small>После включения питание можно добавлять к бронированию.</small></span></label>
+          <label class="field span-2"><span>Заметки</span><textarea name="notes" maxlength="2000" rows="3" placeholder="Общие правила или контакт управляющего"></textarea></label>
+        </div>
+        <div class="form-error" id="placeFormError" role="alert" hidden></div>
+      </div>
+      <footer class="modal-footer">
+        <button class="button ghost" type="button" data-close-dialog>Отмена</button>
+        <button class="button primary" type="submit" value="default" id="placeSubmit">Создать дом отдыха</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="reservationDialog" class="modal wide-modal">
+    <form method="dialog" id="reservationForm" class="modal-card">
+      <header class="modal-header">
+        <div><p class="eyebrow">Бронирование</p><h2 id="reservationDialogTitle">Новая бронь</h2></div>
+        <button class="icon-button" type="button" data-close-dialog aria-label="Закрыть"><svg><use href="#i-close"/></svg></button>
+      </header>
+      <div class="modal-body">
+        <input type="hidden" name="id">
+        <div class="form-section">
+          <h3><span>1</span>Дом и даты</h3>
+          <div class="form-grid">
+            <label class="field span-2"><span>Дом <b aria-hidden="true">*</b></span><select name="propertyId" id="reservationProperty" required></select></label>
+            <label class="field"><span>Заезд <b aria-hidden="true">*</b></span><input name="checkInDate" type="date" required></label>
+            <label class="field"><span>Выезд <b aria-hidden="true">*</b></span><input name="checkOutDate" type="date" required></label>
+          </div>
+        </div>
+        <div class="form-section">
+          <h3><span>2</span>Гость</h3>
+          <div class="form-grid">
+            <label class="field span-2"><span>Имя гостя <b aria-hidden="true">*</b></span><input name="guestName" maxlength="160" required autocomplete="name"></label>
+            <label class="field"><span>Телефон</span><input name="guestPhone" type="tel" maxlength="32" autocomplete="tel"></label>
+            <label class="field"><span>Email</span><input name="guestEmail" type="email" maxlength="200" autocomplete="email"></label>
+            <label class="field"><span>Взрослые</span><input name="adults" type="number" min="1" max="100" value="2"></label>
+            <label class="field"><span>Дети</span><input name="children" type="number" min="0" max="100" value="0"></label>
+          </div>
+        </div>
+        <div class="form-section" id="reservationFoodSection" hidden>
+          <h3><span>3</span>Питание</h3>
+          <p class="section-help">Введите готовую общую сумму для всей компании отдельно за завтрак, обед и ужин каждого дня. Количество порций считать не нужно.</p>
+          <div class="daily-meals" id="reservationMealDays"></div>
+        </div>
+        <div class="form-section">
+          <h3><span>4</span>Деньги и статус</h3>
+          <div class="form-grid">
+            <label class="field"><span>Проживание</span><div class="money-input"><input name="accommodation" type="number" min="0" step="0.01" value="0" readonly><span>₼</span></div><small>Считается автоматически по ночам.</small></label>
+            <label class="field"><span>Предоплата за бронь</span><div class="money-input"><input name="prepaid" type="number" min="0" step="0.01" value="0"><span>₼</span></div><small>Уменьшает остаток к оплате.</small></label>
+            <label class="field"><span>Возвратный залог</span><div class="money-input"><input name="deposit" type="number" min="0" step="0.01" value="0"><span>₼</span></div><small>Считается отдельно и не является оплатой.</small></label>
+            <label class="field"><span>Статус депозита</span><select name="depositStatus"><option value="none">Не требуется</option><option value="due">Ожидается</option><option value="received">Получен</option><option value="returned">Возвращён</option><option value="partially_withheld">Частично удержан</option><option value="withheld">Удержан</option></select></label>
+            <label class="field"><span>Статус брони</span><select name="status"><option value="hold">Временный холд</option><option value="confirmed">Подтверждена</option><option value="checked_in">Гость заехал</option><option value="checked_out">Гость выехал</option><option value="no_show">Не заехал</option><option value="cancelled">Отменена</option></select></label>
+            <label class="field"><span>Заметки</span><input name="notes" maxlength="2000" placeholder="Пожелания или важная информация"></label>
+          </div>
+          <div class="reservation-calculation" role="status" aria-live="polite">
+            <div class="calculation-heading">
+              <span><strong id="calculationNights">0 ночей</strong><small id="calculationFormula">Выберите корректные даты</small></span>
+              <span><small>Проживание + питание</small><strong id="calculationTotal">0 ₼</strong></span>
+            </div>
+            <div class="calculation-breakdown">
+              <span><small>Питание</small><strong id="calculationServices">0 ₼</strong></span>
+              <span><small>Получено</small><strong id="calculationPrepaid">0 ₼</strong></span>
+              <span class="calculation-balance"><small>Осталось получить</small><strong id="calculationBalance">0 ₼</strong></span>
+              <span><small>Залог отдельно</small><strong id="calculationDeposit">0 ₼</strong></span>
+            </div>
+          </div>
+        </div>
+        <div class="form-error" id="reservationFormError" role="alert" hidden></div>
+      </div>
+      <footer class="modal-footer">
+        <button class="button ghost" type="button" data-close-dialog>Отмена</button>
+        <button class="button primary" type="submit" value="default" id="reservationSubmit">Создать бронь</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="earlyCheckoutDialog" class="modal">
+    <form method="dialog" id="earlyCheckoutForm" class="modal-card">
+      <header class="modal-header">
+        <div><p class="eyebrow">Освобождение календаря</p><h2>Досрочный выезд</h2></div>
+        <button class="icon-button" type="button" data-close-dialog aria-label="Закрыть"><svg><use href="#i-close"/></svg></button>
+      </header>
+      <div class="modal-body">
+        <input type="hidden" name="id">
+        <p class="section-help" id="earlyCheckoutDescription"></p>
+        <div class="form-grid">
+          <label class="field span-2"><span>Фактическая дата выезда</span><input name="actualCheckOutDate" type="date" required><small>Эта дата и все последующие ночи станут свободными.</small></label>
+        </div>
+        <fieldset class="choice-group">
+          <legend>Как пересчитать проживание?</legend>
+          <label><input type="radio" name="billingPolicy" value="recalculate" checked><span><strong>Только использованные ночи</strong><small>Рекомендуется: стоимость проживания уменьшится автоматически.</small></span></label>
+          <label><input type="radio" name="billingPolicy" value="keep_total"><span><strong>Сохранить полную стоимость</strong><small>Календарь освободится, но сумма за проживание останется прежней.</small></span></label>
+        </fieldset>
+        <div class="reservation-calculation compact" id="earlyCheckoutPreview"></div>
+        <div class="form-error" id="earlyCheckoutError" role="alert" hidden></div>
+      </div>
+      <footer class="modal-footer">
+        <button class="button ghost" type="button" data-close-dialog>Отмена</button>
+        <button class="button primary" type="submit" id="earlyCheckoutSubmit">Оформить выезд</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="confirmDialog" class="modal confirm-modal">
+    <form method="dialog" class="modal-card">
+      <div class="modal-body">
+        <div class="confirm-icon"><svg><use href="#i-archive"/></svg></div>
+        <h2 id="confirmTitle">Подтвердите действие</h2>
+        <p id="confirmText"></p>
+      </div>
+      <footer class="modal-footer">
+        <button class="button ghost" type="button" data-close-dialog>Отмена</button>
+        <button class="button danger" value="confirm" id="confirmAction">Подтвердить</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <div class="toast-region" aria-live="polite" aria-atomic="true" id="toastRegion"></div>
+
+  <script src="./app.js"></script>
+</body>
+</html>
