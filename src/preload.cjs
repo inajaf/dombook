@@ -37,6 +37,7 @@ contextBridge.exposeInMainWorld("domBook", {
   },
   system: {
     info: () => invoke("system:info"),
+    setLanguage: (language) => invoke("system:setLanguage", { language }),
     openBackupDirectory: () => invoke("system:openBackupDirectory"),
   },
 });

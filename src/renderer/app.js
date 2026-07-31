@@ -41,6 +41,8 @@ const state = {
 const api = window.domBook || createBrowserDemoApi();
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+const interfaceLocale = () => window.i18n?.locale || "ru-RU";
+const interfaceLanguage = () => window.i18n?.language || "ru";
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -56,7 +58,7 @@ function icon(id) {
 }
 
 function money(minor, currency = "AZN") {
-  return new Intl.NumberFormat("ru-RU", {
+  return new Intl.NumberFormat(interfaceLocale(), {
     style: "currency",
     currency,
     minimumFractionDigits: 0,
@@ -66,6 +68,8 @@ function money(minor, currency = "AZN") {
 
 function objectCountLabel(count) {
   const value = Number(count || 0);
+  if (interfaceLanguage() === "en") return `${value} ${value === 1 ? "property" : "properties"}`;
+  if (interfaceLanguage() === "az") return `${value} obyekt`;
   const mod100 = value % 100;
   const mod10 = value % 10;
   if (mod100 >= 11 && mod100 <= 14) return `${value} объектов`;
@@ -74,16 +78,42 @@ function objectCountLabel(count) {
   return `${value} объектов`;
 }
 
+function guestCountLabel(count) {
+  const value = Number(count || 0);
+  if (interfaceLanguage() === "en") return `${value} ${value === 1 ? "guest" : "guests"}`;
+  if (interfaceLanguage() === "az") return `${value} qonaq`;
+  const mod100 = value % 100;
+  const mod10 = value % 10;
+  if (mod100 >= 11 && mod100 <= 14) return `${value} гостей`;
+  if (mod10 === 1) return `${value} гость`;
+  if (mod10 >= 2 && mod10 <= 4) return `${value} гостя`;
+  return `${value} гостей`;
+}
+
+function balanceLabel(reservation) {
+  const value = reservation.refund_due_minor > 0
+    ? money(reservation.refund_due_minor, reservation.currency)
+    : money(reservation.balance_minor, reservation.currency);
+  if (reservation.refund_due_minor > 0) {
+    if (interfaceLanguage() === "en") return `refund ${value}`;
+    if (interfaceLanguage() === "az") return `qaytarılacaq ${value}`;
+    return `к возврату ${value}`;
+  }
+  if (interfaceLanguage() === "en") return `balance ${value}`;
+  if (interfaceLanguage() === "az") return `qalıq ${value}`;
+  return `остаток ${value}`;
+}
+
 function shortDate(value) {
   if (!value) return "—";
-  return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "short" })
+  return new Intl.DateTimeFormat(interfaceLocale(), { day: "2-digit", month: "short" })
     .format(new Date(`${value}T00:00:00`))
     .replace(".", "");
 }
 
 function longDate(value) {
   if (!value) return "—";
-  return new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long", year: "numeric" })
+  return new Intl.DateTimeFormat(interfaceLocale(), { day: "numeric", month: "long", year: "numeric" })
     .format(new Date(`${value}T00:00:00`));
 }
 
@@ -141,14 +171,16 @@ function setBusy(button, busy, text = "Сохранение…") {
 }
 
 async function refreshCore() {
-  const [places, properties, reservations, dashboard, calendar] = await Promise.all([
+  const [places, properties, reservations, dashboard, calendar, systemInfo] = await Promise.all([
     unwrap(api.places.list({ includeArchived: true })),
     unwrap(api.properties.list({ includeArchived: true })),
     unwrap(api.reservations.list()),
     unwrap(api.dashboard.get()),
     unwrap(api.calendar.get(14)),
+    unwrap(api.system.info()),
   ]);
-  Object.assign(state, { places, properties, reservations, dashboard, calendar });
+  Object.assign(state, { places, properties, reservations, dashboard, calendar, systemInfo });
+  window.i18n?.setLanguage(systemInfo.language || "ru");
   renderDashboard();
   renderCalendar();
   renderReservations();
@@ -163,6 +195,30 @@ async function refreshSettings() {
   ]);
   Object.assign(state, { backups, systemInfo });
   renderSettings();
+}
+
+async function changeInterfaceLanguage(event) {
+  const select = event.currentTarget;
+  const language = select.value;
+  select.disabled = true;
+  try {
+    const savedLanguage = await unwrap(api.system.setLanguage(language));
+    state.systemInfo = { ...(state.systemInfo || {}), language: savedLanguage };
+    window.i18n?.setLanguage(savedLanguage);
+    renderDashboard();
+    renderCalendar();
+    renderReservations();
+    renderProperties();
+    renderSettings();
+    navigate(state.page);
+    window.i18n?.translateDom();
+    toast(window.i18n?.t("Язык интерфейса изменён") || "Язык интерфейса изменён");
+  } catch (error) {
+    toast(error.message, "error");
+    select.value = state.systemInfo?.language || "ru";
+  } finally {
+    select.disabled = false;
+  }
 }
 
 function navigate(page) {
@@ -208,7 +264,7 @@ function renderDashboard() {
     ? `<div class="operation-list">${operations.map((item) => `
         <div class="operation-row">
           <span class="operation-time">${item.time}</span>
-          <span><strong>${escapeHtml(item.guest_name)}</strong><small>${escapeHtml(item.place_name ? `${item.place_name} · ${item.property_name}` : item.property_name)} · ${item.adults + item.children} гостей</small></span>
+          <span><strong data-i18n-ignore>${escapeHtml(item.guest_name)}</strong><small><span data-i18n-ignore>${escapeHtml(item.place_name ? `${item.place_name} · ${item.property_name}` : item.property_name)}</span> · ${guestCountLabel(item.adults + item.children)}</small></span>
           <span class="operation-tag ${item.type}">${item.label}</span>
         </div>
       `).join("")}</div>`
@@ -217,6 +273,7 @@ function renderDashboard() {
 
 function renderCalendar() {
   const data = state.calendar || { dates: [], properties: [], occupancy: [] };
+  const maximumCheckInDate = state.systemInfo?.bookingPolicy?.maximumCheckInDate;
   const byKey = new Map(data.occupancy.map((item) => [`${item.property_id}:${item.night_date}`, item]));
   if (!data.properties.length) {
     $("#calendarContainer").innerHTML = `<div class="empty-state"><h3>Нет активных домов</h3><p>Добавьте или восстановите дом, чтобы увидеть календарь.</p></div>`;
@@ -224,22 +281,28 @@ function renderCalendar() {
   }
   const headers = data.dates.map((date) => {
     const parsed = new Date(`${date}T00:00:00`);
-    const weekday = new Intl.DateTimeFormat("ru-RU", { weekday: "short" }).format(parsed);
+    const weekday = new Intl.DateTimeFormat(interfaceLocale(), { weekday: "short" }).format(parsed);
     return `<div class="calendar-cell calendar-head"><span><strong>${parsed.getDate()}</strong>${escapeHtml(weekday)}</span></div>`;
   }).join("");
   const rows = data.properties.map((property) => `
-    <div class="calendar-cell calendar-house"><span>${escapeHtml(property.name)}<small>${escapeHtml(property.place_name || property.location || "Отдельный дом")}</small></span></div>
+    <div class="calendar-cell calendar-house"><span data-i18n-ignore>${escapeHtml(property.name)}</span><small ${property.place_name || property.location ? "data-i18n-ignore" : ""}>${escapeHtml(property.place_name || property.location || "Отдельный дом")}</small></div>
     ${data.dates.map((date) => {
       const booking = byKey.get(`${property.id}:${date}`);
+      const outsideBookingWindow = !booking && maximumCheckInDate && date > maximumCheckInDate;
       const label = booking
         ? `Открыть бронь ${booking.guest_name} на ${longDate(date)}`
-        : `Создать бронь для ${property.name} с ${longDate(date)}`;
-      return `<button type="button" class="calendar-cell calendar-night ${booking ? "is-booked" : "is-free"}"
+        : outsideBookingWindow
+          ? `Новая бронь на ${longDate(date)} недоступна: максимум 21 день вперёд`
+          : `Создать бронь для ${property.name} с ${longDate(date)}`;
+      return `<button type="button" class="calendar-cell calendar-night ${booking ? "is-booked" : outsideBookingWindow ? "is-outside-window" : "is-free"}"
         data-calendar-property="${property.id}" data-calendar-date="${date}"
         ${booking ? `data-calendar-reservation="${booking.reservation_id}"` : ""}
+        ${outsideBookingWindow ? "disabled" : ""}
         aria-label="${escapeHtml(label)}">${booking
-        ? `<span class="calendar-booking ${booking.status}" title="${escapeHtml(booking.guest_name)}">${escapeHtml(booking.guest_name)}</span>`
-        : `<span class="calendar-free" aria-hidden="true">+</span>`}</button>`;
+        ? `<span class="calendar-booking ${booking.status}" data-i18n-ignore title="${escapeHtml(booking.guest_name)}">${escapeHtml(booking.guest_name)}</span>`
+        : outsideBookingWindow
+          ? `<span class="calendar-limit" aria-hidden="true">21+</span>`
+          : `<span class="calendar-free" aria-hidden="true">+</span>`}</button>`;
     }).join("")}
   `).join("");
   $("#calendarContainer").innerHTML = `<div class="calendar-scroll"><div class="calendar-grid"><div class="calendar-cell calendar-head calendar-house">Дом</div>${headers}${rows}</div></div>`;
@@ -262,11 +325,11 @@ function renderReservations() {
   const reservations = filteredReservations();
   $("#reservationTableBody").innerHTML = reservations.map((reservation) => `
     <tr>
-      <td class="primary-cell"><strong>${escapeHtml(reservation.guest_name)}</strong><small>${escapeHtml(reservation.guest_phone || reservation.guest_email || "Контакт не указан")}</small></td>
-      <td class="primary-cell"><strong>${escapeHtml(reservation.property_name)}</strong><small>${escapeHtml(reservation.place_name || "Отдельный дом")}</small></td>
+      <td class="primary-cell"><strong data-i18n-ignore>${escapeHtml(reservation.guest_name)}</strong><small ${reservation.guest_phone || reservation.guest_email ? "data-i18n-ignore" : ""}>${escapeHtml(reservation.guest_phone || reservation.guest_email || "Контакт не указан")}</small></td>
+      <td class="primary-cell"><strong data-i18n-ignore>${escapeHtml(reservation.property_name)}</strong><small ${reservation.place_name ? "data-i18n-ignore" : ""}>${escapeHtml(reservation.place_name || "Отдельный дом")}</small></td>
       <td class="date-range">${shortDate(reservation.check_in_date)} → ${shortDate(reservation.actual_check_out_date || reservation.check_out_date)}${reservation.actual_check_out_date ? "<small>досрочно</small>" : ""}</td>
       <td><span class="status-badge status-${reservation.status}">${STATUS_LABELS[reservation.status]}</span></td>
-      <td class="money-stack"><strong>${money(reservation.prepaid_minor, reservation.currency)}</strong><small>${reservation.refund_due_minor > 0 ? `к возврату ${money(reservation.refund_due_minor, reservation.currency)}` : `остаток ${money(reservation.balance_minor, reservation.currency)}`}</small></td>
+      <td class="money-stack"><strong>${money(reservation.prepaid_minor, reservation.currency)}</strong><small>${balanceLabel(reservation)}</small></td>
       <td class="money-stack"><strong>${money(reservation.deposit_minor, reservation.currency)}</strong><small>${DEPOSIT_LABELS[reservation.deposit_status]}</small></td>
       <td><div class="row-actions">
         <button class="icon-button" data-edit-reservation="${reservation.id}" aria-label="Редактировать бронь ${escapeHtml(reservation.guest_name)}">${icon("i-edit")}</button>
@@ -316,7 +379,7 @@ function renderProperties() {
       </div>
       <div class="property-content">
         <div class="property-title-row">
-          <div><h3>${escapeHtml(property.name)}</h3><p>${escapeHtml(property.location || property.place_address || "Расположение не указано")}</p><span class="property-kind">${property.kind === "cottage" ? "Коттедж" : "Отдельный дом"}</span></div>
+          <div><h3 data-i18n-ignore>${escapeHtml(property.name)}</h3><p ${property.location || property.place_address ? "data-i18n-ignore" : ""}>${escapeHtml(property.location || property.place_address || "Расположение не указано")}</p><span class="property-kind">${property.kind === "cottage" ? "Коттедж" : "Отдельный дом"}</span></div>
           <div class="property-price">${money(property.base_price_minor, property.currency)}<small>за ночь</small></div>
         </div>
         <div class="property-meta">
@@ -344,8 +407,8 @@ function renderProperties() {
           aria-expanded="${expanded}" aria-controls="${bodyId}">
           <span>${icon("i-house")}</span>
           <div>
-            <h3>${escapeHtml(group.place?.name || "Отдельные дома")}</h3>
-            <p>${escapeHtml(group.place?.address || "Сдаются самостоятельно")} · ${objectCountLabel(group.units.length)}</p>
+            <h3 ${group.place?.name ? "data-i18n-ignore" : ""}>${escapeHtml(group.place?.name || "Отдельные дома")}</h3>
+            <p><span ${group.place?.address ? "data-i18n-ignore" : ""}>${escapeHtml(group.place?.address || "Сдаются самостоятельно")}</span> · ${objectCountLabel(group.units.length)}</p>
           </div>
           <span class="property-group-chevron">${icon("i-arrow")}</span>
         </button>
@@ -370,24 +433,26 @@ function renderProperties() {
 
 function renderSettings() {
   const info = state.systemInfo || {};
+  $("#interfaceLanguage").value = info.language || window.i18n?.language || "ru";
   $("#systemInfo").innerHTML = `
-    <div><dt>Файл базы</dt><dd>${escapeHtml(info.databasePath || "—")}</dd></div>
+    <div><dt>Файл базы</dt><dd data-i18n-ignore>${escapeHtml(info.databasePath || "—")}</dd></div>
     <div><dt>Размер</dt><dd>${formatBytes(info.databaseSize || 0)}</dd></div>
-    <div><dt>Папка копий</dt><dd>${escapeHtml(info.backupDir || "—")}</dd></div>
+    <div><dt>Папка копий</dt><dd data-i18n-ignore>${escapeHtml(info.backupDir || "—")}</dd></div>
   `;
   $("#backupList").innerHTML = state.backups.length ? state.backups.slice(0, 8).map((backup) => `
     <div class="backup-row">
       <span>${icon("i-database")}</span>
-      <span><strong>${escapeHtml(backup.file)}</strong><small>${new Date(backup.createdAt).toLocaleString("ru-RU")}</small></span>
+      <span><strong data-i18n-ignore>${escapeHtml(backup.file)}</strong><small>${new Date(backup.createdAt).toLocaleString(interfaceLocale())}</small></span>
       <small>${formatBytes(backup.size)}</small>
     </div>
   `).join("") : `<div class="empty-inline">Копий пока нет. Создайте первую перед внесением реальных данных.</div>`;
 }
 
 function formatBytes(bytes) {
-  if (bytes < 1024) return `${bytes} Б`;
-  if (bytes < 1_048_576) return `${(bytes / 1024).toFixed(1)} КБ`;
-  return `${(bytes / 1_048_576).toFixed(1)} МБ`;
+  const units = interfaceLanguage() === "ru" ? ["Б", "КБ", "МБ"] : ["B", "KB", "MB"];
+  if (bytes < 1024) return `${bytes} ${units[0]}`;
+  if (bytes < 1_048_576) return `${(bytes / 1024).toFixed(1)} ${units[1]}`;
+  return `${(bytes / 1_048_576).toFixed(1)} ${units[2]}`;
 }
 
 function updateBadge() {
@@ -440,6 +505,60 @@ function activeProperties() {
   return state.properties.filter((property) => property.status === "active");
 }
 
+function addCalendarMonthsIso(value, months) {
+  const [year, month, day] = value.split("-").map(Number);
+  const target = new Date(Date.UTC(year, month - 1 + months, 1));
+  const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+  target.setUTCDate(Math.min(day, lastDay));
+  return target.toISOString().slice(0, 10);
+}
+
+function updateReservationDateLimits() {
+  const form = $("#reservationForm");
+  const policy = state.systemInfo?.bookingPolicy;
+  if (!policy) return;
+  const checkIn = form.elements.checkInDate;
+  const checkOut = form.elements.checkOutDate;
+  const isNew = !form.elements.id.value;
+  const checkInChanged = isNew || checkIn.value !== form.dataset.originalCheckIn;
+  const datesChanged = checkInChanged || isNew || checkOut.value !== form.dataset.originalCheckOut;
+  const checkInWithinWindow = checkIn.value >= policy.today && checkIn.value <= policy.maximumCheckInDate;
+  const maximumCheckOutDate = checkIn.value && checkInWithinWindow
+    ? addCalendarMonthsIso(checkIn.value, policy.maximumStayMonths)
+    : "";
+
+  checkIn.min = checkInChanged ? policy.today : "";
+  checkIn.max = checkInChanged ? policy.maximumCheckInDate : "";
+  checkOut.min = datesChanged && checkIn.value ? addDaysIso(checkIn.value) : "";
+  checkOut.max = datesChanged ? maximumCheckOutDate : "";
+
+  let checkInError = "";
+  let checkOutError = "";
+  if (checkInChanged && checkIn.value < policy.today) {
+    checkInError = "Дата заезда не может быть в прошлом";
+  } else if (checkInChanged && checkIn.value > policy.maximumCheckInDate) {
+    checkInError = `Заезд доступен максимум до ${longDate(policy.maximumCheckInDate)}`;
+  }
+  if (datesChanged && checkInWithinWindow && checkOut.value && checkOut.value <= checkIn.value) {
+    checkOutError = "Дата выезда должна быть позже даты заезда";
+  } else if (datesChanged && checkInWithinWindow && maximumCheckOutDate && checkOut.value > maximumCheckOutDate) {
+    checkOutError = `Выезд должен быть не позже ${longDate(maximumCheckOutDate)}`;
+  }
+  checkIn.setCustomValidity(checkInError);
+  checkOut.setCustomValidity(checkOutError);
+
+  const checkInHelp = $("#checkInDateHelp");
+  const checkOutHelp = $("#checkOutDateHelp");
+  checkInHelp.textContent = checkInError || `Можно выбрать заезд с ${longDate(policy.today)} по ${longDate(policy.maximumCheckInDate)}.`;
+  checkOutHelp.textContent = checkOutError || (maximumCheckOutDate
+    ? `Для выбранного заезда — не позже ${longDate(maximumCheckOutDate)}.`
+    : checkInError
+      ? "Сначала выберите допустимую дату заезда."
+      : `Проживание — максимум ${policy.maximumStayMonths} календарных месяца.`);
+  checkInHelp.classList.toggle("limit-error", Boolean(checkInError));
+  checkOutHelp.classList.toggle("limit-error", Boolean(checkOutError));
+}
+
 function openReservationDialog(reservation = null, defaults = {}) {
   const houses = activeProperties();
   if (!houses.length) {
@@ -453,13 +572,15 @@ function openReservationDialog(reservation = null, defaults = {}) {
   $("#reservationProperty").innerHTML = houses.map((property) =>
     `<option value="${property.id}">${escapeHtml(property.place_name ? `${property.place_name} — ${property.name}` : property.name)} · до ${property.capacity} гостей</option>`
   ).join("");
-  const today = new Date();
-  const tomorrow = new Date(today.getTime() + 86_400_000);
-  const afterTomorrow = new Date(today.getTime() + 2 * 86_400_000);
+  const today = state.systemInfo?.bookingPolicy?.today || new Date().toISOString().slice(0, 10);
+  const tomorrow = addDaysIso(today);
+  const afterTomorrow = addDaysIso(today, 2);
   form.elements.id.value = reservation?.id || "";
   form.elements.propertyId.value = reservation?.property_id || defaults.propertyId || houses[0].id;
-  form.elements.checkInDate.value = reservation?.check_in_date || defaults.checkInDate || tomorrow.toISOString().slice(0, 10);
-  form.elements.checkOutDate.value = reservation?.check_out_date || defaults.checkOutDate || afterTomorrow.toISOString().slice(0, 10);
+  form.elements.checkInDate.value = reservation?.check_in_date || defaults.checkInDate || tomorrow;
+  form.elements.checkOutDate.value = reservation?.check_out_date || defaults.checkOutDate || afterTomorrow;
+  form.dataset.originalCheckIn = reservation?.check_in_date || "";
+  form.dataset.originalCheckOut = reservation?.check_out_date || "";
   form.elements.guestName.value = reservation?.guest_name || "";
   form.elements.guestPhone.value = reservation?.guest_phone || "";
   form.elements.guestEmail.value = reservation?.guest_email || "";
@@ -470,6 +591,7 @@ function openReservationDialog(reservation = null, defaults = {}) {
   form.elements.status.value = reservation?.status || "hold";
   form.elements.notes.value = reservation?.notes || "";
   $("#reservationMealDays").innerHTML = "";
+  updateReservationDateLimits();
   applyPropertyDefaults(reservation);
   renderMealInputs(reservation);
   if (reservation) {
@@ -499,7 +621,7 @@ function selectedPlace() {
 }
 
 function mealDateLabel(value) {
-  return new Intl.DateTimeFormat("ru-RU", { weekday: "short", day: "numeric", month: "long" })
+  return new Intl.DateTimeFormat(interfaceLocale(), { weekday: "short", day: "numeric", month: "long" })
     .format(new Date(`${value}T00:00:00`));
 }
 
@@ -515,6 +637,7 @@ function reservationMealDates() {
   const reservation = state.reservations.find((item) => item.id === Number(form.elements.id.value));
   const checkIn = form.elements.checkInDate.value;
   const plannedCheckOut = form.elements.checkOutDate.value;
+  if (!form.elements.checkInDate.validity.valid || !form.elements.checkOutDate.validity.valid) return [];
   const checkOut = reservation?.actual_check_out_date || plannedCheckOut;
   if (!checkIn || !checkOut || nightsBetween(checkIn, checkOut) < 1) return [];
   const dates = [];
@@ -568,7 +691,10 @@ function renderMealInputs(reservation = null) {
 function renderReservationCalculation() {
   const form = $("#reservationForm");
   const property = state.properties.find((item) => item.id === Number(form.elements.propertyId.value));
-  const nights = nightsBetween(form.elements.checkInDate.value, form.elements.checkOutDate.value);
+  const datesAreValid = form.elements.checkInDate.validity.valid && form.elements.checkOutDate.validity.valid;
+  const nights = datesAreValid
+    ? nightsBetween(form.elements.checkInDate.value, form.elements.checkOutDate.value)
+    : 0;
   const accommodationMinor = decimalToMinor(form.elements.accommodation.value);
   const servicesMinor = $$("[data-meal-amount]", $("#reservationMealDays"))
     .reduce((sum, input) => sum + decimalToMinor(input.value), 0);
@@ -579,7 +705,12 @@ function renderReservationCalculation() {
   const totalMinor = accommodationMinor + servicesMinor;
   const prepaidMinor = decimalToMinor(form.elements.prepaid.value);
   const depositMinor = decimalToMinor(form.elements.deposit.value);
-  $("#calculationNights").textContent = `${nights} ${nights === 1 ? "ночь" : nights < 5 ? "ночи" : "ночей"}`;
+  const nightLabel = window.i18n?.language === "en"
+    ? (nights === 1 ? "night" : "nights")
+    : window.i18n?.language === "az"
+      ? "gecə"
+      : nights === 1 ? "ночь" : nights < 5 ? "ночи" : "ночей";
+  $("#calculationNights").textContent = `${nights} ${nightLabel}`;
   $("#calculationFormula").textContent = property && nights
     ? `${money(property.base_price_minor, property.currency)} × ${nights}`
     : "Выберите корректные даты";
@@ -593,7 +724,10 @@ function renderReservationCalculation() {
 function recalculateReservationTotal() {
   const form = $("#reservationForm");
   const property = state.properties.find((item) => item.id === Number(form.elements.propertyId.value));
-  const nights = nightsBetween(form.elements.checkInDate.value, form.elements.checkOutDate.value);
+  const datesAreValid = form.elements.checkInDate.validity.valid && form.elements.checkOutDate.validity.valid;
+  const nights = datesAreValid
+    ? nightsBetween(form.elements.checkInDate.value, form.elements.checkOutDate.value)
+    : 0;
   if (property && nights) {
     const reservation = state.reservations.find((item) => item.id === Number(form.elements.id.value));
     const nightlyRate = reservation && reservation.property_id === property.id
@@ -945,6 +1079,15 @@ function bindEvents() {
   });
   ["checkInDate", "checkOutDate"].forEach((name) => {
     $("#reservationForm").elements[name].addEventListener("change", () => {
+      const form = $("#reservationForm");
+      if (
+        name === "checkInDate" &&
+        form.elements.checkInDate.value &&
+        form.elements.checkOutDate.value <= form.elements.checkInDate.value
+      ) {
+        form.elements.checkOutDate.value = addDaysIso(form.elements.checkInDate.value);
+      }
+      updateReservationDateLimits();
       renderMealInputs();
       recalculateReservationTotal();
     });
@@ -966,6 +1109,7 @@ function bindEvents() {
     renderReservations();
   }));
   $("#createBackup").addEventListener("click", createBackup);
+  $("#interfaceLanguage").addEventListener("change", changeInterfaceLanguage);
   $("#openDatabaseFolder").addEventListener("click", () => {
     unwrap(api.system.openBackupDirectory()).catch((error) => toast(error.message, "error"));
   });
@@ -989,6 +1133,7 @@ async function init() {
 }
 
 function createBrowserDemoApi() {
+  let interfaceLanguage = "ru";
   let places = [
     { id: 1, name: "Дом отдыха «Лесная долина»", address: "Габала", has_food_service: 1, status: "active", notes: "", active_unit_count: 2, total_unit_count: 2 },
   ];
@@ -1077,7 +1222,30 @@ function createBrowserDemoApi() {
       },
     },
     backups: { list: () => response([]), create: () => response({ file: "demo.sqlite" }) },
-    system: { info: () => response({ databasePath: "Доступно в desktop-приложении", backupDir: "Доступно в desktop-приложении", databaseSize: 0 }), openBackupDirectory: () => response(true) },
+    system: {
+      info: () => {
+        const today = new Date().toISOString().slice(0, 10);
+        return response({
+          databasePath: "Доступно в desktop-приложении",
+          backupDir: "Доступно в desktop-приложении",
+          databaseSize: 0,
+          bookingPolicy: {
+            today,
+            maximumCheckInDate: addDaysIso(today, 21),
+            maximumCheckOutDate: null,
+            maximumAdvanceDays: 21,
+            maximumStayMonths: 3,
+            timeZone: "Asia/Baku",
+          },
+          language: interfaceLanguage,
+        });
+      },
+      setLanguage: (language) => {
+        interfaceLanguage = ["ru", "az", "en"].includes(language) ? language : "ru";
+        return response(interfaceLanguage);
+      },
+      openBackupDirectory: () => response(true),
+    },
   };
 }
 

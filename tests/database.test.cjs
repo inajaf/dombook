@@ -5,12 +5,13 @@ const os = require("node:os");
 const path = require("node:path");
 const { DomBookDatabase, eachNight } = require("../src/database.cjs");
 
-async function createTestDatabase(t) {
+async function createTestDatabase(t, today = "2026-07-29") {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "dombook-test-"));
   const database = await new DomBookDatabase({
     filePath: path.join(tempDir, "test.sqlite"),
     backupDir: path.join(tempDir, "backups"),
     seed: false,
+    todayProvider: () => today,
   }).init();
   t.after(() => {
     database.close();
@@ -73,7 +74,9 @@ test("календарные даты проверяются строго без
     );
   }
 
-  const leapReservation = database.createReservation(reservation(property.id, {
+  const { database: leapDatabase } = await createTestDatabase(t, "2028-02-28");
+  const leapProperty = leapDatabase.createProperty(house({ name: "Дом високосного года" }));
+  const leapReservation = leapDatabase.createReservation(reservation(leapProperty.id, {
     checkInDate: "2028-02-29",
     checkOutDate: "2028-03-01",
   }));
@@ -139,6 +142,28 @@ test("каждый дом отдыха сохраняет только свои 
       properties.filter((item) => item.place_id === null).map((item) => item.name),
       ["Отдельный дом"],
     );
+  } finally {
+    reopened.close();
+  }
+});
+
+test("язык интерфейса сохраняется в SQLite и восстанавливается после перезапуска", async (t) => {
+  const { database, tempDir } = await createTestDatabase(t);
+  assert.equal(database.systemInfo().language, "ru");
+  assert.equal(database.setLanguage("az"), "az");
+  assert.equal(database.systemInfo().language, "az");
+  assert.throws(() => database.setLanguage("de"), /ru, az, en/);
+  database.close();
+
+  const reopened = await new DomBookDatabase({
+    filePath: path.join(tempDir, "test.sqlite"),
+    backupDir: path.join(tempDir, "backups"),
+    seed: false,
+    todayProvider: () => "2026-07-29",
+  }).init();
+  try {
+    assert.equal(reopened.systemInfo().language, "az");
+    assert.equal(reopened.setLanguage("en"), "en");
   } finally {
     reopened.close();
   }
@@ -272,6 +297,54 @@ test("предоплата 50 AZN уменьшает долг за ночь 200 
   assert.equal(saved.total_minor, 20000);
   assert.equal(saved.balance_minor, 15000);
   assert.equal(saved.deposit_minor, 30000);
+});
+
+test("SQLite-слой разрешает заезд через 21 день и запрещает через 22 дня", async (t) => {
+  const { database } = await createTestDatabase(t);
+  const property = database.createProperty(house());
+  assert.doesNotThrow(() => database.createReservation(reservation(property.id, {
+    checkInDate: "2026-08-19",
+    checkOutDate: "2026-08-20",
+  })));
+  assert.throws(() => database.createReservation(reservation(property.id, {
+    guestName: "Слишком ранняя будущая бронь",
+    checkInDate: "2026-08-20",
+    checkOutDate: "2026-08-21",
+  })), /максимум на 21 день/);
+});
+
+test("SQLite-слой ограничивает проживание тремя календарными месяцами", async (t) => {
+  const { database } = await createTestDatabase(t);
+  const allowedProperty = database.createProperty(house({ name: "Допустимый срок" }));
+  const rejectedProperty = database.createProperty(house({ name: "Слишком длинный срок" }));
+  assert.doesNotThrow(() => database.createReservation(reservation(allowedProperty.id, {
+    checkInDate: "2026-08-01",
+    checkOutDate: "2026-11-01",
+  })));
+  assert.throws(() => database.createReservation(reservation(rejectedProperty.id, {
+    checkInDate: "2026-08-01",
+    checkOutDate: "2026-11-02",
+  })), /дольше 3 календарных месяцев/);
+});
+
+test("финансовое редактирование старой длинной брони разрешено без расширения дат", async (t) => {
+  const { database } = await createTestDatabase(t);
+  const property = database.createProperty(house());
+  const created = database.createReservation(reservation(property.id));
+  database.run(
+    "UPDATE reservations SET check_in_date = ?, check_out_date = ? WHERE id = ?",
+    ["2026-01-01", "2026-05-01", created.id],
+  );
+  assert.doesNotThrow(() => database.updateReservation(created.id, reservation(property.id, {
+    checkInDate: "2026-01-01",
+    checkOutDate: "2026-05-01",
+    prepaidMinor: 25000,
+  })));
+  assert.throws(() => database.updateReservation(created.id, reservation(property.id, {
+    checkInDate: "2026-01-01",
+    checkOutDate: "2026-05-02",
+    prepaidMinor: 25000,
+  })), /дольше 3 календарных месяцев/);
 });
 
 test("завтрак, обед и ужин вводятся отдельной суммой на каждый день и суммируются", async (t) => {

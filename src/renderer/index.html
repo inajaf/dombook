@@ -155,6 +155,19 @@
             <div><p class="section-note">Данные остаются под вашим контролем</p><h2 id="settings-heading">База и резервные копии</h2></div>
           </div>
           <div class="settings-grid">
+            <article class="panel language-panel">
+              <header class="panel-header"><div><p class="eyebrow">Интерфейс</p><h2>Язык приложения</h2></div></header>
+              <div class="language-setting">
+                <label class="field" for="interfaceLanguage"><span>Язык приложения</span>
+                  <select id="interfaceLanguage">
+                    <option value="ru">Русский</option>
+                    <option value="az">Azərbaycan</option>
+                    <option value="en">English</option>
+                  </select>
+                  <small>Язык меняется сразу и сохраняется для следующего запуска.</small>
+                </label>
+              </div>
+            </article>
             <article class="panel">
               <header class="panel-header"><div><p class="eyebrow">SQLite</p><h2>Локальное хранилище</h2></div><span class="health-badge">Работает</span></header>
               <dl class="info-list" id="systemInfo"></dl>
@@ -236,8 +249,8 @@
           <h3><span>1</span>Дом и даты</h3>
           <div class="form-grid">
             <label class="field span-2"><span>Дом <b aria-hidden="true">*</b></span><select name="propertyId" id="reservationProperty" required></select></label>
-            <label class="field"><span>Заезд <b aria-hidden="true">*</b></span><input name="checkInDate" type="date" required></label>
-            <label class="field"><span>Выезд <b aria-hidden="true">*</b></span><input name="checkOutDate" type="date" required></label>
+            <label class="field"><span>Заезд <b aria-hidden="true">*</b></span><input name="checkInDate" type="date" required><small id="checkInDateHelp">Бронь доступна максимум на 21 день вперёд.</small></label>
+            <label class="field"><span>Выезд <b aria-hidden="true">*</b></span><input name="checkOutDate" type="date" required><small id="checkOutDateHelp">Проживание — максимум 3 календарных месяца.</small></label>
           </div>
         </div>
         <div class="form-section">
@@ -330,6 +343,10 @@
 
   <div class="toast-region" aria-live="polite" aria-atomic="true" id="toastRegion"></div>
 
+  <script src="./i18n/ru.js"></script>
+  <script src="./i18n/az.js"></script>
+  <script src="./i18n/en.js"></script>
+  <script src="./i18n/i18n.js"></script>
   <script src="./app.js"></script>
 </body>
 </html>

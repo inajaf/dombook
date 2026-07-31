@@ -7,6 +7,7 @@ let mainWindow;
 let database;
 
 app.setName("ДомБук");
+app.setPath("userData", path.join(app.getPath("appData"), "dombook-desktop"));
 
 function ok(data) {
   return { ok: true, data };
@@ -53,6 +54,11 @@ function registerIpc() {
   handle("backups:list", () => database.listBackups());
   handle("backups:create", () => database.createBackup());
   handle("system:info", () => database.systemInfo());
+  handle("system:setLanguage", (payload) => {
+    const language = database.setLanguage(payload?.language);
+    createMenu(language);
+    return language;
+  });
   handle("system:openBackupDirectory", async () => {
     const error = await shell.openPath(database.systemInfo().backupDir);
     if (error) throw new Error(error);
@@ -87,37 +93,84 @@ function createWindow() {
   mainWindow.once("ready-to-show", () => mainWindow.show());
 }
 
-function createMenu() {
+function createMenu(language = database?.getLanguage() || "ru") {
+  const labels = {
+    ru: {
+      about: "О программе",
+      quit: "Выйти",
+      edit: "Правка",
+      view: "Вид",
+      undo: "Отменить",
+      redo: "Повторить",
+      cut: "Вырезать",
+      copy: "Копировать",
+      paste: "Вставить",
+      selectAll: "Выбрать всё",
+      reload: "Перезагрузить",
+      fullscreen: "Полный экран",
+      devTools: "Инструменты разработчика",
+    },
+    az: {
+      about: "Proqram haqqında",
+      quit: "Çıxış",
+      edit: "Düzəliş",
+      view: "Görünüş",
+      undo: "Geri al",
+      redo: "Təkrar et",
+      cut: "Kəs",
+      copy: "Kopyala",
+      paste: "Yapışdır",
+      selectAll: "Hamısını seç",
+      reload: "Yenilə",
+      fullscreen: "Tam ekran",
+      devTools: "Tərtibatçı alətləri",
+    },
+    en: {
+      about: "About",
+      quit: "Quit",
+      edit: "Edit",
+      view: "View",
+      undo: "Undo",
+      redo: "Redo",
+      cut: "Cut",
+      copy: "Copy",
+      paste: "Paste",
+      selectAll: "Select All",
+      reload: "Reload",
+      fullscreen: "Full Screen",
+      devTools: "Developer Tools",
+    },
+  }[language] || null;
   const appMenu = process.platform === "darwin"
     ? [
-        { role: "about", label: "О программе" },
+        { role: "about", label: labels.about },
         { type: "separator" },
-        { role: "quit", label: "Выйти" },
+        { role: "quit", label: labels.quit },
       ]
-    : [{ role: "quit", label: "Выйти" }];
+    : [{ role: "quit", label: labels.quit }];
   const template = [
     {
       label: process.platform === "darwin" ? "ДомБук" : "Файл",
       submenu: appMenu,
     },
     {
-      label: "Правка",
+      label: labels.edit,
       submenu: [
-        { role: "undo", label: "Отменить" },
-        { role: "redo", label: "Повторить" },
+        { role: "undo", label: labels.undo },
+        { role: "redo", label: labels.redo },
         { type: "separator" },
-        { role: "cut", label: "Вырезать" },
-        { role: "copy", label: "Копировать" },
-        { role: "paste", label: "Вставить" },
-        { role: "selectAll", label: "Выбрать всё" },
+        { role: "cut", label: labels.cut },
+        { role: "copy", label: labels.copy },
+        { role: "paste", label: labels.paste },
+        { role: "selectAll", label: labels.selectAll },
       ],
     },
     {
-      label: "Вид",
+      label: labels.view,
       submenu: [
-        { role: "reload", label: "Перезагрузить" },
-        { role: "togglefullscreen", label: "Полный экран" },
-        ...(app.isPackaged ? [] : [{ role: "toggleDevTools", label: "Инструменты разработчика" }]),
+        { role: "reload", label: labels.reload },
+        { role: "togglefullscreen", label: labels.fullscreen },
+        ...(app.isPackaged ? [] : [{ role: "toggleDevTools", label: labels.devTools }]),
       ],
     },
   ];
@@ -125,7 +178,7 @@ function createMenu() {
 }
 
 app.whenReady().then(async () => {
-  const iconPath = path.join(__dirname, "assets", "dombook-icon.png");
+  const iconPath = path.join(__dirname, "assets", "dombook-icon-transparent.png");
   if (process.platform === "darwin") app.dock.setIcon(iconPath);
   const userData = app.getPath("userData");
   database = await new DomBookDatabase({

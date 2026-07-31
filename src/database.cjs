@@ -2,6 +2,11 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const initSqlJs = require("sql.js");
+const {
+  assertBookingDates,
+  bookingLimits,
+  todayInTimeZone,
+} = require("./domain/booking/booking-policy.cjs");
 
 const ALLOWED_RESERVATION_STATUSES = new Set([
   "hold",
@@ -22,13 +27,14 @@ const ALLOWED_DEPOSIT_STATUSES = new Set([
 ]);
 
 const ALLOWED_MEAL_TYPES = new Set(["breakfast", "lunch", "dinner"]);
+const ALLOWED_INTERFACE_LANGUAGES = new Set(["ru", "az", "en"]);
 
 function nowIso() {
   return new Date().toISOString();
 }
 
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return todayInTimeZone();
 }
 
 function requiredText(value, label, max = 200) {
@@ -100,10 +106,11 @@ function rowsFrom(result) {
 }
 
 class DomBookDatabase {
-  constructor({ filePath, backupDir, seed = true }) {
+  constructor({ filePath, backupDir, seed = true, todayProvider = todayInTimeZone }) {
     this.filePath = filePath;
     this.backupDir = backupDir;
     this.seed = seed;
+    this.todayProvider = todayProvider;
     this.db = null;
     this.SQL = null;
   }
@@ -214,6 +221,12 @@ class DomBookDatabase {
       CREATE TABLE IF NOT EXISTS schema_migrations (
         name TEXT PRIMARY KEY,
         applied_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS app_settings (
+        setting_key TEXT PRIMARY KEY,
+        setting_value TEXT NOT NULL,
+        updated_at TEXT NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS audit_log (
@@ -616,6 +629,12 @@ class DomBookDatabase {
       throw new Error(`Вместимость дома — ${property.capacity}. Уменьшите число гостей или выберите другой дом`);
     }
     const existing = reservationId ? this.getReservation(reservationId) : null;
+    assertBookingDates({
+      checkInDate,
+      checkOutDate,
+      today: this.todayProvider(),
+      existingReservation: existing,
+    });
     const actualCheckOutDate = existing?.actual_check_out_date || null;
     if (actualCheckOutDate && (actualCheckOutDate < checkInDate || actualCheckOutDate >= checkOutDate)) {
       throw new Error("После досрочного выезда даты проживания нельзя сдвинуть за фактическую дату выезда");
@@ -945,7 +964,34 @@ class DomBookDatabase {
       databasePath: this.filePath,
       backupDir: this.backupDir,
       databaseSize: fs.existsSync(this.filePath) ? fs.statSync(this.filePath).size : 0,
+      bookingPolicy: bookingLimits(null, this.todayProvider()),
+      language: this.getLanguage(),
     };
+  }
+
+  getLanguage() {
+    const language = this.scalar(
+      "SELECT setting_value FROM app_settings WHERE setting_key = 'interface_language'",
+    );
+    return ALLOWED_INTERFACE_LANGUAGES.has(language) ? language : "ru";
+  }
+
+  setLanguage(language) {
+    const normalized = String(language ?? "").trim().toLowerCase();
+    if (!ALLOWED_INTERFACE_LANGUAGES.has(normalized)) {
+      throw new Error("Доступные языки интерфейса: ru, az, en");
+    }
+    this.run(
+      `INSERT INTO app_settings(setting_key, setting_value, updated_at)
+       VALUES ('interface_language', ?, ?)
+       ON CONFLICT(setting_key) DO UPDATE SET
+         setting_value = excluded.setting_value,
+         updated_at = excluded.updated_at`,
+      [normalized, nowIso()],
+    );
+    this.audit("settings", null, "language_changed", { language: normalized });
+    this.persist();
+    return normalized;
   }
 
   close() {
