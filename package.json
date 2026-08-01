@@ -1,6 +1,6 @@
 {
   "name": "dombook-desktop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Локальная desktop-система бронирования домов и коттеджей",
   "main": "src/main.cjs",
   "author": "DomBook",
@@ -13,9 +13,10 @@
     "test:smoke": "node scripts/smoke.cjs",
     "pack": "electron-builder --dir",
     "build": "electron-builder",
-    "build:mac": "electron-builder --mac",
-    "build:win": "electron-builder --win",
-    "build:linux": "electron-builder --linux"
+    "build:mac": "electron-builder --mac --x64 --arm64",
+    "build:win": "electron-builder --win --x64",
+    "build:linux": "electron-builder --linux --x64",
+    "build:web": "node scripts/build-web.cjs"
   },
   "dependencies": {
     "sql.js": "1.14.1"
@@ -48,13 +49,21 @@
       ]
     },
     "win": {
+      "icon": "build/dombook-icon.png",
       "target": [
         "nsis",
         "portable"
       ]
     },
+    "nsis": {
+      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}"
+    },
+    "portable": {
+      "artifactName": "${productName}-Portable-${version}-${arch}.${ext}"
+    },
     "linux": {
       "category": "Office",
+      "icon": "build/dombook-icon.png",
       "target": [
         "AppImage",
         "deb"

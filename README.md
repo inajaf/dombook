@@ -1,6 +1,11 @@
-# DomBook Desktop
+# DomBook
 
-A cross-platform, fully local booking system for vacation houses and cottages.
+A simple booking system for vacation houses and cottages, available for macOS,
+Windows, Linux and the Web.
+
+**[Download the latest release](https://github.com/inajaf/dombook/releases/latest)**
+
+User guides: **[English](docs/USER_GUIDE.en.md)** · **[Русский](docs/USER_GUIDE.ru.md)** · **[Azərbaycan](docs/USER_GUIDE.az.md)**
 
 ## Product tour
 
@@ -23,13 +28,20 @@ daily meal support, language settings and local backups.
 - local SQLite database;
 - manual backups with SHA-256 checksums;
 - multilingual interface: русский, Azərbaycan, English;
-- builds for macOS, Windows and Linux.
+- builds for macOS, Windows, Linux and Web.
 
 ## Getting started
 
 ```bash
 npm install
 npm start
+```
+
+To build and open the browser edition through a local web server:
+
+```bash
+npm run build:web
+python3 -m http.server 8080 --directory release/web
 ```
 
 ## Tests
@@ -43,6 +55,9 @@ npm run test:smoke
 
 In production the `dombook.sqlite` database is created in the Electron `userData`
 directory. In development the path is shown on the Settings screen.
+
+The Web edition stores data in browser `localStorage` and exports JSON backups.
+Use the desktop edition when SQLite storage and verified local backups are required.
 
 ## How objects are organized
 
@@ -62,6 +77,7 @@ deposit. A `standalone house` is created without a group and booked independentl
 npm run build:mac
 npm run build:win
 npm run build:linux
+npm run build:web
 ```
 
 Each installer is most reliably built on its own OS through CI:
