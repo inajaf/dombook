@@ -78,7 +78,7 @@ Aktiv bronu açıb **Erkən çıxış** seçin. Faktiki çıxış tarixini və h
 
 ## 7. Backup və məlumatların yeri
 
-**Sazlamalar** bölməsində baza faylının və backup qovluğunun yolu göstərilir.
+**Sazlamalar** bölməsində yalnız baza faylının və backup qovluğunun adı göstərilir. Məxfilik üçün tam sistem yolları gizlədilir; birbaşa giriş üçün **Baza qovluğunu aç** düyməsini seçin.
 
 - Desktop: **Backup yarat** yoxlanılmış SQLite nüsxəsi və SHA-256 checksum yaradır.
 - Web: **Backup yarat** brauzer məlumatları olan JSON faylını endirir.
