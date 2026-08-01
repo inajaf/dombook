@@ -150,7 +150,8 @@ function toast(message, type = "success") {
   element.className = `toast ${type === "error" ? "error" : ""}`;
   element.textContent = message;
   $("#toastRegion").append(element);
-  setTimeout(() => element.remove(), 4000);
+  setTimeout(() => element.classList.add("is-leaving"), 3700);
+  setTimeout(() => element.remove(), 3900);
 }
 
 function showError(target, error) {
@@ -164,9 +165,11 @@ function setBusy(button, busy, text = "Сохранение…") {
     button.dataset.originalText = button.textContent;
     button.textContent = text;
     button.disabled = true;
+    button.classList.add("is-busy");
   } else {
     button.textContent = button.dataset.originalText || button.textContent;
     button.disabled = false;
+    button.classList.remove("is-busy");
   }
 }
 
@@ -231,6 +234,10 @@ function navigate(page) {
   $("#pageTitle").textContent = meta.title;
   $("#primaryAction span").textContent = meta.action;
   $("#primaryAction").dataset.actionType = meta.actionType;
+  const topbar = $(".topbar");
+  topbar.classList.remove("is-changing");
+  void topbar.offsetWidth;
+  topbar.classList.add("is-changing");
   $("#searchBox").hidden = !meta.search;
   if (!meta.search) {
     state.search = "";
@@ -284,8 +291,15 @@ function renderCalendar() {
     const weekday = new Intl.DateTimeFormat(interfaceLocale(), { weekday: "short" }).format(parsed);
     return `<div class="calendar-cell calendar-head"><span><strong>${parsed.getDate()}</strong>${escapeHtml(weekday)}</span></div>`;
   }).join("");
-  const rows = data.properties.map((property) => `
-    <div class="calendar-cell calendar-house"><span data-i18n-ignore>${escapeHtml(property.name)}</span><small ${property.place_name || property.location ? "data-i18n-ignore" : ""}>${escapeHtml(property.place_name || property.location || "Отдельный дом")}</small></div>
+  const rows = data.properties.map((property) => {
+    const propertyContext = property.place_name || property.location || "Отдельный дом";
+    return `
+    <div class="calendar-cell calendar-house">
+      <span class="calendar-house-copy">
+        <strong class="calendar-house-name" data-i18n-ignore title="${escapeHtml(property.name)}">${escapeHtml(property.name)}</strong>
+        <small class="calendar-house-context" ${property.place_name || property.location ? "data-i18n-ignore" : ""} title="${escapeHtml(propertyContext)}">${escapeHtml(propertyContext)}</small>
+      </span>
+    </div>
     ${data.dates.map((date) => {
       const booking = byKey.get(`${property.id}:${date}`);
       const outsideBookingWindow = !booking && maximumCheckInDate && date > maximumCheckInDate;
@@ -304,7 +318,8 @@ function renderCalendar() {
           ? `<span class="calendar-limit" aria-hidden="true">21+</span>`
           : `<span class="calendar-free" aria-hidden="true">+</span>`}</button>`;
     }).join("")}
-  `).join("");
+  `;
+  }).join("");
   $("#calendarContainer").innerHTML = `<div class="calendar-scroll"><div class="calendar-grid"><div class="calendar-cell calendar-head calendar-house">Дом</div>${headers}${rows}</div></div>`;
 }
 
@@ -326,8 +341,8 @@ function renderReservations() {
   $("#reservationTableBody").innerHTML = reservations.map((reservation) => `
     <tr>
       <td class="primary-cell"><strong data-i18n-ignore>${escapeHtml(reservation.guest_name)}</strong><small ${reservation.guest_phone || reservation.guest_email ? "data-i18n-ignore" : ""}>${escapeHtml(reservation.guest_phone || reservation.guest_email || "Контакт не указан")}</small></td>
-      <td class="primary-cell"><strong data-i18n-ignore>${escapeHtml(reservation.property_name)}</strong><small ${reservation.place_name ? "data-i18n-ignore" : ""}>${escapeHtml(reservation.place_name || "Отдельный дом")}</small></td>
-      <td class="date-range">${shortDate(reservation.check_in_date)} → ${shortDate(reservation.actual_check_out_date || reservation.check_out_date)}${reservation.actual_check_out_date ? "<small>досрочно</small>" : ""}</td>
+      <td class="primary-cell reservation-property-cell"><strong data-i18n-ignore title="${escapeHtml(reservation.property_name)}">${escapeHtml(reservation.property_name)}</strong><small ${reservation.place_name ? "data-i18n-ignore" : ""}>${escapeHtml(reservation.place_name || "Отдельный дом")}</small></td>
+      <td class="date-range"><span>${shortDate(reservation.check_in_date)} → ${shortDate(reservation.actual_check_out_date || reservation.check_out_date)}</span>${reservation.actual_check_out_date ? "<small>досрочно</small>" : ""}</td>
       <td><span class="status-badge status-${reservation.status}">${STATUS_LABELS[reservation.status]}</span></td>
       <td class="money-stack"><strong>${money(reservation.prepaid_minor, reservation.currency)}</strong><small>${balanceLabel(reservation)}</small></td>
       <td class="money-stack"><strong>${money(reservation.deposit_minor, reservation.currency)}</strong><small>${DEPOSIT_LABELS[reservation.deposit_status]}</small></td>
