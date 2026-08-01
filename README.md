@@ -2,7 +2,13 @@
 
 A cross-platform, fully local booking system for vacation houses and cottages.
 
-![DomBook demo](docs/demo.gif)
+## Product tour
+
+![DomBook product tour: dashboard, calendar, properties, reservations, booking calculation and backups](docs/demo.gif)
+
+The lightweight 10-second preview shows the current desktop interface, clickable
+calendar, resort and cottage hierarchy, reservation workflow, financial calculation,
+daily meal support, language settings and local backups.
 
 ## MVP features
 
