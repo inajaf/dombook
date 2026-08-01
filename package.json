@@ -3,7 +3,10 @@
   "version": "0.2.0",
   "description": "Локальная desktop-система бронирования домов и коттеджей",
   "main": "src/main.cjs",
-  "author": "DomBook",
+  "author": {
+    "name": "DomBook",
+    "email": "inajaf@users.noreply.github.com"
+  },
   "license": "UNLICENSED",
   "private": true,
   "scripts": {
@@ -13,9 +16,9 @@
     "test:smoke": "node scripts/smoke.cjs",
     "pack": "electron-builder --dir",
     "build": "electron-builder",
-    "build:mac": "electron-builder --mac --x64 --arm64",
-    "build:win": "electron-builder --win --x64",
-    "build:linux": "electron-builder --linux --x64",
+    "build:mac": "electron-builder --mac --x64 --arm64 --publish never",
+    "build:win": "electron-builder --win --x64 --publish never",
+    "build:linux": "electron-builder --linux --x64 --publish never",
     "build:web": "node scripts/build-web.cjs"
   },
   "dependencies": {
@@ -56,10 +59,10 @@
       ]
     },
     "nsis": {
-      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}"
+      "artifactName": "DomBook-Setup-${version}-${arch}.${ext}"
     },
     "portable": {
-      "artifactName": "${productName}-Portable-${version}-${arch}.${ext}"
+      "artifactName": "DomBook-Portable-${version}-${arch}.${ext}"
     },
     "linux": {
       "category": "Office",
@@ -69,6 +72,6 @@
         "deb"
       ]
     },
-    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}"
+    "artifactName": "DomBook-${version}-${os}-${arch}.${ext}"
   }
 }
