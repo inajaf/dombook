@@ -1148,6 +1148,7 @@ async function init() {
 }
 
 function createBrowserDemoApi() {
+  const storageKey = "dombook.web.v1";
   let interfaceLanguage = "ru";
   let places = [
     { id: 1, name: "Дом отдыха «Лесная долина»", address: "Габала", has_food_service: 1, status: "active", notes: "", active_unit_count: 2, total_unit_count: 2 },
@@ -1158,8 +1159,48 @@ function createBrowserDemoApi() {
     { id: 3, place_id: null, place_name: null, place_address: null, kind: "house", name: "Отдельный дом в Шеки", location: "Шеки", capacity: 3, base_price_minor: 17000, deposit_minor: 20000, currency: "AZN", check_in_time: "15:00", check_out_time: "11:00", notes: "", status: "active", reservation_count: 0 },
   ];
   let reservations = [];
+  let backups = [];
+  try {
+    const saved = JSON.parse(localStorage.getItem(storageKey) || "null");
+    if (saved) {
+      if (Array.isArray(saved.places)) places = saved.places;
+      if (Array.isArray(saved.properties)) properties = saved.properties;
+      if (Array.isArray(saved.reservations)) reservations = saved.reservations;
+      if (Array.isArray(saved.backups)) backups = saved.backups;
+      if (["ru", "az", "en"].includes(saved.language)) interfaceLanguage = saved.language;
+    }
+  } catch (error) {
+    console.warn("DomBook web storage could not be restored", error);
+  }
   const response = (data) => Promise.resolve({ ok: true, data });
   const error = (message) => Promise.resolve({ ok: false, error: message });
+  const persist = () => localStorage.setItem(storageKey, JSON.stringify({
+    version: 1,
+    language: interfaceLanguage,
+    places,
+    properties,
+    reservations,
+    backups,
+  }));
+  const persistedResponse = (data) => {
+    persist();
+    return response(data);
+  };
+  const exportBackup = () => {
+    const createdAt = new Date();
+    const file = `dombook-web-${createdAt.toISOString().replaceAll(":", "-")}.json`;
+    const payload = JSON.stringify({ version: 1, exportedAt: createdAt.toISOString(), places, properties, reservations }, null, 2);
+    const blob = new Blob([payload], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = file;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    const backup = { file, size: blob.size, createdAt: createdAt.toISOString() };
+    backups = [backup, ...backups].slice(0, 20);
+    return persistedResponse(backup);
+  };
   const list = () => reservations.map((item) => {
     const property = properties.find((p) => p.id === item.property_id);
     return { ...item, property_name: property?.name || "—", place_name: property?.place_name || null, currency: "AZN", balance_minor: Math.max(item.total_minor - item.prepaid_minor, 0), refund_due_minor: Math.max(item.prepaid_minor - item.total_minor, 0) };
@@ -1205,24 +1246,24 @@ function createBrowserDemoApi() {
     } },
     places: {
       list: () => response(places),
-      create: (data) => { if (places.some((p) => p.name.toLowerCase() === data.name.toLowerCase())) return error("Дом отдыха с таким названием уже существует"); const item = { id: Date.now(), name: data.name, address: data.address, has_food_service: data.hasFoodService ? 1 : 0, notes: data.notes, status: "active", active_unit_count: 0, total_unit_count: 0 }; places.push(item); return response(item); },
-      update: (id, data) => { const item = places.find((p) => p.id === id); Object.assign(item, { name: data.name, address: data.address, has_food_service: data.hasFoodService ? 1 : 0, notes: data.notes }); return response(item); },
-      archive: (id) => { places.find((p) => p.id === id).status = "archived"; return response(true); },
-      restore: (id) => { places.find((p) => p.id === id).status = "active"; return response(true); },
+      create: (data) => { if (places.some((p) => p.name.toLowerCase() === data.name.toLowerCase())) return error("Дом отдыха с таким названием уже существует"); const item = { id: Date.now(), name: data.name, address: data.address, has_food_service: data.hasFoodService ? 1 : 0, notes: data.notes, status: "active", active_unit_count: 0, total_unit_count: 0 }; places.push(item); return persistedResponse(item); },
+      update: (id, data) => { const item = places.find((p) => p.id === id); Object.assign(item, { name: data.name, address: data.address, has_food_service: data.hasFoodService ? 1 : 0, notes: data.notes }); properties.filter((property) => property.place_id === id).forEach((property) => Object.assign(property, { place_name: item.name, place_address: item.address })); return persistedResponse(item); },
+      archive: (id) => { places.find((p) => p.id === id).status = "archived"; return persistedResponse(true); },
+      restore: (id) => { places.find((p) => p.id === id).status = "active"; return persistedResponse(true); },
     },
     properties: {
       list: () => response(properties),
-      create: (data) => { if (properties.some((p) => p.name.toLowerCase() === data.name.toLowerCase())) return error("Дом с таким наименованием уже существует"); const place = places.find((p) => p.id === data.placeId); const item = { id: Date.now(), place_id: data.placeId, place_name: place?.name || null, place_address: place?.address || null, kind: data.kind, name: data.name, location: data.location, capacity: data.capacity, base_price_minor: data.basePriceMinor, deposit_minor: data.depositMinor, currency: data.currency, check_in_time: data.checkInTime, check_out_time: data.checkOutTime, notes: data.notes, status: "active", reservation_count: 0 }; properties.push(item); return response(item); },
-      update: (id, data) => { const item = properties.find((p) => p.id === id); const place = places.find((p) => p.id === data.placeId); Object.assign(item, { place_id: data.placeId, place_name: place?.name || null, place_address: place?.address || null, kind: data.kind, name: data.name, location: data.location, capacity: data.capacity, base_price_minor: data.basePriceMinor, deposit_minor: data.depositMinor, currency: data.currency, check_in_time: data.checkInTime, check_out_time: data.checkOutTime, notes: data.notes }); return response(item); },
-      archive: (id) => { properties.find((p) => p.id === id).status = "archived"; return response(true); },
-      restore: (id) => { properties.find((p) => p.id === id).status = "active"; return response(true); },
+      create: (data) => { if (properties.some((p) => p.name.toLowerCase() === data.name.toLowerCase())) return error("Дом с таким наименованием уже существует"); const place = places.find((p) => p.id === data.placeId); const item = { id: Date.now(), place_id: data.placeId, place_name: place?.name || null, place_address: place?.address || null, kind: data.kind, name: data.name, location: data.location, capacity: data.capacity, base_price_minor: data.basePriceMinor, deposit_minor: data.depositMinor, currency: data.currency, check_in_time: data.checkInTime, check_out_time: data.checkOutTime, notes: data.notes, status: "active", reservation_count: 0 }; properties.push(item); return persistedResponse(item); },
+      update: (id, data) => { const item = properties.find((p) => p.id === id); const place = places.find((p) => p.id === data.placeId); Object.assign(item, { place_id: data.placeId, place_name: place?.name || null, place_address: place?.address || null, kind: data.kind, name: data.name, location: data.location, capacity: data.capacity, base_price_minor: data.basePriceMinor, deposit_minor: data.depositMinor, currency: data.currency, check_in_time: data.checkInTime, check_out_time: data.checkOutTime, notes: data.notes }); return persistedResponse(item); },
+      archive: (id) => { properties.find((p) => p.id === id).status = "archived"; return persistedResponse(true); },
+      restore: (id) => { properties.find((p) => p.id === id).status = "active"; return persistedResponse(true); },
     },
     reservations: {
       list: () => response(list()),
-      create: (data) => { const item = { id: Date.now(), ...demoReservation(data) }; reservations.push(item); return response(item); },
-      update: (id, data) => { const item = reservations.find((r) => r.id === id); Object.assign(item, demoReservation(data, item)); return response(item); },
-      cancel: (id) => { reservations.find((r) => r.id === id).status = "cancelled"; return response(true); },
-      delete: (id) => { reservations = reservations.filter((r) => r.id !== id); return response(true); },
+      create: (data) => { const item = { id: Date.now(), ...demoReservation(data) }; reservations.push(item); return persistedResponse(item); },
+      update: (id, data) => { const item = reservations.find((r) => r.id === id); Object.assign(item, demoReservation(data, item)); return persistedResponse(item); },
+      cancel: (id) => { reservations.find((r) => r.id === id).status = "cancelled"; return persistedResponse(true); },
+      delete: (id) => { reservations = reservations.filter((r) => r.id !== id); return persistedResponse(true); },
       earlyCheckout: (id, data) => {
         const item = reservations.find((r) => r.id === id);
         item.actual_check_out_date = data.actualCheckOutDate;
@@ -1233,17 +1274,17 @@ function createBrowserDemoApi() {
           item.accommodation_minor = item.nightly_rate_minor * nightsBetween(item.check_in_date, data.actualCheckOutDate);
         }
         item.total_minor = item.accommodation_minor + item.services_minor;
-        return response(item);
+        return persistedResponse(item);
       },
     },
-    backups: { list: () => response([]), create: () => response({ file: "demo.sqlite" }) },
+    backups: { list: () => response(backups), create: exportBackup },
     system: {
       info: () => {
         const today = new Date().toISOString().slice(0, 10);
         return response({
-          databasePath: "Доступно в desktop-приложении",
-          backupDir: "Доступно в desktop-приложении",
-          databaseSize: 0,
+          databasePath: "Browser local storage",
+          backupDir: "Browser downloads",
+          databaseSize: new Blob([localStorage.getItem(storageKey) || ""]).size,
           bookingPolicy: {
             today,
             maximumCheckInDate: addDaysIso(today, 21),
@@ -1257,7 +1298,7 @@ function createBrowserDemoApi() {
       },
       setLanguage: (language) => {
         interfaceLanguage = ["ru", "az", "en"].includes(language) ? language : "ru";
-        return response(interfaceLanguage);
+        return persistedResponse(interfaceLanguage);
       },
       openBackupDirectory: () => response(true),
     },
