@@ -170,6 +170,8 @@ window.DomBookLocales.en = {
     "Активен": "Active",
     "В архиве": "Archived",
     "за ночь": "per night",
+    "Гостей": "Guests",
+    "Брони": "Reservations",
     "ГОСТЕЙ": "GUESTS",
     "БРОНИ": "RESERVATIONS",
     "ДЕПОЗИТ": "DEPOSIT",
