@@ -450,9 +450,9 @@ function renderSettings() {
   const info = state.systemInfo || {};
   $("#interfaceLanguage").value = info.language || window.i18n?.language || "ru";
   $("#systemInfo").innerHTML = `
-    <div><dt>Файл базы</dt><dd data-i18n-ignore>${escapeHtml(info.databasePath || "—")}</dd></div>
+    <div><dt>Файл базы</dt><dd data-i18n-ignore>${escapeHtml(privateStorageLabel(info.databasePath, "dombook.sqlite"))}</dd></div>
     <div><dt>Размер</dt><dd>${formatBytes(info.databaseSize || 0)}</dd></div>
-    <div><dt>Папка копий</dt><dd data-i18n-ignore>${escapeHtml(info.backupDir || "—")}</dd></div>
+    <div><dt>Папка копий</dt><dd data-i18n-ignore>${escapeHtml(privateStorageLabel(info.backupDir, "backups"))}</dd></div>
   `;
   $("#backupList").innerHTML = state.backups.length ? state.backups.slice(0, 8).map((backup) => `
     <div class="backup-row">
@@ -461,6 +461,13 @@ function renderSettings() {
       <small>${formatBytes(backup.size)}</small>
     </div>
   `).join("") : `<div class="empty-inline">Копий пока нет. Создайте первую перед внесением реальных данных.</div>`;
+}
+
+function privateStorageLabel(value, fallback) {
+  if (!value) return fallback;
+  if (value === "Browser local storage" || value === "Browser downloads") return value;
+  const segments = String(value).split(/[\\/]/).filter(Boolean);
+  return segments.at(-1) || fallback;
 }
 
 function formatBytes(bytes) {

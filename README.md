@@ -54,7 +54,8 @@ npm run test:smoke
 ## Where the database lives
 
 In production the `dombook.sqlite` database is created in the Electron `userData`
-directory. In development the path is shown on the Settings screen.
+directory. The Settings screen intentionally shows only safe file and folder names;
+use its open-folder action when direct access is required.
 
 The Web edition stores data in browser `localStorage` and exports JSON backups.
 Use the desktop edition when SQLite storage and verified local backups are required.

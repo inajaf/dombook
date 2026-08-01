@@ -78,7 +78,7 @@ If the prepayment becomes greater than the new total, DomBook displays the amoun
 
 ## 7. Backup and data location
 
-Open **Settings** to see the current database path and backup folder.
+Open **Settings** to see the database filename and backup folder name. Full system paths are intentionally hidden for privacy; use **Open database folder** when direct access is required.
 
 - Desktop: **Create backup** writes a verified SQLite copy with a SHA-256 checksum.
 - Web: **Create backup** downloads a JSON file containing browser data.
