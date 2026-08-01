@@ -28,9 +28,9 @@ The public desktop binaries are not code-signed. Follow the first-launch instruc
 
 ## Documentation
 
-- [English user guide](USER_GUIDE.en.md)
-- [Руководство на русском](USER_GUIDE.ru.md)
-- [Azərbaycan dilində təlimat](USER_GUIDE.az.md)
+- [English user guide](https://github.com/inajaf/dombook/blob/v0.2.0/docs/USER_GUIDE.en.md)
+- [Руководство на русском](https://github.com/inajaf/dombook/blob/v0.2.0/docs/USER_GUIDE.ru.md)
+- [Azərbaycan dilində təlimat](https://github.com/inajaf/dombook/blob/v0.2.0/docs/USER_GUIDE.az.md)
 
 ## Data safety
 
