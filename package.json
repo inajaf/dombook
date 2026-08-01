@@ -1,7 +1,7 @@
 {
   "name": "dombook-desktop",
   "version": "0.2.0",
-  "description": "Локальная desktop-система бронирования домов и коттеджей",
+  "description": "Local desktop booking system for vacation houses and cottages",
   "main": "src/main.cjs",
   "author": {
     "name": "DomBook",
@@ -30,7 +30,7 @@
   },
   "build": {
     "appId": "com.dombook.desktop",
-    "productName": "ДомБук",
+    "productName": "DomBook",
     "asar": true,
     "asarUnpack": [
       "node_modules/sql.js/dist/sql-wasm.wasm"
