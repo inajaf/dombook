@@ -170,6 +170,8 @@ window.DomBookLocales.az = {
     "Активен": "Aktivdir",
     "В архиве": "Arxivdədir",
     "за ночь": "gecəlik",
+    "Гостей": "Qonaqlar",
+    "Брони": "Rezervasiyalar",
     "ГОСТЕЙ": "QONAQLAR",
     "БРОНИ": "REZERVASİYALAR",
     "ДЕПОЗИТ": "DEPOZİT",

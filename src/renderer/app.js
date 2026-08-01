@@ -90,6 +90,30 @@ function guestCountLabel(count) {
   return `${value} гостей`;
 }
 
+function capacityLabel(count) {
+  if (interfaceLanguage() === "en") return `up to ${guestCountLabel(count)}`;
+  if (interfaceLanguage() === "az") return `maksimum ${guestCountLabel(count)}`;
+  return `до ${Number(count || 0)} гостей`;
+}
+
+function bookingWindowHelp(fromDate, toDate) {
+  if (interfaceLanguage() === "en") return `Check-in can be selected from ${longDate(fromDate)} to ${longDate(toDate)}.`;
+  if (interfaceLanguage() === "az") return `Giriş ${longDate(fromDate)} tarixindən ${longDate(toDate)} tarixinədək seçilə bilər.`;
+  return `Можно выбрать заезд с ${longDate(fromDate)} по ${longDate(toDate)}.`;
+}
+
+function maximumCheckoutHelp(date) {
+  if (interfaceLanguage() === "en") return `For the selected check-in, checkout must be no later than ${longDate(date)}.`;
+  if (interfaceLanguage() === "az") return `Seçilmiş giriş üçün çıxış ${longDate(date)} tarixindən gec olmamalıdır.`;
+  return `Для выбранного заезда — не позже ${longDate(date)}.`;
+}
+
+function maximumStayHelp(months) {
+  if (interfaceLanguage() === "en") return `Maximum stay is ${months} calendar months.`;
+  if (interfaceLanguage() === "az") return `Maksimum qalma müddəti ${months} təqvim ayıdır.`;
+  return `Проживание — максимум ${months} календарных месяца.`;
+}
+
 function balanceLabel(reservation) {
   const value = reservation.refund_due_minor > 0
     ? money(reservation.refund_due_minor, reservation.currency)
@@ -398,7 +422,7 @@ function renderProperties() {
           <div class="property-price">${money(property.base_price_minor, property.currency)}<small>за ночь</small></div>
         </div>
         <div class="property-meta">
-          <div><small>Гостей</small><strong>до ${property.capacity}</strong></div>
+          <div><small>Гостей</small><strong data-i18n-ignore>${escapeHtml(capacityLabel(property.capacity))}</strong></div>
           <div><small>Депозит</small><strong>${money(property.deposit_minor, property.currency)}</strong></div>
           <div><small>Брони</small><strong>${property.reservation_count}</strong></div>
         </div>
@@ -559,24 +583,32 @@ function updateReservationDateLimits() {
   if (checkInChanged && checkIn.value < policy.today) {
     checkInError = "Дата заезда не может быть в прошлом";
   } else if (checkInChanged && checkIn.value > policy.maximumCheckInDate) {
-    checkInError = `Заезд доступен максимум до ${longDate(policy.maximumCheckInDate)}`;
+    checkInError = interfaceLanguage() === "en"
+      ? `Check-in is available only through ${longDate(policy.maximumCheckInDate)}`
+      : interfaceLanguage() === "az"
+        ? `Giriş yalnız ${longDate(policy.maximumCheckInDate)} tarixinədək mümkündür`
+        : `Заезд доступен максимум до ${longDate(policy.maximumCheckInDate)}`;
   }
   if (datesChanged && checkInWithinWindow && checkOut.value && checkOut.value <= checkIn.value) {
     checkOutError = "Дата выезда должна быть позже даты заезда";
   } else if (datesChanged && checkInWithinWindow && maximumCheckOutDate && checkOut.value > maximumCheckOutDate) {
-    checkOutError = `Выезд должен быть не позже ${longDate(maximumCheckOutDate)}`;
+    checkOutError = interfaceLanguage() === "en"
+      ? `Checkout must be no later than ${longDate(maximumCheckOutDate)}`
+      : interfaceLanguage() === "az"
+        ? `Çıxış ${longDate(maximumCheckOutDate)} tarixindən gec olmamalıdır`
+        : `Выезд должен быть не позже ${longDate(maximumCheckOutDate)}`;
   }
   checkIn.setCustomValidity(checkInError);
   checkOut.setCustomValidity(checkOutError);
 
   const checkInHelp = $("#checkInDateHelp");
   const checkOutHelp = $("#checkOutDateHelp");
-  checkInHelp.textContent = checkInError || `Можно выбрать заезд с ${longDate(policy.today)} по ${longDate(policy.maximumCheckInDate)}.`;
+  checkInHelp.textContent = checkInError || bookingWindowHelp(policy.today, policy.maximumCheckInDate);
   checkOutHelp.textContent = checkOutError || (maximumCheckOutDate
-    ? `Для выбранного заезда — не позже ${longDate(maximumCheckOutDate)}.`
+    ? maximumCheckoutHelp(maximumCheckOutDate)
     : checkInError
       ? "Сначала выберите допустимую дату заезда."
-      : `Проживание — максимум ${policy.maximumStayMonths} календарных месяца.`);
+      : maximumStayHelp(policy.maximumStayMonths));
   checkInHelp.classList.toggle("limit-error", Boolean(checkInError));
   checkOutHelp.classList.toggle("limit-error", Boolean(checkOutError));
 }
@@ -592,7 +624,7 @@ function openReservationDialog(reservation = null, defaults = {}) {
   form.reset();
   $("#reservationFormError").hidden = true;
   $("#reservationProperty").innerHTML = houses.map((property) =>
-    `<option value="${property.id}">${escapeHtml(property.place_name ? `${property.place_name} — ${property.name}` : property.name)} · до ${property.capacity} гостей</option>`
+    `<option value="${property.id}">${escapeHtml(property.place_name ? `${property.place_name} — ${property.name}` : property.name)} · ${escapeHtml(capacityLabel(property.capacity))}</option>`
   ).join("");
   const today = state.systemInfo?.bookingPolicy?.today || new Date().toISOString().slice(0, 10);
   const tomorrow = addDaysIso(today);
