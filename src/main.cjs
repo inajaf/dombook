@@ -6,7 +6,7 @@ const { DomBookDatabase } = require("./database.cjs");
 let mainWindow;
 let database;
 
-app.setName("ДомБук");
+app.setName("DomBook");
 app.setPath("userData", path.join(app.getPath("appData"), "dombook-desktop"));
 
 function ok(data) {
@@ -75,7 +75,7 @@ function createWindow() {
     minWidth: 980,
     minHeight: 680,
     backgroundColor: "#f4f7f5",
-    title: "ДомБук",
+    title: "DomBook",
     show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
@@ -150,7 +150,7 @@ function createMenu(language = database?.getLanguage() || "ru") {
     : [{ role: "quit", label: labels.quit }];
   const template = [
     {
-      label: process.platform === "darwin" ? "ДомБук" : "Файл",
+      label: process.platform === "darwin" ? "DomBook" : "Файл",
       submenu: appMenu,
     },
     {
