@@ -2,6 +2,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { DomBookDatabase } = require("../src/database.cjs");
+const { todayInTimeZone, addDaysIso } = require("../src/domain/booking/booking-policy.cjs");
 
 async function main() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "dombook-smoke-"));
@@ -12,6 +13,7 @@ async function main() {
   }).init();
 
   try {
+    const checkInDate = addDaysIso(todayInTimeZone(), 1);
     const property = database.createProperty({
       name: "Smoke House",
       location: "Local",
@@ -28,8 +30,8 @@ async function main() {
       guestName: "Smoke Guest",
       guestPhone: "",
       guestEmail: "",
-      checkInDate: "2026-08-10",
-      checkOutDate: "2026-08-12",
+      checkInDate,
+      checkOutDate: addDaysIso(checkInDate, 2),
       adults: 2,
       children: 0,
       status: "confirmed",
