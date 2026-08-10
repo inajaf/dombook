@@ -1,0 +1,7 @@
+# Local secrets for `wrangler dev` and the vitest pool. Never commit real values.
+# Production values are set as Cloudflare Worker secrets (see docs/saas-spec.md).
+JWT_SECRET="dev-only-jwt-secret-change-me"
+ADMIN_API_KEY="dev-admin-key-change-me"
+# When non-empty, the one-time login code is returned in the API response
+# (development convenience only; in production the code is emailed and this is off).
+AUTH_EXPOSE_CODE="true"

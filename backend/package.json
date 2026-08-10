@@ -1,0 +1,22 @@
+{
+  "name": "dombook-saas-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DomBook SaaS backend: Cloudflare Workers + D1 multi-tenant API (auth, CRUD, sync, admin)",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "migrate:local": "wrangler d1 migrations apply dombook-saas --local",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "0.21.0",
+    "@cloudflare/workers-types": "^5.20260810.1",
+    "typescript": "~5.9.3",
+    "vitest": "^4.1.10",
+    "wrangler": "4.120.1"
+  }
+}
