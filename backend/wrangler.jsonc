@@ -1,0 +1,33 @@
+// DomBook SaaS backend — Cloudflare Workers + D1.
+// Canonical cloud database and API for the multi-tenant DomBook service.
+//
+// Configuration is Cloudflare-agnostic where possible: secrets are read from
+// `vars`/`.dev.vars`, the D1 binding is the only Cloudflare-specific surface,
+// and the repository layer wraps it so the worker can be re-hosted on a VPS
+// (SQLite via the same SQL contract) later. See docs/saas-spec.md.
+
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "dombook-saas-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-09-01",
+  "observability": {
+    "enabled": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "dombook-saas",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    // App-level configuration. Secrets (JWT_SECRET, ADMIN_API_KEY, SETUP_TOKEN)
+    // live in `.dev.vars` locally and as Worker secrets in production.
+    "APP_NAME": "ДомБук",
+    "AUTH_OTP_TTL_SECONDS": "600",
+    "AUTH_SESSION_TTL_SECONDS": "2592000",
+    "AUTH_EXPOSE_CODE": "true"
+  }
+}
