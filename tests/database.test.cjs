@@ -3,7 +3,10 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const initSqlJs = require("sql.js");
 const { DomBookDatabase, eachNight } = require("../src/database.cjs");
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 async function createTestDatabase(t, today = "2026-07-29") {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "dombook-test-"));
@@ -198,7 +201,8 @@ test("отмена освобождает ночи для новой брони"
   database.cancelReservation(first.id);
 
   const second = database.createReservation(reservation(property.id, { guestName: "Новый гость" }));
-  assert.ok(second.id > first.id);
+  assert.notEqual(second.id, first.id);
+  assert.match(second.id, UUID_RE);
   assert.equal(database.listReservations().filter((item) => item.status === "cancelled").length, 1);
 });
 
@@ -225,7 +229,7 @@ test("удаление брони доступно после отмены и с
   assert.equal(JSON.parse(audit.payload_json).guestName, "Тестовый гость");
 
   const replacement = database.createReservation(reservation(property.id));
-  assert.ok(replacement.id > created.id);
+  assert.notEqual(replacement.id, created.id);
   database.close();
 
   const reopened = await new DomBookDatabase({
@@ -582,4 +586,359 @@ test("backup создаёт валидный файл и checksum", async (t) =>
   assert.ok(fs.existsSync(backup.path));
   assert.match(backup.checksum, /^[a-f0-9]{64}$/);
   assert.equal(database.listBackups().length, 1);
+});
+
+test("все создаваемые записи получают UUID и sync-колонки", async (t) => {
+  const { database } = await createTestDatabase(t);
+  const place = database.createPlace({ name: "Долина", address: "", notes: "" });
+  const property = database.createProperty(house({ placeId: place.id }));
+  const booking = database.createReservation(reservation(property.id));
+
+  assert.match(place.id, UUID_RE);
+  assert.match(property.id, UUID_RE);
+  assert.match(booking.id, UUID_RE);
+  assert.equal(place.version, 1);
+  assert.equal(property.version, 1);
+  assert.equal(booking.version, 1);
+  assert.equal(place.deleted_at, null);
+  assert.ok(place.created_at);
+  assert.ok(place.updated_at);
+
+  const nights = database.query(
+    "SELECT * FROM reservation_nights WHERE reservation_id = ?",
+    [booking.id],
+  );
+  assert.equal(nights.length, 3);
+  nights.forEach((night) => {
+    assert.match(night.id, UUID_RE);
+    assert.equal(night.reservation_id, booking.id);
+    assert.equal(night.property_id, property.id);
+    assert.equal(night.version, 1);
+    assert.ok(night.created_at);
+    assert.ok(night.updated_at);
+  });
+
+  const meals = database.query(
+    "SELECT * FROM reservation_meals WHERE reservation_id = ?",
+    [booking.id],
+  );
+  meals.forEach((meal) => assert.match(meal.id, UUID_RE));
+});
+
+test("version и last_writer обновляются при каждой записи", async (t) => {
+  const { database } = await createTestDatabase(t);
+  const created = database.createProperty(house());
+  assert.equal(created.version, 1);
+  assert.match(created.last_writer, UUID_RE);
+
+  const updated = database.updateProperty(created.id, house({ name: "Дом у моря" }));
+  assert.equal(updated.version, 2);
+  assert.equal(updated.last_writer, created.last_writer);
+
+  const archived = database.archiveProperty(created.id);
+  assert.equal(archived.version, 3);
+
+  const restored = database.restoreProperty(created.id);
+  assert.equal(restored.version, 4);
+  assert.ok(restored.updated_at >= updated.updated_at);
+});
+
+test("version брони растёт при создании, изменении и отмене", async (t) => {
+  const { database } = await createTestDatabase(t);
+  const property = database.createProperty(house());
+  const created = database.createReservation(reservation(property.id));
+  assert.equal(created.version, 1);
+
+  const updated = database.updateReservation(created.id, reservation(property.id, {
+    prepaidMinor: 25000,
+  }));
+  assert.equal(updated.version, 2);
+
+  const cancelled = database.cancelReservation(created.id);
+  assert.equal(cancelled.version, 3);
+  assert.equal(cancelled.status, "cancelled");
+  assert.notEqual(cancelled.last_writer, "");
+});
+
+test("ранний выезд бампит version брони", async (t) => {
+  const { database } = await createTestDatabase(t);
+  const property = database.createProperty(house({ basePriceMinor: 20000 }));
+  const created = database.createReservation(reservation(property.id));
+  assert.equal(created.version, 1);
+
+  const checkedOut = database.earlyCheckout(created.id, {
+    actualCheckOutDate: "2026-08-11",
+    billingPolicy: "recalculate",
+  });
+  assert.equal(checkedOut.version, 2);
+  assert.equal(checkedOut.status, "checked_out");
+});
+
+async function createLegacyDatabase(t) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "dombook-legacy-"));
+  const SQL = await initSqlJs({ locateFile: () => require.resolve("sql.js/dist/sql-wasm.wasm") });
+  const db = new SQL.Database();
+  db.run(`
+    CREATE TABLE places (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+      address TEXT NOT NULL DEFAULT '',
+      has_food_service INTEGER NOT NULL DEFAULT 0,
+      breakfast_price_minor INTEGER NOT NULL DEFAULT 0,
+      lunch_price_minor INTEGER NOT NULL DEFAULT 0,
+      dinner_price_minor INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'archived')),
+      notes TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE properties (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      place_id INTEGER REFERENCES places(id),
+      kind TEXT NOT NULL DEFAULT 'house' CHECK(kind IN ('cottage', 'house')),
+      name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+      location TEXT NOT NULL DEFAULT '',
+      capacity INTEGER NOT NULL CHECK(capacity > 0),
+      base_price_minor INTEGER NOT NULL DEFAULT 0,
+      deposit_minor INTEGER NOT NULL DEFAULT 0,
+      currency TEXT NOT NULL DEFAULT 'AZN',
+      check_in_time TEXT NOT NULL DEFAULT '15:00',
+      check_out_time TEXT NOT NULL DEFAULT '11:00',
+      status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'archived')),
+      notes TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE reservations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      property_id INTEGER NOT NULL REFERENCES properties(id),
+      guest_name TEXT NOT NULL,
+      guest_phone TEXT NOT NULL DEFAULT '',
+      guest_email TEXT NOT NULL DEFAULT '',
+      check_in_date TEXT NOT NULL,
+      check_out_date TEXT NOT NULL,
+      adults INTEGER NOT NULL DEFAULT 1 CHECK(adults > 0),
+      children INTEGER NOT NULL DEFAULT 0 CHECK(children >= 0),
+      status TEXT NOT NULL CHECK(status IN ('hold','confirmed','checked_in','checked_out','cancelled','no_show')),
+      nightly_rate_minor INTEGER NOT NULL DEFAULT 0,
+      accommodation_minor INTEGER NOT NULL DEFAULT 0,
+      services_minor INTEGER NOT NULL DEFAULT 0,
+      total_minor INTEGER NOT NULL DEFAULT 0,
+      prepaid_minor INTEGER NOT NULL DEFAULT 0,
+      deposit_minor INTEGER NOT NULL DEFAULT 0,
+      deposit_status TEXT NOT NULL DEFAULT 'none',
+      actual_check_out_date TEXT,
+      notes TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE reservation_nights (
+      reservation_id INTEGER NOT NULL REFERENCES reservations(id) ON DELETE CASCADE,
+      property_id INTEGER NOT NULL REFERENCES properties(id),
+      night_date TEXT NOT NULL,
+      PRIMARY KEY(property_id, night_date)
+    );
+    CREATE TABLE reservation_services (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      reservation_id INTEGER NOT NULL REFERENCES reservations(id) ON DELETE CASCADE,
+      service_type TEXT NOT NULL CHECK(service_type IN ('breakfast','lunch','dinner')),
+      service_name TEXT NOT NULL,
+      unit_price_minor INTEGER NOT NULL CHECK(unit_price_minor >= 0),
+      quantity INTEGER NOT NULL CHECK(quantity > 0),
+      UNIQUE(reservation_id, service_type)
+    );
+    CREATE TABLE reservation_meals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      reservation_id INTEGER NOT NULL REFERENCES reservations(id) ON DELETE CASCADE,
+      meal_date TEXT NOT NULL,
+      meal_type TEXT NOT NULL CHECK(meal_type IN ('breakfast','lunch','dinner')),
+      amount_minor INTEGER NOT NULL CHECK(amount_minor > 0),
+      UNIQUE(reservation_id, meal_date, meal_type)
+    );
+    CREATE TABLE app_settings (
+      setting_key TEXT PRIMARY KEY,
+      setting_value TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE audit_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      entity_type TEXT NOT NULL,
+      entity_id INTEGER,
+      action TEXT NOT NULL,
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL
+    );
+  `);
+
+  const ts = "2026-01-01T10:00:00.000Z";
+  db.run(
+    `INSERT INTO places(name, address, has_food_service, status, notes, created_at, updated_at)
+     VALUES ('Лесная долина', 'Габала', 1, 'active', '', ?, ?)`,
+    [ts, ts],
+  );
+  db.run(
+    `INSERT INTO properties(place_id, kind, name, location, capacity, base_price_minor, deposit_minor, currency, check_in_time, check_out_time, status, notes, created_at, updated_at)
+     VALUES (1, 'cottage', 'Коттедж «Сосны»', '', 6, 24000, 30000, 'AZN', '15:00', '11:00', 'active', '', ?, ?)`,
+    [ts, ts],
+  );
+  db.run(
+    `INSERT INTO reservations(property_id, guest_name, guest_phone, guest_email, check_in_date, check_out_date, adults, children, status, nightly_rate_minor, accommodation_minor, services_minor, total_minor, prepaid_minor, deposit_minor, deposit_status, notes, created_at, updated_at)
+     VALUES (1, 'Али', '+994501112233', 'ali@example.com', '2026-08-10', '2026-08-13', 2, 0, 'confirmed', 24000, 72000, 0, 72000, 20000, 30000, 'received', '', ?, ?)`,
+    [ts, ts],
+  );
+  db.run(
+    `INSERT INTO reservation_nights(reservation_id, property_id, night_date)
+     VALUES (1, 1, '2026-08-10'), (1, 1, '2026-08-11'), (1, 1, '2026-08-12')`,
+  );
+  db.run(
+    `INSERT INTO reservation_services(reservation_id, service_type, service_name, unit_price_minor, quantity)
+     VALUES (1, 'lunch', 'Обед', 2000, 3)`,
+  );
+  db.run(
+    `INSERT INTO reservation_meals(reservation_id, meal_date, meal_type, amount_minor)
+     VALUES (1, '2026-08-10', 'lunch', 6000)`,
+  );
+  db.run(
+    `INSERT INTO app_settings(setting_key, setting_value, updated_at)
+     VALUES ('interface_language', 'az', ?)`,
+    [ts],
+  );
+  db.run(
+    `INSERT INTO audit_log(entity_type, entity_id, action, payload_json, created_at)
+     VALUES ('reservation', 1, 'created', '{}', ?)`,
+    [ts],
+  );
+
+  const filePath = path.join(tempDir, "legacy.sqlite");
+  fs.writeFileSync(filePath, Buffer.from(db.export()));
+  db.close();
+
+  const database = await new DomBookDatabase({
+    filePath,
+    backupDir: path.join(tempDir, "backups"),
+    seed: false,
+    todayProvider: () => "2026-07-29",
+  }).init();
+  t.after(() => {
+    database.close();
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+  return { database, tempDir };
+}
+
+test("миграция legacy-базы переводит все данные на UUID без потерь", async (t) => {
+  const { database } = await createLegacyDatabase(t);
+
+  const places = database.query("SELECT * FROM places");
+  const properties = database.query("SELECT * FROM properties");
+  const reservations = database.query("SELECT * FROM reservations");
+  const nights = database.query("SELECT * FROM reservation_nights");
+  const services = database.query("SELECT * FROM reservation_services");
+  const meals = database.query("SELECT * FROM reservation_meals");
+  const settings = database.query("SELECT * FROM app_settings");
+  const audit = database.query("SELECT * FROM audit_log");
+
+  assert.equal(places.length, 1);
+  assert.equal(properties.length, 1);
+  assert.equal(reservations.length, 1);
+  assert.equal(nights.length, 3);
+  assert.equal(services.length, 1);
+  assert.equal(meals.length, 1);
+
+  [...places, ...properties, ...reservations, ...services, ...meals].forEach((row) => {
+    assert.match(row.id, UUID_RE);
+    assert.equal(row.version, 1);
+    assert.equal(row.deleted_at, null);
+    assert.equal(row.last_writer, "");
+    assert.ok(row.created_at);
+    assert.ok(row.updated_at);
+  });
+  nights.forEach((night) => {
+    assert.match(night.id, UUID_RE);
+    assert.equal(night.version, 1);
+  });
+
+  const placeById = new Map(places.map((item) => [item.id, item]));
+  const propertyById = new Map(properties.map((item) => [item.id, item]));
+  const reservationById = new Map(reservations.map((item) => [item.id, item]));
+
+  properties.forEach((property) => assert.ok(placeById.has(property.place_id)));
+  reservations.forEach((item) => assert.ok(propertyById.has(item.property_id)));
+  nights.forEach((night) => {
+    assert.ok(propertyById.has(night.property_id));
+    assert.ok(reservationById.has(night.reservation_id));
+  });
+  services.forEach((service) => assert.ok(reservationById.has(service.reservation_id)));
+  meals.forEach((meal) => assert.ok(reservationById.has(meal.reservation_id)));
+
+  const language = settings.find((item) => item.setting_key === "interface_language");
+  assert.equal(language.setting_value, "az");
+  assert.match(language.id, UUID_RE);
+
+  const auditRow = audit.find((item) => item.action === "created");
+  assert.match(auditRow.entity_id, UUID_RE);
+  assert.equal(auditRow.entity_id, reservations[0].id);
+
+  assert.ok(database.scalar("SELECT 1 FROM schema_migrations WHERE name = 'sync_schema_v1'"));
+
+  const booking = database.listReservations()[0];
+  assert.equal(booking.guest_name, "Али");
+  assert.equal(booking.property_name, "Коттедж «Сосны»");
+  assert.equal(booking.meals.length, 1);
+});
+
+test("мигрированную базу можно редактировать: version бампится, двойная бронь блокируется", async (t) => {
+  const { database } = await createLegacyDatabase(t);
+  const place = database.query("SELECT * FROM places")[0];
+  const property = database.query("SELECT * FROM properties")[0];
+
+  const updated = database.updatePlace(place.id, {
+    name: "Лесная долина",
+    address: "Габала",
+    hasFoodService: true,
+    notes: "",
+  });
+  assert.equal(updated.version, 2);
+
+  const archived = database.archiveProperty(property.id);
+  assert.equal(archived.version, 2);
+  const restored = database.restoreProperty(property.id);
+  assert.equal(restored.version, 3);
+
+  const booking = database.listReservations()[0];
+  assert.throws(
+    () => database.createReservation(reservation(property.id, {
+      guestName: "Другой гость",
+      checkInDate: "2026-08-12",
+      checkOutDate: "2026-08-14",
+    })),
+    /уже занят 2026-08-12/,
+  );
+  assert.equal(booking.version, 1);
+});
+
+test("повторное открытие мигрированной базы не теряет данные и не мигрирует повторно", async (t) => {
+  const { database, tempDir } = await createLegacyDatabase(t);
+  database.close();
+
+  const reopened = await new DomBookDatabase({
+    filePath: path.join(tempDir, "legacy.sqlite"),
+    backupDir: path.join(tempDir, "backups"),
+    seed: false,
+  }).init();
+  try {
+    assert.equal(reopened.query("SELECT COUNT(*) AS count FROM places")[0].count, 1);
+    assert.equal(reopened.query("SELECT COUNT(*) AS count FROM properties")[0].count, 1);
+    assert.equal(reopened.query("SELECT COUNT(*) AS count FROM reservations")[0].count, 1);
+    assert.equal(reopened.query("SELECT COUNT(*) AS count FROM reservation_nights")[0].count, 3);
+
+    const idColumn = reopened.query("PRAGMA table_info(places)").find((column) => column.name === "id");
+    assert.equal(idColumn.type, "TEXT");
+    const place = reopened.query("SELECT * FROM places")[0];
+    assert.match(place.id, UUID_RE);
+
+    assert.ok(reopened.scalar("SELECT setting_value FROM app_settings WHERE setting_key = 'device_id'"));
+  } finally {
+    reopened.close();
+  }
 });
