@@ -662,7 +662,7 @@ function openReservationDialog(reservation = null, defaults = {}) {
 
 function applyPropertyDefaults(existingReservation = null) {
   const form = $("#reservationForm");
-  const property = state.properties.find((item) => item.id === Number(form.elements.propertyId.value));
+  const property = state.properties.find((item) => item.id === form.elements.propertyId.value);
   if (!property || existingReservation) return;
   form.elements.deposit.value = minorToDecimal(property.deposit_minor);
   form.elements.depositStatus.value = property.deposit_minor > 0 ? "due" : "none";
@@ -670,7 +670,7 @@ function applyPropertyDefaults(existingReservation = null) {
 
 function selectedPlace() {
   const form = $("#reservationForm");
-  const property = state.properties.find((item) => item.id === Number(form.elements.propertyId.value));
+  const property = state.properties.find((item) => item.id === form.elements.propertyId.value);
   return state.places.find((item) => item.id === property?.place_id) || null;
 }
 
@@ -688,7 +688,7 @@ function currentMealDraft() {
 
 function reservationMealDates() {
   const form = $("#reservationForm");
-  const reservation = state.reservations.find((item) => item.id === Number(form.elements.id.value));
+  const reservation = state.reservations.find((item) => item.id === form.elements.id.value);
   const checkIn = form.elements.checkInDate.value;
   const plannedCheckOut = form.elements.checkOutDate.value;
   if (!form.elements.checkInDate.validity.valid || !form.elements.checkOutDate.validity.valid) return [];
@@ -744,7 +744,7 @@ function renderMealInputs(reservation = null) {
 
 function renderReservationCalculation() {
   const form = $("#reservationForm");
-  const property = state.properties.find((item) => item.id === Number(form.elements.propertyId.value));
+  const property = state.properties.find((item) => item.id === form.elements.propertyId.value);
   const datesAreValid = form.elements.checkInDate.validity.valid && form.elements.checkOutDate.validity.valid;
   const nights = datesAreValid
     ? nightsBetween(form.elements.checkInDate.value, form.elements.checkOutDate.value)
@@ -777,13 +777,13 @@ function renderReservationCalculation() {
 
 function recalculateReservationTotal() {
   const form = $("#reservationForm");
-  const property = state.properties.find((item) => item.id === Number(form.elements.propertyId.value));
+  const property = state.properties.find((item) => item.id === form.elements.propertyId.value);
   const datesAreValid = form.elements.checkInDate.validity.valid && form.elements.checkOutDate.validity.valid;
   const nights = datesAreValid
     ? nightsBetween(form.elements.checkInDate.value, form.elements.checkOutDate.value)
     : 0;
   if (property && nights) {
-    const reservation = state.reservations.find((item) => item.id === Number(form.elements.id.value));
+    const reservation = state.reservations.find((item) => item.id === form.elements.id.value);
     const nightlyRate = reservation && reservation.property_id === property.id
       ? reservation.nightly_rate_minor
       : property.base_price_minor;
@@ -802,7 +802,7 @@ async function submitProperty(event) {
   const errorBox = $("#propertyFormError");
   errorBox.hidden = true;
   const payload = {
-    placeId: form.elements.placeId.value ? Number(form.elements.placeId.value) : null,
+    placeId: form.elements.placeId.value || null,
     kind: form.elements.kind.value,
     name: form.elements.name.value,
     location: form.elements.location.value,
@@ -813,11 +813,11 @@ async function submitProperty(event) {
     checkInTime: form.elements.checkInTime.value,
     checkOutTime: form.elements.checkOutTime.value,
     notes: form.elements.notes.value,
-    status: state.properties.find((item) => item.id === Number(form.elements.id.value))?.status || "active",
+    status: state.properties.find((item) => item.id === form.elements.id.value)?.status || "active",
   };
   try {
     setBusy(submit, true);
-    const id = Number(form.elements.id.value);
+    const id = form.elements.id.value;
     if (id) await unwrap(api.properties.update(id, payload));
     else await unwrap(api.properties.create(payload));
     $("#propertyDialog").close();
@@ -837,7 +837,7 @@ async function submitPlace(event) {
   const submit = $("#placeSubmit");
   const errorBox = $("#placeFormError");
   errorBox.hidden = true;
-  const id = Number(form.elements.id.value);
+  const id = form.elements.id.value;
   const current = state.places.find((place) => place.id === id);
   const payload = {
     name: form.elements.name.value,
@@ -872,7 +872,7 @@ async function submitReservation(event) {
   const errorBox = $("#reservationFormError");
   errorBox.hidden = true;
   const payload = {
-    propertyId: Number(form.elements.propertyId.value),
+    propertyId: form.elements.propertyId.value,
     checkInDate: form.elements.checkInDate.value,
     checkOutDate: form.elements.checkOutDate.value,
     guestName: form.elements.guestName.value,
@@ -895,7 +895,7 @@ async function submitReservation(event) {
   };
   try {
     setBusy(submit, true);
-    const id = Number(form.elements.id.value);
+    const id = form.elements.id.value;
     if (id) await unwrap(api.reservations.update(id, payload));
     else await unwrap(api.reservations.create(payload));
     $("#reservationDialog").close();
@@ -927,7 +927,7 @@ function openEarlyCheckoutDialog(reservation) {
 
 function renderEarlyCheckoutPreview() {
   const form = $("#earlyCheckoutForm");
-  const reservation = state.reservations.find((item) => item.id === Number(form.elements.id.value));
+  const reservation = state.reservations.find((item) => item.id === form.elements.id.value);
   if (!reservation) return;
   const usedNights = nightsBetween(reservation.check_in_date, form.elements.actualCheckOutDate.value);
   const keepTotal = form.elements.billingPolicy.value === "keep_total";
@@ -957,7 +957,7 @@ async function submitEarlyCheckout(event) {
   errorBox.hidden = true;
   try {
     setBusy(button, true);
-    await unwrap(api.reservations.earlyCheckout(Number(form.elements.id.value), {
+    await unwrap(api.reservations.earlyCheckout(form.elements.id.value, {
       actualCheckOutDate: form.elements.actualCheckOutDate.value,
       billingPolicy: form.elements.billingPolicy.value,
     }));
@@ -1020,7 +1020,7 @@ function bindEvents() {
       return;
     }
     if (target.dataset.addPropertyToPlace) {
-      openPropertyDialog(null, { placeId: Number(target.dataset.addPropertyToPlace), kind: "cottage" });
+      openPropertyDialog(null, { placeId: target.dataset.addPropertyToPlace, kind: "cottage" });
       return;
     }
     if (target.hasAttribute("data-add-standalone-house")) {
@@ -1028,12 +1028,12 @@ function bindEvents() {
       return;
     }
     if (target.dataset.calendarProperty) {
-      const reservationId = Number(target.dataset.calendarReservation);
+      const reservationId = target.dataset.calendarReservation;
       if (reservationId) {
         openReservationDialog(state.reservations.find((item) => item.id === reservationId));
       } else {
         openReservationDialog(null, {
-          propertyId: Number(target.dataset.calendarProperty),
+          propertyId: target.dataset.calendarProperty,
           checkInDate: target.dataset.calendarDate,
           checkOutDate: addDaysIso(target.dataset.calendarDate),
         });
@@ -1044,12 +1044,12 @@ function bindEvents() {
     if (target.dataset.quick === "property") openPropertyDialog();
     if (target.dataset.quick === "place") openPlaceDialog();
     if (target.dataset.quick === "reservation") openReservationDialog();
-    if (target.dataset.editProperty) openPropertyDialog(state.properties.find((item) => item.id === Number(target.dataset.editProperty)));
-    if (target.dataset.editPlace) openPlaceDialog(state.places.find((item) => item.id === Number(target.dataset.editPlace)));
-    if (target.dataset.editReservation) openReservationDialog(state.reservations.find((item) => item.id === Number(target.dataset.editReservation)));
-    if (target.dataset.earlyCheckout) openEarlyCheckoutDialog(state.reservations.find((item) => item.id === Number(target.dataset.earlyCheckout)));
+    if (target.dataset.editProperty) openPropertyDialog(state.properties.find((item) => item.id === target.dataset.editProperty));
+    if (target.dataset.editPlace) openPlaceDialog(state.places.find((item) => item.id === target.dataset.editPlace));
+    if (target.dataset.editReservation) openReservationDialog(state.reservations.find((item) => item.id === target.dataset.editReservation));
+    if (target.dataset.earlyCheckout) openEarlyCheckoutDialog(state.reservations.find((item) => item.id === target.dataset.earlyCheckout));
     if (target.dataset.archiveProperty) {
-      const property = state.properties.find((item) => item.id === Number(target.dataset.archiveProperty));
+      const property = state.properties.find((item) => item.id === target.dataset.archiveProperty);
       confirmAction({
         title: "Архивировать дом?",
         text: `«${property.name}» исчезнет из новых броней, но история сохранится.`,
@@ -1062,13 +1062,13 @@ function bindEvents() {
       });
     }
     if (target.dataset.restoreProperty) {
-      unwrap(api.properties.restore(Number(target.dataset.restoreProperty)))
+      unwrap(api.properties.restore(target.dataset.restoreProperty))
         .then(refreshCore)
         .then(() => toast("Дом восстановлен"))
         .catch((error) => toast(error.message, "error"));
     }
     if (target.dataset.archivePlace) {
-      const place = state.places.find((item) => item.id === Number(target.dataset.archivePlace));
+      const place = state.places.find((item) => item.id === target.dataset.archivePlace);
       confirmAction({
         title: "Архивировать дом отдыха?",
         text: `«${place.name}» будет скрыт из выбора для новых коттеджей. Сами коттеджи и их брони сохранятся.`,
@@ -1081,13 +1081,13 @@ function bindEvents() {
       });
     }
     if (target.dataset.restorePlace) {
-      unwrap(api.places.restore(Number(target.dataset.restorePlace)))
+      unwrap(api.places.restore(target.dataset.restorePlace))
         .then(refreshCore)
         .then(() => toast("Дом отдыха восстановлен"))
         .catch((error) => toast(error.message, "error"));
     }
     if (target.dataset.cancelReservation) {
-      const reservation = state.reservations.find((item) => item.id === Number(target.dataset.cancelReservation));
+      const reservation = state.reservations.find((item) => item.id === target.dataset.cancelReservation);
       confirmAction({
         title: "Отменить бронь?",
         text: `Бронь №${reservation.id} для ${reservation.guest_name} будет отменена, а ночи освободятся.`,
@@ -1100,7 +1100,7 @@ function bindEvents() {
       });
     }
     if (target.dataset.deleteReservation) {
-      const reservation = state.reservations.find((item) => item.id === Number(target.dataset.deleteReservation));
+      const reservation = state.reservations.find((item) => item.id === target.dataset.deleteReservation);
       confirmAction({
         title: "Удалить бронь навсегда?",
         text: `Бронь №${reservation.id} для ${reservation.guest_name} (${shortDate(reservation.check_in_date)} → ${shortDate(reservation.actual_check_out_date || reservation.check_out_date)}) будет безвозвратно удалена. Отменить это действие нельзя.`,
@@ -1190,21 +1190,21 @@ function createBrowserDemoApi() {
   const storageKey = "dombook.web.v1";
   let interfaceLanguage = "ru";
   let places = [
-    { id: 1, name: "Дом отдыха «Лесная долина»", address: "Габала", has_food_service: 1, status: "active", notes: "", active_unit_count: 2, total_unit_count: 2 },
+    { id: "1", name: "Дом отдыха «Лесная долина»", address: "Габала", has_food_service: 1, status: "active", notes: "", active_unit_count: 2, total_unit_count: 2 },
   ];
   let properties = [
-    { id: 1, place_id: 1, place_name: "Дом отдыха «Лесная долина»", place_address: "Габала", kind: "cottage", name: "Коттедж «Сосны»", location: "", capacity: 6, base_price_minor: 24000, deposit_minor: 30000, currency: "AZN", check_in_time: "15:00", check_out_time: "11:00", notes: "", status: "active", reservation_count: 1 },
-    { id: 2, place_id: 1, place_name: "Дом отдыха «Лесная долина»", place_address: "Габала", kind: "cottage", name: "Коттедж «У озера»", location: "", capacity: 8, base_price_minor: 32000, deposit_minor: 40000, currency: "AZN", check_in_time: "15:00", check_out_time: "11:00", notes: "", status: "active", reservation_count: 0 },
-    { id: 3, place_id: null, place_name: null, place_address: null, kind: "house", name: "Отдельный дом в Шеки", location: "Шеки", capacity: 3, base_price_minor: 17000, deposit_minor: 20000, currency: "AZN", check_in_time: "15:00", check_out_time: "11:00", notes: "", status: "active", reservation_count: 0 },
+    { id: "1", place_id: "1", place_name: "Дом отдыха «Лесная долина»", place_address: "Габала", kind: "cottage", name: "Коттедж «Сосны»", location: "", capacity: 6, base_price_minor: 24000, deposit_minor: 30000, currency: "AZN", check_in_time: "15:00", check_out_time: "11:00", notes: "", status: "active", reservation_count: 1 },
+    { id: "2", place_id: "1", place_name: "Дом отдыха «Лесная долина»", place_address: "Габала", kind: "cottage", name: "Коттедж «У озера»", location: "", capacity: 8, base_price_minor: 32000, deposit_minor: 40000, currency: "AZN", check_in_time: "15:00", check_out_time: "11:00", notes: "", status: "active", reservation_count: 0 },
+    { id: "3", place_id: null, place_name: null, place_address: null, kind: "house", name: "Отдельный дом в Шеки", location: "Шеки", capacity: 3, base_price_minor: 17000, deposit_minor: 20000, currency: "AZN", check_in_time: "15:00", check_out_time: "11:00", notes: "", status: "active", reservation_count: 0 },
   ];
   let reservations = [];
   let backups = [];
   try {
     const saved = JSON.parse(localStorage.getItem(storageKey) || "null");
     if (saved) {
-      if (Array.isArray(saved.places)) places = saved.places;
-      if (Array.isArray(saved.properties)) properties = saved.properties;
-      if (Array.isArray(saved.reservations)) reservations = saved.reservations;
+      if (Array.isArray(saved.places)) places = normalizeIds(saved.places);
+      if (Array.isArray(saved.properties)) properties = normalizeIds(saved.properties);
+      if (Array.isArray(saved.reservations)) reservations = normalizeIds(saved.reservations);
       if (Array.isArray(saved.backups)) backups = saved.backups;
       if (["ru", "az", "en"].includes(saved.language)) interfaceLanguage = saved.language;
     }
@@ -1213,6 +1213,13 @@ function createBrowserDemoApi() {
   }
   const response = (data) => Promise.resolve({ ok: true, data });
   const error = (message) => Promise.resolve({ ok: false, error: message });
+  const idOf = (value) => (value === null || value === undefined ? null : String(value));
+  const findById = (list, id, key = "id") => list.find((item) => idOf(item[key]) === idOf(id));
+  const normalizeIds = (list, keys = ["id", "place_id", "property_id", "reservation_id"]) => (list || []).map((item) => {
+    const copy = { ...item };
+    keys.forEach((key) => { if (copy[key] !== null && copy[key] !== undefined) copy[key] = String(copy[key]); });
+    return copy;
+  });
   const persist = () => localStorage.setItem(storageKey, JSON.stringify({
     version: 1,
     language: interfaceLanguage,
@@ -1241,12 +1248,12 @@ function createBrowserDemoApi() {
     return persistedResponse(backup);
   };
   const list = () => reservations.map((item) => {
-    const property = properties.find((p) => p.id === item.property_id);
+    const property = findById(properties, item.property_id);
     return { ...item, property_name: property?.name || "—", place_name: property?.place_name || null, currency: "AZN", balance_minor: Math.max(item.total_minor - item.prepaid_minor, 0), refund_due_minor: Math.max(item.prepaid_minor - item.total_minor, 0) };
   });
   const demoReservation = (data, previous = null) => {
-    const property = properties.find((item) => item.id === data.propertyId);
-    const place = places.find((item) => item.id === property?.place_id);
+    const property = findById(properties, data.propertyId);
+    const place = findById(places, property?.place_id);
     const nights = nightsBetween(data.checkInDate, data.checkOutDate);
     const nightlyRate = previous?.nightly_rate_minor || property.base_price_minor;
     const meals = place?.has_food_service
@@ -1285,26 +1292,26 @@ function createBrowserDemoApi() {
     } },
     places: {
       list: () => response(places),
-      create: (data) => { if (places.some((p) => p.name.toLowerCase() === data.name.toLowerCase())) return error("Дом отдыха с таким названием уже существует"); const item = { id: Date.now(), name: data.name, address: data.address, has_food_service: data.hasFoodService ? 1 : 0, notes: data.notes, status: "active", active_unit_count: 0, total_unit_count: 0 }; places.push(item); return persistedResponse(item); },
-      update: (id, data) => { const item = places.find((p) => p.id === id); Object.assign(item, { name: data.name, address: data.address, has_food_service: data.hasFoodService ? 1 : 0, notes: data.notes }); properties.filter((property) => property.place_id === id).forEach((property) => Object.assign(property, { place_name: item.name, place_address: item.address })); return persistedResponse(item); },
-      archive: (id) => { places.find((p) => p.id === id).status = "archived"; return persistedResponse(true); },
-      restore: (id) => { places.find((p) => p.id === id).status = "active"; return persistedResponse(true); },
+      create: (data) => { if (places.some((p) => p.name.toLowerCase() === data.name.toLowerCase())) return error("Дом отдыха с таким названием уже существует"); const item = { id: String(Date.now()), name: data.name, address: data.address, has_food_service: data.hasFoodService ? 1 : 0, notes: data.notes, status: "active", active_unit_count: 0, total_unit_count: 0 }; places.push(item); return persistedResponse(item); },
+      update: (id, data) => { const item = findById(places, id); Object.assign(item, { name: data.name, address: data.address, has_food_service: data.hasFoodService ? 1 : 0, notes: data.notes }); properties.filter((property) => idOf(property.place_id) === idOf(id)).forEach((property) => Object.assign(property, { place_name: item.name, place_address: item.address })); return persistedResponse(item); },
+      archive: (id) => { findById(places, id).status = "archived"; return persistedResponse(true); },
+      restore: (id) => { findById(places, id).status = "active"; return persistedResponse(true); },
     },
     properties: {
       list: () => response(properties),
-      create: (data) => { if (properties.some((p) => p.name.toLowerCase() === data.name.toLowerCase())) return error("Дом с таким наименованием уже существует"); const place = places.find((p) => p.id === data.placeId); const item = { id: Date.now(), place_id: data.placeId, place_name: place?.name || null, place_address: place?.address || null, kind: data.kind, name: data.name, location: data.location, capacity: data.capacity, base_price_minor: data.basePriceMinor, deposit_minor: data.depositMinor, currency: data.currency, check_in_time: data.checkInTime, check_out_time: data.checkOutTime, notes: data.notes, status: "active", reservation_count: 0 }; properties.push(item); return persistedResponse(item); },
-      update: (id, data) => { const item = properties.find((p) => p.id === id); const place = places.find((p) => p.id === data.placeId); Object.assign(item, { place_id: data.placeId, place_name: place?.name || null, place_address: place?.address || null, kind: data.kind, name: data.name, location: data.location, capacity: data.capacity, base_price_minor: data.basePriceMinor, deposit_minor: data.depositMinor, currency: data.currency, check_in_time: data.checkInTime, check_out_time: data.checkOutTime, notes: data.notes }); return persistedResponse(item); },
-      archive: (id) => { properties.find((p) => p.id === id).status = "archived"; return persistedResponse(true); },
-      restore: (id) => { properties.find((p) => p.id === id).status = "active"; return persistedResponse(true); },
+      create: (data) => { if (properties.some((p) => p.name.toLowerCase() === data.name.toLowerCase())) return error("Дом с таким наименованием уже существует"); const place = findById(places, data.placeId); const item = { id: String(Date.now()), place_id: data.placeId || null, place_name: place?.name || null, place_address: place?.address || null, kind: data.kind, name: data.name, location: data.location, capacity: data.capacity, base_price_minor: data.basePriceMinor, deposit_minor: data.depositMinor, currency: data.currency, check_in_time: data.checkInTime, check_out_time: data.checkOutTime, notes: data.notes, status: "active", reservation_count: 0 }; properties.push(item); return persistedResponse(item); },
+      update: (id, data) => { const item = findById(properties, id); const place = findById(places, data.placeId); Object.assign(item, { place_id: data.placeId || null, place_name: place?.name || null, place_address: place?.address || null, kind: data.kind, name: data.name, location: data.location, capacity: data.capacity, base_price_minor: data.basePriceMinor, deposit_minor: data.depositMinor, currency: data.currency, check_in_time: data.checkInTime, check_out_time: data.checkOutTime, notes: data.notes }); return persistedResponse(item); },
+      archive: (id) => { findById(properties, id).status = "archived"; return persistedResponse(true); },
+      restore: (id) => { findById(properties, id).status = "active"; return persistedResponse(true); },
     },
     reservations: {
       list: () => response(list()),
-      create: (data) => { const item = { id: Date.now(), ...demoReservation(data) }; reservations.push(item); return persistedResponse(item); },
-      update: (id, data) => { const item = reservations.find((r) => r.id === id); Object.assign(item, demoReservation(data, item)); return persistedResponse(item); },
-      cancel: (id) => { reservations.find((r) => r.id === id).status = "cancelled"; return persistedResponse(true); },
-      delete: (id) => { reservations = reservations.filter((r) => r.id !== id); return persistedResponse(true); },
+      create: (data) => { const item = { id: String(Date.now()), ...demoReservation(data) }; reservations.push(item); return persistedResponse(item); },
+      update: (id, data) => { const item = findById(reservations, id); Object.assign(item, demoReservation(data, item)); return persistedResponse(item); },
+      cancel: (id) => { findById(reservations, id).status = "cancelled"; return persistedResponse(true); },
+      delete: (id) => { reservations = reservations.filter((r) => !(idOf(r.id) === idOf(id))); return persistedResponse(true); },
       earlyCheckout: (id, data) => {
-        const item = reservations.find((r) => r.id === id);
+        const item = findById(reservations, id);
         item.actual_check_out_date = data.actualCheckOutDate;
         item.status = "checked_out";
         item.meals = (item.meals || []).filter((meal) => meal.meal_date < data.actualCheckOutDate);

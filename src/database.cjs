@@ -29,6 +29,151 @@ const ALLOWED_DEPOSIT_STATUSES = new Set([
 const ALLOWED_MEAL_TYPES = new Set(["breakfast", "lunch", "dinner"]);
 const ALLOWED_INTERFACE_LANGUAGES = new Set(["ru", "az", "en"]);
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Domain tables carry the same sync columns as the SaaS baseline
+// (backend/migrations/0001_baseline.sql): UUID TEXT id, created_at/updated_at,
+// soft-delete deleted_at, version (bumped on every write) and last_writer.
+// The desktop is single-tenant, so tenant_id columns are omitted here.
+const SCHEMA_TABLES = {
+  places: `
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL COLLATE NOCASE,
+    address TEXT NOT NULL DEFAULT '',
+    has_food_service INTEGER NOT NULL DEFAULT 0 CHECK(has_food_service IN (0, 1)),
+    breakfast_price_minor INTEGER NOT NULL DEFAULT 0 CHECK(breakfast_price_minor >= 0),
+    lunch_price_minor INTEGER NOT NULL DEFAULT 0 CHECK(lunch_price_minor >= 0),
+    dinner_price_minor INTEGER NOT NULL DEFAULT 0 CHECK(dinner_price_minor >= 0),
+    status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'archived')),
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT,
+    version INTEGER NOT NULL DEFAULT 1,
+    last_writer TEXT NOT NULL DEFAULT ''
+  `,
+  properties: `
+    id TEXT PRIMARY KEY,
+    place_id TEXT REFERENCES places(id),
+    kind TEXT NOT NULL DEFAULT 'house' CHECK(kind IN ('cottage', 'house')),
+    name TEXT NOT NULL COLLATE NOCASE,
+    location TEXT NOT NULL DEFAULT '',
+    capacity INTEGER NOT NULL CHECK(capacity > 0),
+    base_price_minor INTEGER NOT NULL DEFAULT 0 CHECK(base_price_minor >= 0),
+    deposit_minor INTEGER NOT NULL DEFAULT 0 CHECK(deposit_minor >= 0),
+    currency TEXT NOT NULL DEFAULT 'AZN',
+    check_in_time TEXT NOT NULL DEFAULT '15:00',
+    check_out_time TEXT NOT NULL DEFAULT '11:00',
+    status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'archived')),
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT,
+    version INTEGER NOT NULL DEFAULT 1,
+    last_writer TEXT NOT NULL DEFAULT ''
+  `,
+  reservations: `
+    id TEXT PRIMARY KEY,
+    property_id TEXT NOT NULL REFERENCES properties(id),
+    guest_name TEXT NOT NULL,
+    guest_phone TEXT NOT NULL DEFAULT '',
+    guest_email TEXT NOT NULL DEFAULT '',
+    check_in_date TEXT NOT NULL,
+    check_out_date TEXT NOT NULL,
+    adults INTEGER NOT NULL DEFAULT 1 CHECK(adults > 0),
+    children INTEGER NOT NULL DEFAULT 0 CHECK(children >= 0),
+    status TEXT NOT NULL CHECK(status IN ('hold','confirmed','checked_in','checked_out','cancelled','no_show')),
+    nightly_rate_minor INTEGER NOT NULL DEFAULT 0 CHECK(nightly_rate_minor >= 0),
+    accommodation_minor INTEGER NOT NULL DEFAULT 0 CHECK(accommodation_minor >= 0),
+    services_minor INTEGER NOT NULL DEFAULT 0 CHECK(services_minor >= 0),
+    total_minor INTEGER NOT NULL DEFAULT 0 CHECK(total_minor >= 0),
+    prepaid_minor INTEGER NOT NULL DEFAULT 0 CHECK(prepaid_minor >= 0),
+    deposit_minor INTEGER NOT NULL DEFAULT 0 CHECK(deposit_minor >= 0),
+    deposit_status TEXT NOT NULL DEFAULT 'none' CHECK(deposit_status IN ('none','due','received','returned','partially_withheld','withheld')),
+    actual_check_out_date TEXT,
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT,
+    version INTEGER NOT NULL DEFAULT 1,
+    last_writer TEXT NOT NULL DEFAULT ''
+  `,
+  reservation_nights: `
+    id TEXT PRIMARY KEY,
+    reservation_id TEXT NOT NULL REFERENCES reservations(id) ON DELETE CASCADE,
+    property_id TEXT NOT NULL REFERENCES properties(id),
+    night_date TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT,
+    version INTEGER NOT NULL DEFAULT 1,
+    last_writer TEXT NOT NULL DEFAULT ''
+  `,
+  reservation_services: `
+    id TEXT PRIMARY KEY,
+    reservation_id TEXT NOT NULL REFERENCES reservations(id) ON DELETE CASCADE,
+    service_type TEXT NOT NULL CHECK(service_type IN ('breakfast','lunch','dinner')),
+    service_name TEXT NOT NULL,
+    unit_price_minor INTEGER NOT NULL CHECK(unit_price_minor >= 0),
+    quantity INTEGER NOT NULL CHECK(quantity > 0),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT,
+    version INTEGER NOT NULL DEFAULT 1,
+    last_writer TEXT NOT NULL DEFAULT ''
+  `,
+  reservation_meals: `
+    id TEXT PRIMARY KEY,
+    reservation_id TEXT NOT NULL REFERENCES reservations(id) ON DELETE CASCADE,
+    meal_date TEXT NOT NULL,
+    meal_type TEXT NOT NULL CHECK(meal_type IN ('breakfast','lunch','dinner')),
+    amount_minor INTEGER NOT NULL CHECK(amount_minor > 0),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT,
+    version INTEGER NOT NULL DEFAULT 1,
+    last_writer TEXT NOT NULL DEFAULT ''
+  `,
+  app_settings: `
+    id TEXT PRIMARY KEY,
+    setting_key TEXT NOT NULL,
+    setting_value TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT,
+    version INTEGER NOT NULL DEFAULT 1,
+    last_writer TEXT NOT NULL DEFAULT ''
+  `,
+  audit_log: `
+    id TEXT PRIMARY KEY,
+    entity_type TEXT NOT NULL,
+    entity_id TEXT,
+    action TEXT NOT NULL,
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT,
+    version INTEGER NOT NULL DEFAULT 1
+  `,
+};
+
+const SCHEMA_INDEXES = [
+  "CREATE UNIQUE INDEX IF NOT EXISTS places_name_active_idx ON places(name) WHERE deleted_at IS NULL",
+  "CREATE INDEX IF NOT EXISTS places_version_idx ON places(version)",
+  "CREATE UNIQUE INDEX IF NOT EXISTS properties_name_active_idx ON properties(name) WHERE deleted_at IS NULL",
+  "CREATE INDEX IF NOT EXISTS properties_place_idx ON properties(place_id, status)",
+  "CREATE INDEX IF NOT EXISTS properties_version_idx ON properties(version)",
+  "CREATE INDEX IF NOT EXISTS reservations_dates_idx ON reservations(check_in_date, check_out_date)",
+  "CREATE INDEX IF NOT EXISTS reservations_property_idx ON reservations(property_id, status)",
+  "CREATE INDEX IF NOT EXISTS reservations_version_idx ON reservations(version)",
+  "CREATE UNIQUE INDEX IF NOT EXISTS reservation_nights_active_idx ON reservation_nights(property_id, night_date) WHERE deleted_at IS NULL",
+  "CREATE UNIQUE INDEX IF NOT EXISTS reservation_services_active_idx ON reservation_services(reservation_id, service_type) WHERE deleted_at IS NULL",
+  "CREATE UNIQUE INDEX IF NOT EXISTS reservation_meals_active_idx ON reservation_meals(reservation_id, meal_date, meal_type) WHERE deleted_at IS NULL",
+  "CREATE INDEX IF NOT EXISTS reservation_meals_reservation_date_idx ON reservation_meals(reservation_id, meal_date)",
+  "CREATE INDEX IF NOT EXISTS audit_created_idx ON audit_log(created_at DESC)",
+  "CREATE UNIQUE INDEX IF NOT EXISTS app_settings_key_idx ON app_settings(setting_key)",
+];
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -60,6 +205,12 @@ function integer(value, label, min = 0, max = Number.MAX_SAFE_INTEGER) {
 
 function money(value, label) {
   return integer(value, label, 0, 1_000_000_000);
+}
+
+function uuid(value, label = "Идентификатор") {
+  const result = String(value ?? "").trim();
+  if (!UUID_PATTERN.test(result)) throw new Error(`${label}: неверный идентификатор`);
+  return result;
 }
 
 function validDate(value, label) {
@@ -99,12 +250,6 @@ function canonicalName(value) {
   return String(value ?? "").trim().toLocaleLowerCase("ru-RU");
 }
 
-function rowsFrom(result) {
-  if (!result?.length) return [];
-  const [{ columns, values }] = result;
-  return values.map((row) => Object.fromEntries(columns.map((column, index) => [column, row[index]])));
-}
-
 class DomBookDatabase {
   constructor({ filePath, backupDir, seed = true, todayProvider = todayInTimeZone }) {
     this.filePath = filePath;
@@ -113,6 +258,7 @@ class DomBookDatabase {
     this.todayProvider = todayProvider;
     this.db = null;
     this.SQL = null;
+    this.writerId = "";
   }
 
   async init() {
@@ -129,176 +275,284 @@ class DomBookDatabase {
 
     this.db.run("PRAGMA foreign_keys = ON");
     this.migrate();
+    this.ensureDeviceId();
     if (this.seed) this.seedDemoData();
     this.persist();
     return this;
   }
 
   migrate() {
-    this.db.run(`
-      CREATE TABLE IF NOT EXISTS places (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL COLLATE NOCASE UNIQUE,
-        address TEXT NOT NULL DEFAULT '',
-        has_food_service INTEGER NOT NULL DEFAULT 0 CHECK(has_food_service IN (0, 1)),
-        breakfast_price_minor INTEGER NOT NULL DEFAULT 0 CHECK(breakfast_price_minor >= 0),
-        lunch_price_minor INTEGER NOT NULL DEFAULT 0 CHECK(lunch_price_minor >= 0),
-        dinner_price_minor INTEGER NOT NULL DEFAULT 0 CHECK(dinner_price_minor >= 0),
-        status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'archived')),
-        notes TEXT NOT NULL DEFAULT '',
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS properties (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        place_id INTEGER REFERENCES places(id),
-        kind TEXT NOT NULL DEFAULT 'house' CHECK(kind IN ('cottage', 'house')),
-        name TEXT NOT NULL COLLATE NOCASE UNIQUE,
-        location TEXT NOT NULL DEFAULT '',
-        capacity INTEGER NOT NULL CHECK(capacity > 0),
-        base_price_minor INTEGER NOT NULL DEFAULT 0 CHECK(base_price_minor >= 0),
-        deposit_minor INTEGER NOT NULL DEFAULT 0 CHECK(deposit_minor >= 0),
-        currency TEXT NOT NULL DEFAULT 'AZN',
-        check_in_time TEXT NOT NULL DEFAULT '15:00',
-        check_out_time TEXT NOT NULL DEFAULT '11:00',
-        status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'archived')),
-        notes TEXT NOT NULL DEFAULT '',
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS reservations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        property_id INTEGER NOT NULL REFERENCES properties(id),
-        guest_name TEXT NOT NULL,
-        guest_phone TEXT NOT NULL DEFAULT '',
-        guest_email TEXT NOT NULL DEFAULT '',
-        check_in_date TEXT NOT NULL,
-        check_out_date TEXT NOT NULL,
-        adults INTEGER NOT NULL DEFAULT 1 CHECK(adults > 0),
-        children INTEGER NOT NULL DEFAULT 0 CHECK(children >= 0),
-        status TEXT NOT NULL CHECK(status IN ('hold','confirmed','checked_in','checked_out','cancelled','no_show')),
-        nightly_rate_minor INTEGER NOT NULL DEFAULT 0 CHECK(nightly_rate_minor >= 0),
-        accommodation_minor INTEGER NOT NULL DEFAULT 0 CHECK(accommodation_minor >= 0),
-        services_minor INTEGER NOT NULL DEFAULT 0 CHECK(services_minor >= 0),
-        total_minor INTEGER NOT NULL DEFAULT 0 CHECK(total_minor >= 0),
-        prepaid_minor INTEGER NOT NULL DEFAULT 0 CHECK(prepaid_minor >= 0),
-        deposit_minor INTEGER NOT NULL DEFAULT 0 CHECK(deposit_minor >= 0),
-        deposit_status TEXT NOT NULL DEFAULT 'none' CHECK(deposit_status IN ('none','due','received','returned','partially_withheld','withheld')),
-        actual_check_out_date TEXT,
-        notes TEXT NOT NULL DEFAULT '',
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS reservation_nights (
-        reservation_id INTEGER NOT NULL REFERENCES reservations(id) ON DELETE CASCADE,
-        property_id INTEGER NOT NULL REFERENCES properties(id),
-        night_date TEXT NOT NULL,
-        PRIMARY KEY(property_id, night_date)
-      );
-
-      CREATE TABLE IF NOT EXISTS reservation_services (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        reservation_id INTEGER NOT NULL REFERENCES reservations(id) ON DELETE CASCADE,
-        service_type TEXT NOT NULL CHECK(service_type IN ('breakfast','lunch','dinner')),
-        service_name TEXT NOT NULL,
-        unit_price_minor INTEGER NOT NULL CHECK(unit_price_minor >= 0),
-        quantity INTEGER NOT NULL CHECK(quantity > 0),
-        UNIQUE(reservation_id, service_type)
-      );
-
-      CREATE TABLE IF NOT EXISTS reservation_meals (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        reservation_id INTEGER NOT NULL REFERENCES reservations(id) ON DELETE CASCADE,
-        meal_date TEXT NOT NULL,
-        meal_type TEXT NOT NULL CHECK(meal_type IN ('breakfast','lunch','dinner')),
-        amount_minor INTEGER NOT NULL CHECK(amount_minor > 0),
-        UNIQUE(reservation_id, meal_date, meal_type)
-      );
-
-      CREATE TABLE IF NOT EXISTS schema_migrations (
-        name TEXT PRIMARY KEY,
-        applied_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS app_settings (
-        setting_key TEXT PRIMARY KEY,
-        setting_value TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS audit_log (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        entity_type TEXT NOT NULL,
-        entity_id INTEGER,
-        action TEXT NOT NULL,
-        payload_json TEXT NOT NULL DEFAULT '{}',
-        created_at TEXT NOT NULL
-      );
-
-      CREATE INDEX IF NOT EXISTS reservations_dates_idx
-        ON reservations(check_in_date, check_out_date);
-      CREATE INDEX IF NOT EXISTS reservations_property_idx
-        ON reservations(property_id, status);
-      CREATE INDEX IF NOT EXISTS properties_place_idx
-        ON properties(place_id, status);
-      CREATE INDEX IF NOT EXISTS audit_created_idx
-        ON audit_log(created_at DESC);
-      CREATE INDEX IF NOT EXISTS reservation_meals_reservation_date_idx
-        ON reservation_meals(reservation_id, meal_date);
-    `);
-
-    this.ensureColumn("places", "has_food_service", "INTEGER NOT NULL DEFAULT 0 CHECK(has_food_service IN (0, 1))");
-    this.ensureColumn("places", "breakfast_price_minor", "INTEGER NOT NULL DEFAULT 0 CHECK(breakfast_price_minor >= 0)");
-    this.ensureColumn("places", "lunch_price_minor", "INTEGER NOT NULL DEFAULT 0 CHECK(lunch_price_minor >= 0)");
-    this.ensureColumn("places", "dinner_price_minor", "INTEGER NOT NULL DEFAULT 0 CHECK(dinner_price_minor >= 0)");
-    this.ensureColumn("reservations", "nightly_rate_minor", "INTEGER NOT NULL DEFAULT 0 CHECK(nightly_rate_minor >= 0)");
-    this.ensureColumn("reservations", "accommodation_minor", "INTEGER NOT NULL DEFAULT 0 CHECK(accommodation_minor >= 0)");
-    this.ensureColumn("reservations", "services_minor", "INTEGER NOT NULL DEFAULT 0 CHECK(services_minor >= 0)");
-    this.ensureColumn("reservations", "actual_check_out_date", "TEXT");
-    this.db.run(`
-      UPDATE reservations
-      SET accommodation_minor = total_minor
-      WHERE accommodation_minor = 0 AND services_minor = 0 AND total_minor > 0;
-      UPDATE reservations
-      SET nightly_rate_minor = CASE
-        WHEN julianday(check_out_date) > julianday(check_in_date)
-          THEN CAST(accommodation_minor / (julianday(check_out_date) - julianday(check_in_date)) AS INTEGER)
-        ELSE accommodation_minor
-      END
-      WHERE nightly_rate_minor = 0 AND accommodation_minor > 0;
-    `);
-
-    if (!this.scalar("SELECT 1 FROM schema_migrations WHERE name = 'daily_meals_v1'")) {
+    this.db.run("PRAGMA foreign_keys = OFF");
+    try {
+      for (const [name, sql] of Object.entries(SCHEMA_TABLES)) {
+        this.db.run(`CREATE TABLE IF NOT EXISTS ${name} (${sql})`);
+      }
       this.db.run(`
-        INSERT OR IGNORE INTO reservation_meals(reservation_id, meal_date, meal_type, amount_minor)
-        SELECT rs.reservation_id, r.check_in_date, rs.service_type,
-          SUM(rs.unit_price_minor * rs.quantity)
-        FROM reservation_services rs
-        JOIN reservations r ON r.id = rs.reservation_id
-        GROUP BY rs.reservation_id, r.check_in_date, rs.service_type
-        HAVING SUM(rs.unit_price_minor * rs.quantity) > 0;
-
-        INSERT OR IGNORE INTO reservation_meals(reservation_id, meal_date, meal_type, amount_minor)
-        SELECT r.id, r.check_in_date, 'lunch', r.services_minor
-        FROM reservations r
-        WHERE r.services_minor > 0
-          AND NOT EXISTS (
-            SELECT 1 FROM reservation_meals rm WHERE rm.reservation_id = r.id
-          );
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+          name TEXT PRIMARY KEY,
+          applied_at TEXT NOT NULL
+        );
       `);
-      this.run(
-        "INSERT INTO schema_migrations(name, applied_at) VALUES ('daily_meals_v1', ?)",
-        [nowIso()],
-      );
+
+      this.ensureColumn("places", "has_food_service", "INTEGER NOT NULL DEFAULT 0 CHECK(has_food_service IN (0, 1))");
+      this.ensureColumn("places", "breakfast_price_minor", "INTEGER NOT NULL DEFAULT 0 CHECK(breakfast_price_minor >= 0)");
+      this.ensureColumn("places", "lunch_price_minor", "INTEGER NOT NULL DEFAULT 0 CHECK(lunch_price_minor >= 0)");
+      this.ensureColumn("places", "dinner_price_minor", "INTEGER NOT NULL DEFAULT 0 CHECK(dinner_price_minor >= 0)");
+      this.ensureColumn("reservations", "nightly_rate_minor", "INTEGER NOT NULL DEFAULT 0 CHECK(nightly_rate_minor >= 0)");
+      this.ensureColumn("reservations", "accommodation_minor", "INTEGER NOT NULL DEFAULT 0 CHECK(accommodation_minor >= 0)");
+      this.ensureColumn("reservations", "services_minor", "INTEGER NOT NULL DEFAULT 0 CHECK(services_minor >= 0)");
+      this.ensureColumn("reservations", "actual_check_out_date", "TEXT");
+      this.db.run(`
+        UPDATE reservations
+        SET accommodation_minor = total_minor
+        WHERE accommodation_minor = 0 AND services_minor = 0 AND total_minor > 0;
+        UPDATE reservations
+        SET nightly_rate_minor = CASE
+          WHEN julianday(check_out_date) > julianday(check_in_date)
+            THEN CAST(accommodation_minor / (julianday(check_out_date) - julianday(check_in_date)) AS INTEGER)
+          ELSE accommodation_minor
+        END
+        WHERE nightly_rate_minor = 0 AND accommodation_minor > 0;
+      `);
+
+      this.migrateLegacyIntegerIds();
+      this.db.run(SCHEMA_INDEXES.join(";\n"));
+
+      if (!this.scalar("SELECT 1 FROM schema_migrations WHERE name = 'daily_meals_v1'")) {
+        const timestamp = nowIso();
+        const serviceMeals = this.query(`
+          SELECT rs.reservation_id, r.check_in_date AS meal_date, rs.service_type AS meal_type,
+            SUM(rs.unit_price_minor * rs.quantity) AS amount_minor
+          FROM reservation_services rs
+          JOIN reservations r ON r.id = rs.reservation_id
+          GROUP BY rs.reservation_id, r.check_in_date, rs.service_type
+          HAVING SUM(rs.unit_price_minor * rs.quantity) > 0
+        `);
+        serviceMeals.forEach((row) => {
+          this.run(
+            `INSERT OR IGNORE INTO reservation_meals(
+              id, reservation_id, meal_date, meal_type, amount_minor, created_at, updated_at, version, last_writer
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+            [crypto.randomUUID(), row.reservation_id, row.meal_date, row.meal_type, row.amount_minor, timestamp, timestamp, this.writerId],
+          );
+        });
+        const lunchFallback = this.query(`
+          SELECT r.id AS reservation_id, r.check_in_date AS meal_date, r.services_minor AS amount_minor
+          FROM reservations r
+          WHERE r.services_minor > 0
+            AND NOT EXISTS (
+              SELECT 1 FROM reservation_meals rm WHERE rm.reservation_id = r.id
+            )
+        `);
+        lunchFallback.forEach((row) => {
+          this.run(
+            `INSERT OR IGNORE INTO reservation_meals(
+              id, reservation_id, meal_date, meal_type, amount_minor, created_at, updated_at, version, last_writer
+            ) VALUES (?, ?, ?, 'lunch', ?, ?, ?, 1, ?)`,
+            [crypto.randomUUID(), row.reservation_id, row.meal_date, row.amount_minor, timestamp, timestamp, this.writerId],
+          );
+        });
+        this.run(
+          "INSERT INTO schema_migrations(name, applied_at) VALUES ('daily_meals_v1', ?)",
+          [timestamp],
+        );
+      }
+    } finally {
+      this.db.run("PRAGMA foreign_keys = ON");
     }
+  }
+
+  // Legacy databases (before UUID ids) have INTEGER PRIMARY KEY AUTOINCREMENT
+  // and no sync columns. Rebuild every table into the new schema, generating a
+  // UUID per row and re-pointing foreign keys to the new UUIDs. No data is lost.
+  migrateLegacyIntegerIds() {
+    const placesId = this.query("PRAGMA table_info(places)").find((column) => column.name === "id");
+    if (!placesId || placesId.type.toUpperCase() === "TEXT") return false;
+
+    const timestamp = nowIso();
+    const uuid = () => crypto.randomUUID();
+
+    const placeMap = new Map();
+    const propertyMap = new Map();
+    const reservationMap = new Map();
+
+    const remap = (value, map) =>
+      value === null || value === undefined ? null : (map.get(String(value)) ?? String(value));
+
+    const newPlaces = this.query("SELECT * FROM places").map((row) => {
+      const id = uuid();
+      placeMap.set(String(row.id), id);
+      return {
+        id,
+        name: row.name,
+        address: row.address,
+        has_food_service: row.has_food_service,
+        breakfast_price_minor: row.breakfast_price_minor,
+        lunch_price_minor: row.lunch_price_minor,
+        dinner_price_minor: row.dinner_price_minor,
+        status: row.status,
+        notes: row.notes,
+        created_at: row.created_at || timestamp,
+        updated_at: row.updated_at || timestamp,
+      };
+    });
+    const newProperties = this.query("SELECT * FROM properties").map((row) => {
+      const id = uuid();
+      propertyMap.set(String(row.id), id);
+      return {
+        id,
+        place_id: remap(row.place_id, placeMap),
+        kind: row.kind,
+        name: row.name,
+        location: row.location,
+        capacity: row.capacity,
+        base_price_minor: row.base_price_minor,
+        deposit_minor: row.deposit_minor,
+        currency: row.currency,
+        check_in_time: row.check_in_time,
+        check_out_time: row.check_out_time,
+        status: row.status,
+        notes: row.notes,
+        created_at: row.created_at || timestamp,
+        updated_at: row.updated_at || timestamp,
+      };
+    });
+    const newReservations = this.query("SELECT * FROM reservations").map((row) => {
+      const id = uuid();
+      reservationMap.set(String(row.id), id);
+      return {
+        id,
+        property_id: remap(row.property_id, propertyMap) ?? "",
+        guest_name: row.guest_name,
+        guest_phone: row.guest_phone,
+        guest_email: row.guest_email,
+        check_in_date: row.check_in_date,
+        check_out_date: row.check_out_date,
+        adults: row.adults,
+        children: row.children,
+        status: row.status,
+        nightly_rate_minor: row.nightly_rate_minor,
+        accommodation_minor: row.accommodation_minor,
+        services_minor: row.services_minor,
+        total_minor: row.total_minor,
+        prepaid_minor: row.prepaid_minor,
+        deposit_minor: row.deposit_minor,
+        deposit_status: row.deposit_status,
+        actual_check_out_date: row.actual_check_out_date,
+        notes: row.notes,
+        created_at: row.created_at || timestamp,
+        updated_at: row.updated_at || timestamp,
+      };
+    });
+    const newNights = this.query("SELECT * FROM reservation_nights").map((row) => ({
+      id: uuid(),
+      reservation_id: remap(row.reservation_id, reservationMap) ?? "",
+      property_id: remap(row.property_id, propertyMap) ?? "",
+      night_date: row.night_date,
+      created_at: timestamp,
+      updated_at: timestamp,
+    }));
+    const newServices = this.query("SELECT * FROM reservation_services").map((row) => ({
+      id: uuid(),
+      reservation_id: remap(row.reservation_id, reservationMap) ?? "",
+      service_type: row.service_type,
+      service_name: row.service_name,
+      unit_price_minor: row.unit_price_minor,
+      quantity: row.quantity,
+      created_at: timestamp,
+      updated_at: timestamp,
+    }));
+    const newMeals = this.query("SELECT * FROM reservation_meals").map((row) => ({
+      id: uuid(),
+      reservation_id: remap(row.reservation_id, reservationMap) ?? "",
+      meal_date: row.meal_date,
+      meal_type: row.meal_type,
+      amount_minor: row.amount_minor,
+      created_at: timestamp,
+      updated_at: timestamp,
+    }));
+    const newSettings = this.query("SELECT * FROM app_settings").map((row) => ({
+      id: uuid(),
+      setting_key: row.setting_key,
+      setting_value: row.setting_value,
+      created_at: row.updated_at || timestamp,
+      updated_at: row.updated_at || timestamp,
+    }));
+    const entityMaps = { place: placeMap, property: propertyMap, reservation: reservationMap };
+    const newAudit = this.query("SELECT * FROM audit_log").map((row) => ({
+      id: uuid(),
+      entity_type: row.entity_type,
+      entity_id: row.entity_id === null || row.entity_id === undefined
+        ? null
+        : (entityMaps[row.entity_type]?.get(String(row.entity_id)) ?? String(row.entity_id)),
+      action: row.action,
+      payload_json: row.payload_json,
+      created_at: row.created_at || timestamp,
+      updated_at: row.updated_at || timestamp,
+    }));
+
+    const rowsByTable = {
+      places: newPlaces,
+      properties: newProperties,
+      reservations: newReservations,
+      reservation_nights: newNights,
+      reservation_services: newServices,
+      reservation_meals: newMeals,
+      app_settings: newSettings,
+      audit_log: newAudit,
+    };
+
+    this.transaction(() => {
+      for (const name of Object.keys(SCHEMA_TABLES)) {
+        this.db.run(`DROP TABLE IF EXISTS ${name}_new`);
+        this.db.run(`CREATE TABLE ${name}_new (${SCHEMA_TABLES[name]})`);
+      }
+      for (const [name, rows] of Object.entries(rowsByTable)) {
+        rows.forEach((row) => this.insertRow(`${name}_new`, row));
+      }
+      const dropOrder = [
+        "reservation_nights",
+        "reservation_services",
+        "reservation_meals",
+        "reservations",
+        "properties",
+        "places",
+        "app_settings",
+        "audit_log",
+      ];
+      for (const name of dropOrder) this.db.run(`DROP TABLE ${name}`);
+      for (const name of Object.keys(SCHEMA_TABLES)) {
+        this.db.run(`ALTER TABLE ${name}_new RENAME TO ${name}`);
+      }
+      this.run(
+        "INSERT INTO schema_migrations(name, applied_at) VALUES ('sync_schema_v1', ?)",
+        [timestamp],
+      );
+    });
+    return true;
+  }
+
+  insertRow(table, row) {
+    const columns = Object.keys(row);
+    this.db.run(
+      `INSERT INTO ${table}(${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`,
+      columns.map((column) => row[column]),
+    );
   }
 
   ensureColumn(table, column, definition) {
     const exists = this.query(`PRAGMA table_info(${table})`).some((item) => item.name === column);
     if (!exists) this.db.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+
+  ensureDeviceId() {
+    const existing = this.scalar("SELECT setting_value FROM app_settings WHERE setting_key = 'device_id'");
+    if (existing) {
+      this.writerId = existing;
+      return;
+    }
+    this.writerId = crypto.randomUUID();
+    this.upsertSetting("device_id", this.writerId);
   }
 
   seedDemoData() {
@@ -337,7 +591,6 @@ class DomBookDatabase {
 
   run(sql, params = []) {
     this.db.run(sql, params);
-    return Number(this.scalar("SELECT last_insert_rowid()"));
   }
 
   transaction(callback) {
@@ -370,9 +623,11 @@ class DomBookDatabase {
   }
 
   audit(entityType, entityId, action, payload = {}) {
+    const timestamp = nowIso();
     this.run(
-      "INSERT INTO audit_log(entity_type, entity_id, action, payload_json, created_at) VALUES (?, ?, ?, ?, ?)",
-      [entityType, entityId ?? null, action, JSON.stringify(payload), nowIso()],
+      `INSERT INTO audit_log(id, entity_type, entity_id, action, payload_json, created_at, updated_at, version)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
+      [crypto.randomUUID(), entityType, entityId ?? null, action, JSON.stringify(payload), timestamp, timestamp],
     );
   }
 
@@ -403,7 +658,7 @@ class DomBookDatabase {
   }
 
   getPlace(id) {
-    return this.query("SELECT * FROM places WHERE id = ?", [integer(id, "Дом отдыха", 1)])[0] ?? null;
+    return this.query("SELECT * FROM places WHERE id = ?", [uuid(id, "Дом отдыха")])[0] ?? null;
   }
 
   validatePlace(input) {
@@ -426,13 +681,14 @@ class DomBookDatabase {
     const create = () => {
       const duplicate = this.listPlaces().find((place) => canonicalName(place.name) === canonicalName(data.name));
       if (duplicate) throw new Error("Дом отдыха с таким названием уже существует");
-      const id = this.run(
+      const id = crypto.randomUUID();
+      this.run(
         `INSERT INTO places(
-          name, address, has_food_service, breakfast_price_minor, lunch_price_minor,
-          dinner_price_minor, status, notes, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [data.name, data.address, data.hasFoodService, data.breakfastPriceMinor, data.lunchPriceMinor,
-          data.dinnerPriceMinor, data.status, data.notes, timestamp, timestamp],
+          id, name, address, has_food_service, breakfast_price_minor, lunch_price_minor,
+          dinner_price_minor, status, notes, created_at, updated_at, version, last_writer
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+        [id, data.name, data.address, data.hasFoodService, data.breakfastPriceMinor, data.lunchPriceMinor,
+          data.dinnerPriceMinor, data.status, data.notes, timestamp, timestamp, this.writerId],
       );
       if (options.audit !== false) this.audit("place", id, "created", data);
       return this.getPlace(id);
@@ -442,7 +698,7 @@ class DomBookDatabase {
   }
 
   updatePlace(id, input) {
-    const placeId = integer(id, "Дом отдыха", 1);
+    const placeId = uuid(id, "Дом отдыха");
     if (!this.getPlace(placeId)) throw new Error("Дом отдыха не найден");
     const data = this.validatePlace(input);
     return this.transaction(() => {
@@ -452,9 +708,11 @@ class DomBookDatabase {
       if (duplicate) throw new Error("Дом отдыха с таким названием уже существует");
       this.run(
         `UPDATE places SET name = ?, address = ?, has_food_service = ?, breakfast_price_minor = ?,
-          lunch_price_minor = ?, dinner_price_minor = ?, status = ?, notes = ?, updated_at = ? WHERE id = ?`,
+          lunch_price_minor = ?, dinner_price_minor = ?, status = ?, notes = ?,
+          updated_at = ?, version = version + 1, last_writer = ?
+        WHERE id = ?`,
         [data.name, data.address, data.hasFoodService, data.breakfastPriceMinor, data.lunchPriceMinor,
-          data.dinnerPriceMinor, data.status, data.notes, nowIso(), placeId],
+          data.dinnerPriceMinor, data.status, data.notes, nowIso(), this.writerId, placeId],
       );
       this.audit("place", placeId, "updated", data);
       return this.getPlace(placeId);
@@ -462,33 +720,39 @@ class DomBookDatabase {
   }
 
   archivePlace(id) {
-    const placeId = integer(id, "Дом отдыха", 1);
+    const placeId = uuid(id, "Дом отдыха");
     if (!this.getPlace(placeId)) throw new Error("Дом отдыха не найден");
     return this.transaction(() => {
-      this.run("UPDATE places SET status = 'archived', updated_at = ? WHERE id = ?", [nowIso(), placeId]);
+      this.run(
+        "UPDATE places SET status = 'archived', updated_at = ?, version = version + 1, last_writer = ? WHERE id = ?",
+        [nowIso(), this.writerId, placeId],
+      );
       this.audit("place", placeId, "archived");
       return this.getPlace(placeId);
     });
   }
 
   restorePlace(id) {
-    const placeId = integer(id, "Дом отдыха", 1);
+    const placeId = uuid(id, "Дом отдыха");
     if (!this.getPlace(placeId)) throw new Error("Дом отдыха не найден");
     return this.transaction(() => {
-      this.run("UPDATE places SET status = 'active', updated_at = ? WHERE id = ?", [nowIso(), placeId]);
+      this.run(
+        "UPDATE places SET status = 'active', updated_at = ?, version = version + 1, last_writer = ? WHERE id = ?",
+        [nowIso(), this.writerId, placeId],
+      );
       this.audit("place", placeId, "restored");
       return this.getPlace(placeId);
     });
   }
 
   getProperty(id) {
-    return this.query("SELECT * FROM properties WHERE id = ?", [integer(id, "Дом", 1)])[0] ?? null;
+    return this.query("SELECT * FROM properties WHERE id = ?", [uuid(id, "Дом")])[0] ?? null;
   }
 
   validateProperty(input) {
     const placeId = input.placeId === null || input.placeId === "" || input.placeId === undefined
       ? null
-      : integer(input.placeId, "Дом отдыха", 1);
+      : uuid(input.placeId, "Дом отдыха");
     if (placeId) {
       const place = this.getPlace(placeId);
       if (!place || place.status !== "active") throw new Error("Выберите активный дом отдыха");
@@ -517,15 +781,16 @@ class DomBookDatabase {
         (property) => canonicalName(property.name) === canonicalName(data.name),
       );
       if (duplicate) throw new Error("Объект с таким наименованием уже существует");
-      const id = this.run(
+      const id = crypto.randomUUID();
+      this.run(
         `INSERT INTO properties(
-          place_id, kind, name, location, capacity, base_price_minor, deposit_minor, currency,
-          check_in_time, check_out_time, status, notes, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          id, place_id, kind, name, location, capacity, base_price_minor, deposit_minor, currency,
+          check_in_time, check_out_time, status, notes, created_at, updated_at, version, last_writer
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
         [
-          data.placeId, data.kind, data.name, data.location, data.capacity, data.basePriceMinor, data.depositMinor,
+          id, data.placeId, data.kind, data.name, data.location, data.capacity, data.basePriceMinor, data.depositMinor,
           data.currency, data.checkInTime, data.checkOutTime, data.status, data.notes,
-          timestamp, timestamp,
+          timestamp, timestamp, this.writerId,
         ],
       );
       if (options.audit !== false) this.audit("property", id, "created", data);
@@ -536,7 +801,7 @@ class DomBookDatabase {
   }
 
   updateProperty(id, input) {
-    const propertyId = integer(id, "Дом", 1);
+    const propertyId = uuid(id, "Дом");
     if (!this.getProperty(propertyId)) throw new Error("Дом не найден");
     const data = this.validateProperty(input);
     return this.transaction(() => {
@@ -548,12 +813,12 @@ class DomBookDatabase {
         `UPDATE properties SET
           place_id = ?, kind = ?, name = ?, location = ?, capacity = ?, base_price_minor = ?, deposit_minor = ?,
           currency = ?, check_in_time = ?, check_out_time = ?, status = ?, notes = ?,
-          updated_at = ?
+          updated_at = ?, version = version + 1, last_writer = ?
         WHERE id = ?`,
         [
           data.placeId, data.kind, data.name, data.location, data.capacity, data.basePriceMinor, data.depositMinor,
           data.currency, data.checkInTime, data.checkOutTime, data.status, data.notes,
-          nowIso(), propertyId,
+          nowIso(), this.writerId, propertyId,
         ],
       );
       this.audit("property", propertyId, "updated", data);
@@ -562,20 +827,26 @@ class DomBookDatabase {
   }
 
   archiveProperty(id) {
-    const propertyId = integer(id, "Дом", 1);
+    const propertyId = uuid(id, "Дом");
     if (!this.getProperty(propertyId)) throw new Error("Дом не найден");
     return this.transaction(() => {
-      this.run("UPDATE properties SET status = 'archived', updated_at = ? WHERE id = ?", [nowIso(), propertyId]);
+      this.run(
+        "UPDATE properties SET status = 'archived', updated_at = ?, version = version + 1, last_writer = ? WHERE id = ?",
+        [nowIso(), this.writerId, propertyId],
+      );
       this.audit("property", propertyId, "archived");
       return this.getProperty(propertyId);
     });
   }
 
   restoreProperty(id) {
-    const propertyId = integer(id, "Дом", 1);
+    const propertyId = uuid(id, "Дом");
     if (!this.getProperty(propertyId)) throw new Error("Дом не найден");
     return this.transaction(() => {
-      this.run("UPDATE properties SET status = 'active', updated_at = ? WHERE id = ?", [nowIso(), propertyId]);
+      this.run(
+        "UPDATE properties SET status = 'active', updated_at = ?, version = version + 1, last_writer = ? WHERE id = ?",
+        [nowIso(), this.writerId, propertyId],
+      );
       this.audit("property", propertyId, "restored");
       return this.getProperty(propertyId);
     });
@@ -589,7 +860,7 @@ class DomBookDatabase {
       FROM reservations r
       JOIN properties p ON p.id = r.property_id
       LEFT JOIN places pl ON pl.id = p.place_id
-      ORDER BY r.check_in_date DESC, r.id DESC
+      ORDER BY r.check_in_date DESC, r.created_at DESC, r.id DESC
     `);
     const mealsByReservation = new Map();
     this.query(`
@@ -609,11 +880,11 @@ class DomBookDatabase {
   }
 
   getReservation(id) {
-    return this.query("SELECT * FROM reservations WHERE id = ?", [integer(id, "Бронь", 1)])[0] ?? null;
+    return this.query("SELECT * FROM reservations WHERE id = ?", [uuid(id, "Бронь")])[0] ?? null;
   }
 
   validateReservation(input, reservationId = null) {
-    const propertyId = integer(input.propertyId, "Дом", 1);
+    const propertyId = uuid(input.propertyId, "Дом");
     const property = this.getProperty(propertyId);
     if (!property || property.status !== "active") throw new Error("Выберите активный дом");
     const checkInDate = validDate(input.checkInDate, "Дата заезда");
@@ -707,14 +978,17 @@ class DomBookDatabase {
 
   insertNights(reservationId, data) {
     if (data.status === "cancelled" || data.status === "no_show") return;
+    const timestamp = nowIso();
     const effectiveNights = data.actualCheckOutDate
       ? data.nights.filter((night) => night < data.actualCheckOutDate)
       : data.nights;
     effectiveNights.forEach((night) => {
       try {
         this.run(
-          "INSERT INTO reservation_nights(reservation_id, property_id, night_date) VALUES (?, ?, ?)",
-          [reservationId, data.propertyId, night],
+          `INSERT INTO reservation_nights(
+            id, reservation_id, property_id, night_date, created_at, updated_at, version, last_writer
+          ) VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
+          [crypto.randomUUID(), reservationId, data.propertyId, night, timestamp, timestamp, this.writerId],
         );
       } catch (error) {
         if (/UNIQUE constraint failed/.test(error.message)) {
@@ -737,12 +1011,13 @@ class DomBookDatabase {
   }
 
   replaceReservationMeals(reservationId, meals) {
+    const timestamp = nowIso();
     this.run("DELETE FROM reservation_meals WHERE reservation_id = ?", [reservationId]);
     meals.forEach((item) => this.run(
       `INSERT INTO reservation_meals(
-        reservation_id, meal_date, meal_type, amount_minor
-      ) VALUES (?, ?, ?, ?)`,
-      [reservationId, item.date, item.type, item.amountMinor],
+        id, reservation_id, meal_date, meal_type, amount_minor, created_at, updated_at, version, last_writer
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+      [crypto.randomUUID(), reservationId, item.date, item.type, item.amountMinor, timestamp, timestamp, this.writerId],
     ));
   }
 
@@ -750,18 +1025,20 @@ class DomBookDatabase {
     const data = this.validateReservation(input);
     const timestamp = nowIso();
     return this.transaction(() => {
-      const id = this.run(
+      const id = crypto.randomUUID();
+      this.run(
         `INSERT INTO reservations(
-          property_id, guest_name, guest_phone, guest_email, check_in_date, check_out_date,
+          id, property_id, guest_name, guest_phone, guest_email, check_in_date, check_out_date,
           adults, children, status, nightly_rate_minor, accommodation_minor, services_minor,
-          total_minor, prepaid_minor, deposit_minor, deposit_status, notes, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          total_minor, prepaid_minor, deposit_minor, deposit_status, notes, created_at, updated_at,
+          version, last_writer
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
         [
-          data.propertyId, data.guestName, data.guestPhone, data.guestEmail,
+          id, data.propertyId, data.guestName, data.guestPhone, data.guestEmail,
           data.checkInDate, data.checkOutDate, data.adults, data.children, data.status,
           data.nightlyRateMinor, data.accommodationMinor, data.servicesMinor,
           data.totalMinor, data.prepaidMinor, data.depositMinor, data.depositStatus,
-          data.notes, timestamp, timestamp,
+          data.notes, timestamp, timestamp, this.writerId,
         ],
       );
       this.insertNights(id, data);
@@ -772,7 +1049,7 @@ class DomBookDatabase {
   }
 
   updateReservation(id, input) {
-    const reservationId = integer(id, "Бронь", 1);
+    const reservationId = uuid(id, "Бронь");
     if (!this.getReservation(reservationId)) throw new Error("Бронь не найдена");
     const data = this.validateReservation(input, reservationId);
     return this.transaction(() => {
@@ -784,14 +1061,14 @@ class DomBookDatabase {
           nightly_rate_minor = ?, accommodation_minor = ?, services_minor = ?,
           total_minor = ?, prepaid_minor = ?, deposit_minor = ?, deposit_status = ?,
           actual_check_out_date = ?,
-          notes = ?, updated_at = ?
+          notes = ?, updated_at = ?, version = version + 1, last_writer = ?
         WHERE id = ?`,
         [
           data.propertyId, data.guestName, data.guestPhone, data.guestEmail,
           data.checkInDate, data.checkOutDate, data.adults, data.children, data.status,
           data.nightlyRateMinor, data.accommodationMinor, data.servicesMinor,
           data.totalMinor, data.prepaidMinor, data.depositMinor, data.depositStatus,
-          data.actualCheckOutDate, data.notes, nowIso(), reservationId,
+          data.actualCheckOutDate, data.notes, nowIso(), this.writerId, reservationId,
         ],
       );
       this.insertNights(reservationId, data);
@@ -802,18 +1079,21 @@ class DomBookDatabase {
   }
 
   cancelReservation(id) {
-    const reservationId = integer(id, "Бронь", 1);
+    const reservationId = uuid(id, "Бронь");
     if (!this.getReservation(reservationId)) throw new Error("Бронь не найдена");
     return this.transaction(() => {
       this.run("DELETE FROM reservation_nights WHERE reservation_id = ?", [reservationId]);
-      this.run("UPDATE reservations SET status = 'cancelled', updated_at = ? WHERE id = ?", [nowIso(), reservationId]);
+      this.run(
+        "UPDATE reservations SET status = 'cancelled', updated_at = ?, version = version + 1, last_writer = ? WHERE id = ?",
+        [nowIso(), this.writerId, reservationId],
+      );
       this.audit("reservation", reservationId, "cancelled");
       return this.getReservation(reservationId);
     });
   }
 
   deleteReservation(id) {
-    const reservationId = integer(id, "Бронь", 1);
+    const reservationId = uuid(id, "Бронь");
     const reservation = this.getReservation(reservationId);
     if (!reservation) throw new Error("Бронь не найдена");
     if (!["cancelled", "no_show", "checked_out"].includes(reservation.status)) {
@@ -836,7 +1116,7 @@ class DomBookDatabase {
   }
 
   earlyCheckout(id, input) {
-    const reservationId = integer(id, "Бронь", 1);
+    const reservationId = uuid(id, "Бронь");
     const reservation = this.getReservation(reservationId);
     if (!reservation) throw new Error("Бронь не найдена");
     if (!["confirmed", "checked_in", "hold"].includes(reservation.status)) {
@@ -863,8 +1143,9 @@ class DomBookDatabase {
       const totalMinor = accommodationMinor + servicesMinor;
       this.run(
         `UPDATE reservations SET status = 'checked_out', actual_check_out_date = ?,
-          accommodation_minor = ?, services_minor = ?, total_minor = ?, updated_at = ? WHERE id = ?`,
-        [actualDate, accommodationMinor, servicesMinor, totalMinor, nowIso(), reservationId],
+          accommodation_minor = ?, services_minor = ?, total_minor = ?,
+          updated_at = ?, version = version + 1, last_writer = ? WHERE id = ?`,
+        [actualDate, accommodationMinor, servicesMinor, totalMinor, nowIso(), this.writerId, reservationId],
       );
       this.audit("reservation", reservationId, "early_checkout", {
         actualCheckOutDate: actualDate,
@@ -976,19 +1257,26 @@ class DomBookDatabase {
     return ALLOWED_INTERFACE_LANGUAGES.has(language) ? language : "ru";
   }
 
+  upsertSetting(key, value) {
+    const timestamp = nowIso();
+    this.run(
+      `INSERT INTO app_settings(id, setting_key, setting_value, created_at, updated_at, version, last_writer)
+       VALUES (?, ?, ?, ?, ?, 1, ?)
+       ON CONFLICT(setting_key) DO UPDATE SET
+         setting_value = excluded.setting_value,
+         updated_at = excluded.updated_at,
+         version = version + 1,
+         last_writer = excluded.last_writer`,
+      [crypto.randomUUID(), key, value, timestamp, timestamp, this.writerId],
+    );
+  }
+
   setLanguage(language) {
     const normalized = String(language ?? "").trim().toLowerCase();
     if (!ALLOWED_INTERFACE_LANGUAGES.has(normalized)) {
       throw new Error("Доступные языки интерфейса: ru, az, en");
     }
-    this.run(
-      `INSERT INTO app_settings(setting_key, setting_value, updated_at)
-       VALUES ('interface_language', ?, ?)
-       ON CONFLICT(setting_key) DO UPDATE SET
-         setting_value = excluded.setting_value,
-         updated_at = excluded.updated_at`,
-      [normalized, nowIso()],
-    );
+    this.upsertSetting("interface_language", normalized);
     this.audit("settings", null, "language_changed", { language: normalized });
     this.persist();
     return normalized;
