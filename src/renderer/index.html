@@ -24,7 +24,7 @@
       <div class="login-body">
         <div class="login-step is-active" id="loginStepEmail">
           <h2 id="loginHeading">Вход в DomBook</h2>
-          <p class="login-note">Войдите, чтобы синхронизировать брони с облаком. Без входа приложение продолжит работать с локальной базой.</p>
+          <p class="login-note">Войдите, чтобы синхронизировать брони с облаком.</p>
           <form id="loginEmailForm" novalidate>
             <label class="field"><span>Email</span>
               <input id="loginEmail" type="email" maxlength="200" autocomplete="email" inputmode="email" required placeholder="you@example.com">
@@ -48,10 +48,31 @@
             <button class="button ghost login-resend" type="button" id="loginResend">Отправить код ещё раз</button>
           </form>
         </div>
+
+        <div class="login-step" id="loginStepPlan" hidden>
+          <button class="text-button login-back" type="button" id="loginPlanBack">← Назад</button>
+          <h2 id="loginPlanHeading">Выберите тариф</h2>
+          <p class="login-note">Ваш аккаунт создан. Выберите план — его можно изменить позже.</p>
+          <div class="plan-picker">
+            <label class="plan-option">
+              <input type="radio" name="plan" value="free" checked>
+              <span class="plan-option-body">
+                <strong>Бесплатно</strong>
+                <span class="plan-option-sub">1 локация и 1 объект</span>
+              </span>
+            </label>
+            <label class="plan-option">
+              <input type="radio" name="plan" value="business">
+              <span class="plan-option-body">
+                <strong>Business</strong>
+                <span class="plan-option-sub">Без ограничений</span>
+              </span>
+            </label>
+          </div>
+          <div class="form-error" id="loginPlanError" role="alert" hidden></div>
+          <button class="button primary login-submit" type="button" id="loginPlanSubmit">Продолжить</button>
+        </div>
       </div>
-      <footer class="login-footer">
-        <button class="text-button" type="button" id="loginOffline">Продолжить без входа (локально)</button>
-      </footer>
     </div>
   </section>
 

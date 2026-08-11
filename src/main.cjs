@@ -61,15 +61,16 @@ function registerIpc() {
         baseUrl: authApi.baseUrl,
       };
     } catch (error) {
-      // Backend unreachable / session rejected: still report a signed-out or
-      // offline state instead of failing the window. The renderer decides
-      // whether to show login or keep working in local mode.
+      // Backend unreachable / session rejected: report a signed-out state so
+      // the renderer shows only the login screen (app data is gated behind
+      // authentication).
       return { authenticated: false, session: null, baseUrl: authApi.baseUrl, offline: true };
     }
   });
   handle("auth:send", (payload) => authApi.send(payload?.email));
   handle("auth:setup", (payload) => authApi.setup(payload?.email));
   handle("auth:verify", (payload) => authApi.verify(payload?.email, payload?.code));
+  handle("auth:setPlan", (payload) => authApi.setPlan(payload?.plan));
   handle("auth:logout", () => authApi.logout());
 
   handle("dashboard:get", () => database.dashboard());

@@ -1180,10 +1180,7 @@ function bindEvents() {
 
 function showLogin() {
   $("#loginScreen").classList.remove("is-hidden");
-  $("#loginStepEmail").classList.add("is-active");
-  $("#loginStepEmail").hidden = false;
-  $("#loginStepCode").hidden = true;
-  $("#loginStepCode").classList.remove("is-active");
+  showLoginStep("loginStepEmail");
   $("#loginEmailError").hidden = true;
   $("#loginCodeError").hidden = true;
   $("#loginCodeHint").hidden = true;
@@ -1198,6 +1195,22 @@ function hideLogin() {
     screen.classList.add("is-hidden");
     screen.classList.remove("is-leaving");
   }, 260);
+}
+
+function showLoginStep(id) {
+  ["loginStepEmail", "loginStepCode", "loginStepPlan"].forEach((stepId) => {
+    const step = $(`#${stepId}`);
+    const active = stepId === id;
+    step.hidden = !active;
+    step.classList.toggle("is-active", active);
+  });
+}
+
+function showPlanStep() {
+  $("#loginPlanError").hidden = true;
+  showLoginStep("loginStepPlan");
+  $("#loginPlanHeading").textContent = "Выберите тариф";
+  setTimeout(() => $("#loginStepPlan button.login-submit").focus(), 60);
 }
 
 function applySession(session) {
@@ -1261,10 +1274,7 @@ async function requestLoginCode() {
     }
     $("#loginCode").value = "";
     $("#loginCodeError").hidden = true;
-    $("#loginStepEmail").classList.remove("is-active");
-    $("#loginStepEmail").hidden = true;
-    $("#loginStepCode").classList.add("is-active");
-    $("#loginStepCode").hidden = false;
+    showLoginStep("loginStepCode");
     setTimeout(() => $("#loginCode").focus(), 60);
   } catch (error) {
     showError($("#loginEmailError"), error);
@@ -1285,13 +1295,38 @@ async function submitLoginCode() {
   try {
     const result = await unwrap(api.auth.verify(state.loginEmail, code));
     applySession(result);
-    hideLogin();
-    await enterApp();
+    showPlanStep();
   } catch (error) {
     showError($("#loginCodeError"), error);
   } finally {
     setBusy(button, false);
   }
+}
+
+async function submitPlanSelection() {
+  const selected = document.querySelector('input[name="plan"]:checked')?.value;
+  const button = $("#loginPlanSubmit");
+  setBusy(button, true, "Сохранение…");
+  try {
+    if (selected === "business") {
+      const refreshed = await unwrap(api.auth.setPlan("business"));
+      if (refreshed) applySession(refreshed);
+    }
+    await enterAppAfterLogin();
+  } catch (error) {
+    if (error?.status === 404) {
+      showError($("#loginPlanError"), new Error("Смена плана пока недоступна на сервере. Вы можете продолжить на бесплатном тарифе."));
+    } else {
+      showError($("#loginPlanError"), error);
+    }
+  } finally {
+    setBusy(button, false);
+  }
+}
+
+async function enterAppAfterLogin() {
+  hideLogin();
+  await enterApp();
 }
 
 function bindAuthEvents() {
@@ -1305,12 +1340,8 @@ function bindAuthEvents() {
   });
   $("#loginResend").addEventListener("click", requestLoginCode);
   $("#loginBack").addEventListener("click", showLogin);
-  $("#loginOffline").addEventListener("click", () => {
-    clearSessionUI();
-    state.loginEmail = $("#loginEmail").value.trim();
-    hideLogin();
-    enterApp();
-  });
+  $("#loginPlanBack").addEventListener("click", showLogin);
+  $("#loginPlanSubmit").addEventListener("click", submitPlanSelection);
   $("#logoutButton").addEventListener("click", async () => {
     try {
       await api.auth.logout();
@@ -1334,8 +1365,7 @@ async function boot() {
   }
   const hasAuthApi = Boolean(api.auth && api.auth.status);
   if (!hasAuthApi) {
-    hideLogin();
-    await enterApp();
+    showLogin();
     return;
   }
   try {
@@ -1348,8 +1378,8 @@ async function boot() {
       return;
     }
   } catch (error) {
-    // Backend unreachable or no session: show the login screen; the user can
-    // continue in local mode without losing access to their local database.
+    // Backend unreachable or no valid session: show only the login screen.
+    // The app data UI stays gated behind authentication.
     console.warn("Auth restore failed", error);
   }
   showLogin();

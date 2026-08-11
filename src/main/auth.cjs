@@ -13,6 +13,13 @@
 // can be exercised from plain Node tests with a fake HTTP backend.
 
 function createAuthApi({ baseUrl, storage }) {
+  function httpError(message, status, code) {
+    const error = new Error(message);
+    error.status = status;
+    if (code) error.code = code;
+    return error;
+  }
+
   async function request(method, url, body, token) {
     const headers = { Accept: "application/json" };
     if (body !== undefined) headers["Content-Type"] = "application/json";
@@ -79,6 +86,26 @@ function createAuthApi({ baseUrl, storage }) {
     return data;
   }
 
+  // Owner-only plan change via PATCH /account/plan (ships with the phase-2
+  // subscriptions backend; against older local APIs it 404s). Saves the
+  // returned plan into the stored session and refreshes the rest via /auth/me
+  // so the sidebar always reflects the current plan. Errors (including an
+  // unsupported backend) propagate for the caller to surface gracefully.
+  async function setPlan(plan) {
+    const session = await storage.load();
+    if (!session?.token) throw httpError("Нет активной сессии", 401);
+    const data = await request("PATCH", "/account/plan", { plan }, session.token);
+    let refreshed = { ...session, ...data, token: session.token };
+    try {
+      const me = await request("GET", "/auth/me", undefined, session.token);
+      refreshed = { ...refreshed, ...me, token: session.token };
+    } catch {
+      // /auth/me is best-effort; the PATCH response already carries the plan.
+    }
+    await storage.save(refreshed);
+    return refreshed;
+  }
+
   // Validate/refresh the stored session against the backend. Returns the
   // restored session (`user`, `accountId`, `accountName`, `plan`) or null when
   // there is no stored token or the token is rejected/unreachable.
@@ -120,6 +147,7 @@ function createAuthApi({ baseUrl, storage }) {
     setup,
     send,
     verify,
+    setPlan,
     restore,
     logout,
     clear,
