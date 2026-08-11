@@ -3,8 +3,8 @@ const path = require("node:path");
 const fs = require("node:fs/promises");
 const { pathToFileURL } = require("node:url");
 const { DomBookDatabase } = require("./database.cjs");
-const { createAuthApi } = require("./auth.cjs");
-const { createAuthSessionStore } = require("./auth-session.cjs");
+const { createAuthApi } = require("./main/auth.cjs");
+const { createAuthSessionStore } = require("./main/auth-session.cjs");
 
 let mainWindow;
 let database;
