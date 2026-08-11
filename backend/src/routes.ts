@@ -14,6 +14,7 @@ import {
   validateReservation,
 } from "./validation";
 import { SYNC_TABLES, type SyncTable } from "./types";
+import { assertCanCreatePlace, assertCanCreateProperty, isKnownPlan } from "./plans";
 
 function ctx(c: RouteContext) {
   return c.auth!;
@@ -90,6 +91,20 @@ export function buildRouter(repo: Repository, auth: AuthService): Router {
     return json({ ok: true });
   }, "user");
 
+  // Manual plan change (owner-only). Billing automation lands later; for now a
+  // plan switch is applied directly. Returns the fresh account so the client
+  // can re-sync /auth/me state.
+  router.patch("/account/plan", async (c) => {
+    const me = ctx(c);
+    ensureRole(me, ["owner"]);
+    const body = await readJson(c.request);
+    const plan = String(body.plan ?? "").trim();
+    if (!isKnownPlan(plan)) throw badRequest("validation_error", "Некорректный тариф плана");
+    const updated = await repo.updateAccountPlan(me.accountId, plan);
+    if (!updated) throw unauthorized_session();
+    return json({ plan: updated.plan });
+  }, "user");
+
   router.get("/auth/invites", async (c) => {
     const me = ctx(c);
     ensureRole(me, ["owner", "admin"]);
@@ -136,14 +151,18 @@ export function buildRouter(repo: Repository, auth: AuthService): Router {
   }, "user");
 
   router.post("/places", async (c) => {
+    const me = ctx(c);
+    const current = await repo.countActivePlaces(me.accountId);
+    const account = await repo.getAccount(me.accountId);
+    assertCanCreatePlace(current, account?.plan ?? "free");
     const data = validatePlace(await readJson(c.request));
     assertUniqueName(
-      await repo.listPlaces(ctx(c).accountId),
+      await repo.listPlaces(me.accountId),
       data.name,
       null,
       "Дом отдыха с таким названием уже существует",
     );
-    const place = await repo.createPlace(ctx(c).accountId, data, device(c));
+    const place = await repo.createPlace(me.accountId, data, device(c));
     return json({ place }, 201);
   }, "user");
 
@@ -194,6 +213,9 @@ export function buildRouter(repo: Repository, auth: AuthService): Router {
 
   router.post("/properties", async (c) => {
     const me = ctx(c);
+    const currentProperties = await repo.countActiveProperties(me.accountId);
+    const account = await repo.getAccount(me.accountId);
+    assertCanCreateProperty(currentProperties, account?.plan ?? "free");
     const body = await readJson(c.request);
     const data = await validateProperty(body, (id) => repo.getPlace(me.accountId, id));
     assertUniqueName(

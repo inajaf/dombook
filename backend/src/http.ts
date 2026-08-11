@@ -24,6 +24,13 @@ export function forbidden(code = "forbidden", message = "Forbidden"): ApiError {
   return new ApiError(403, code, message);
 }
 
+// 403 for hitting a plan quota. The message is user-facing Russian that names
+// the current plan and its cap so a client can render an upgrade prompt.
+// `limit` details expose the machine-readable cap to the caller.
+export function planLimitError(resource: "places" | "properties", limit: number, message: string): ApiError {
+  return new ApiError(403, "plan_limit", message, { resource, limit });
+}
+
 export function unauthorized(message = "Unauthorized"): ApiError {
   return new ApiError(401, "unauthorized", message);
 }

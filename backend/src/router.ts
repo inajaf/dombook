@@ -45,6 +45,10 @@ export class Router {
     this.add("PUT", path, handler, auth);
   }
 
+  patch(path: string, handler: Handler, auth?: "user" | "admin"): void {
+    this.add("PATCH", path, handler, auth);
+  }
+
   delete(path: string, handler: Handler, auth?: "user" | "admin"): void {
     this.add("DELETE", path, handler, auth);
   }
