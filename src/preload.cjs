@@ -40,4 +40,11 @@ contextBridge.exposeInMainWorld("domBook", {
     setLanguage: (language) => invoke("system:setLanguage", { language }),
     openBackupDirectory: () => invoke("system:openBackupDirectory"),
   },
+  auth: {
+    status: () => invoke("auth:status"),
+    send: (email) => invoke("auth:send", { email }),
+    setup: (email) => invoke("auth:setup", { email }),
+    verify: (email, code) => invoke("auth:verify", { email, code }),
+    logout: () => invoke("auth:logout"),
+  },
 });

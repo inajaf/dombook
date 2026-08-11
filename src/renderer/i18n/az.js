@@ -224,6 +224,18 @@ window.DomBookLocales.az = {
     "Архивировать": "Arxivləşdir",
     "ночь": "gecə",
     "ночи": "gecə",
-    "ночей": "gecə"
+    "ночей": "gecə",
+    "Вход в DomBook": "DomBook-ə giriş",
+    "Войдите, чтобы синхронизировать брони с облаком. Без входа приложение продолжит работать с локальной базой.": "Rezervasiyaları buludla sinxronlaşdırmaq üçün daxil olun. Daxil olmadan proqram lokal verilənlər bazası ilə işləməyə davam edir.",
+    "Email": "E-poçt",
+    "Получить код": "Kodu al",
+    "Введите код": "Kodu daxil edin",
+    "Мы отправили шестизначный код на ": "Altı rəqəmli kodu bu ünvana göndərdik: ",
+    "Код из письма": "Məktubdakı kod",
+    "Войти": "Daxil ol",
+    "Отправить код ещё раз": "Kodu yenidən göndər",
+    "Продолжить без входа (локально)": "Giriş etmədən davam et (lokal)",
+    "← Назад": "← Geri",
+    "Выйти": "Çıxış"
   },
 };

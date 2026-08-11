@@ -224,6 +224,18 @@ window.DomBookLocales.en = {
     "Архивировать": "Archive",
     "ночь": "night",
     "ночи": "nights",
-    "ночей": "nights"
+    "ночей": "nights",
+    "Вход в DomBook": "Sign in to DomBook",
+    "Войдите, чтобы синхронизировать брони с облаком. Без входа приложение продолжит работать с локальной базой.": "Sign in to sync bookings with the cloud. Without signing in the app keeps working with the local database.",
+    "Email": "Email",
+    "Получить код": "Get code",
+    "Введите код": "Enter the code",
+    "Мы отправили шестизначный код на ": "We sent a six-digit code to ",
+    "Код из письма": "Code from email",
+    "Войти": "Sign in",
+    "Отправить код ещё раз": "Resend code",
+    "Продолжить без входа (локально)": "Continue without signing in (local)",
+    "← Назад": "← Back",
+    "Выйти": "Sign out"
   },
 };

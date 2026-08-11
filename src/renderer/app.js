@@ -36,6 +36,8 @@ const state = {
   reservationFilter: "all",
   search: "",
   expandedGroups: new Set(),
+  session: null,
+  authBaseUrl: null,
 };
 
 const api = window.domBook || createBrowserDemoApi();
@@ -1176,14 +1178,185 @@ function bindEvents() {
   });
 }
 
-async function init() {
-  bindEvents();
+function showLogin() {
+  $("#loginScreen").classList.remove("is-hidden");
+  $("#loginStepEmail").classList.add("is-active");
+  $("#loginStepEmail").hidden = false;
+  $("#loginStepCode").hidden = true;
+  $("#loginStepCode").classList.remove("is-active");
+  $("#loginEmailError").hidden = true;
+  $("#loginCodeError").hidden = true;
+  $("#loginCodeHint").hidden = true;
+  $("#loginEmail").value = state.loginEmail || "";
+  setTimeout(() => $("#loginEmail").focus(), 60);
+}
+
+function hideLogin() {
+  const screen = $("#loginScreen");
+  screen.classList.add("is-leaving");
+  setTimeout(() => {
+    screen.classList.add("is-hidden");
+    screen.classList.remove("is-leaving");
+  }, 260);
+}
+
+function applySession(session) {
+  state.session = session;
+  const container = $("#cloudStatus");
+  if (session) {
+    const email = session.user?.email || session.accountName || "";
+    const planLabel = { free: "Бесплатный", pro: "Pro", business: "Business" }[session.plan] || session.plan || "";
+    $("#cloudAccount").innerHTML = `<strong>${escapeHtml(session.accountName || email)}</strong><span>${escapeHtml(planLabel)}</span>`;
+    container.hidden = false;
+  } else {
+    container.hidden = true;
+  }
+}
+
+function clearSessionUI() {
+  state.session = null;
+  $("#cloudStatus").hidden = true;
+  $("#cloudAccount").innerHTML = "";
+}
+
+async function enterApp() {
   try {
     await refreshCore();
     navigate("dashboard");
   } catch (error) {
     toast(`Не удалось загрузить базу: ${error.message}`, "error");
   }
+}
+
+async function requestLoginCode() {
+  const email = $("#loginEmail").value.trim();
+  $("#loginEmailError").hidden = true;
+  if (!email) {
+    showError($("#loginEmailError"), new Error("Укажите email"));
+    return;
+  }
+  const button = $("#loginEmailSubmit");
+  setBusy(button, true, "Отправка…");
+  try {
+    state.loginEmail = email;
+    let result = await unwrap(api.auth.send(email));
+    if (result?.loginable === false) {
+      try {
+        await unwrap(api.auth.setup(email));
+        result = await unwrap(api.auth.send(email));
+      } catch (setupError) {
+        if (setupError?.code !== "user_exists") throw setupError;
+      }
+    }
+    if (result?.loginable === false) {
+      throw new Error("Учётная запись для этого email не найдена. Обратитесь к владельцу аккаунта.");
+    }
+    $("#loginCodeEmail").textContent = email;
+    const codeHint = $("#loginCodeHint");
+    if (result?.code) {
+      codeHint.textContent = `Dev-режим: ваш код — ${result.code}`;
+      codeHint.hidden = false;
+    } else {
+      codeHint.hidden = true;
+    }
+    $("#loginCode").value = "";
+    $("#loginCodeError").hidden = true;
+    $("#loginStepEmail").classList.remove("is-active");
+    $("#loginStepEmail").hidden = true;
+    $("#loginStepCode").classList.add("is-active");
+    $("#loginStepCode").hidden = false;
+    setTimeout(() => $("#loginCode").focus(), 60);
+  } catch (error) {
+    showError($("#loginEmailError"), error);
+  } finally {
+    setBusy(button, false);
+  }
+}
+
+async function submitLoginCode() {
+  const code = $("#loginCode").value.trim();
+  $("#loginCodeError").hidden = true;
+  if (!/^\d{6}$/.test(code)) {
+    showError($("#loginCodeError"), new Error("Код состоит из 6 цифр"));
+    return;
+  }
+  const button = $("#loginCodeSubmit");
+  setBusy(button, true, "Вход…");
+  try {
+    const result = await unwrap(api.auth.verify(state.loginEmail, code));
+    applySession(result);
+    hideLogin();
+    await enterApp();
+  } catch (error) {
+    showError($("#loginCodeError"), error);
+  } finally {
+    setBusy(button, false);
+  }
+}
+
+function bindAuthEvents() {
+  $("#loginEmailForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    requestLoginCode();
+  });
+  $("#loginCodeForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    submitLoginCode();
+  });
+  $("#loginResend").addEventListener("click", requestLoginCode);
+  $("#loginBack").addEventListener("click", showLogin);
+  $("#loginOffline").addEventListener("click", () => {
+    clearSessionUI();
+    state.loginEmail = $("#loginEmail").value.trim();
+    hideLogin();
+    enterApp();
+  });
+  $("#logoutButton").addEventListener("click", async () => {
+    try {
+      await api.auth.logout();
+    } catch (error) {
+      console.warn("Logout failed; clearing local session", error);
+    }
+    clearSessionUI();
+    $("#loginEmail").value = state.loginEmail || "";
+    showLogin();
+  });
+}
+
+async function boot() {
+  bindEvents();
+  bindAuthEvents();
+  try {
+    const systemInfo = await unwrap(api.system.info());
+    window.i18n?.setLanguage(systemInfo.language || "ru");
+  } catch {
+    // language falls back to Russian if the local database is not reachable yet
+  }
+  const hasAuthApi = Boolean(api.auth && api.auth.status);
+  if (!hasAuthApi) {
+    hideLogin();
+    await enterApp();
+    return;
+  }
+  try {
+    const status = await unwrap(api.auth.status());
+    state.authBaseUrl = status.baseUrl;
+    if (status?.authenticated && status.session) {
+      applySession(status.session);
+      hideLogin();
+      await enterApp();
+      return;
+    }
+  } catch (error) {
+    // Backend unreachable or no session: show the login screen; the user can
+    // continue in local mode without losing access to their local database.
+    console.warn("Auth restore failed", error);
+  }
+  showLogin();
+}
+
+async function init() {
+  await boot();
 }
 
 function createBrowserDemoApi() {
