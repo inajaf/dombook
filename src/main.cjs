@@ -1,13 +1,36 @@
-const { app, BrowserWindow, ipcMain, Menu, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, Menu, shell, safeStorage } = require("electron");
 const path = require("node:path");
+const fs = require("node:fs/promises");
 const { pathToFileURL } = require("node:url");
 const { DomBookDatabase } = require("./database.cjs");
+const { createAuthApi } = require("./main/auth.cjs");
+const { createAuthSessionStore } = require("./main/auth-session.cjs");
 
 let mainWindow;
 let database;
+let authApi;
 
 app.setName("DomBook");
 app.setPath("userData", path.join(app.getPath("appData"), "dombook-desktop"));
+
+function electronEncryptionAvailable() {
+  try {
+    return safeStorage.isEncryptionAvailable();
+  } catch {
+    return false;
+  }
+}
+
+function createAuthStore(filePath) {
+  return createAuthSessionStore({
+    filePath,
+    readFile: (p) => fs.readFile(p),
+    writeFile: (p, data) => fs.writeFile(p, data),
+    encrypt: (text) => safeStorage.encryptString(text),
+    decrypt: (buffer) => safeStorage.decryptString(buffer),
+    isEncryptionAvailable: electronEncryptionAvailable,
+  });
+}
 
 function ok(data) {
   return { ok: true, data };
@@ -29,6 +52,27 @@ function handle(channel, action) {
 }
 
 function registerIpc() {
+  handle("auth:status", async () => {
+    try {
+      const session = await authApi.restore();
+      return {
+        authenticated: Boolean(session),
+        session,
+        baseUrl: authApi.baseUrl,
+      };
+    } catch (error) {
+      // Backend unreachable / session rejected: report a signed-out state so
+      // the renderer shows only the login screen (app data is gated behind
+      // authentication).
+      return { authenticated: false, session: null, baseUrl: authApi.baseUrl, offline: true };
+    }
+  });
+  handle("auth:send", (payload) => authApi.send(payload?.email));
+  handle("auth:setup", (payload) => authApi.setup(payload?.email));
+  handle("auth:verify", (payload) => authApi.verify(payload?.email, payload?.code));
+  handle("auth:setPlan", (payload) => authApi.setPlan(payload?.plan));
+  handle("auth:logout", () => authApi.logout());
+
   handle("dashboard:get", () => database.dashboard());
   handle("calendar:get", (payload) => database.calendar(payload?.days ?? 14));
 
@@ -217,6 +261,9 @@ app.whenReady().then(async () => {
       backupDir: path.join(userData, "backups"),
       seed: true,
     }).init();
+    const baseUrl = process.env.DOMBOOK_API_URL || "http://127.0.0.1:8787";
+    const store = createAuthStore(path.join(userData, "auth-session.bin"));
+    authApi = createAuthApi({ baseUrl, storage: store });
     registerIpc();
     createMenu();
     createWindow();

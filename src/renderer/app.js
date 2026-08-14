@@ -36,6 +36,8 @@ const state = {
   reservationFilter: "all",
   search: "",
   expandedGroups: new Set(),
+  session: null,
+  authBaseUrl: null,
 };
 
 const api = window.domBook || createBrowserDemoApi();
@@ -1176,14 +1178,215 @@ function bindEvents() {
   });
 }
 
-async function init() {
-  bindEvents();
+function showLogin() {
+  $("#loginScreen").classList.remove("is-hidden");
+  showLoginStep("loginStepEmail");
+  $("#loginEmailError").hidden = true;
+  $("#loginCodeError").hidden = true;
+  $("#loginCodeHint").hidden = true;
+  $("#loginEmail").value = state.loginEmail || "";
+  setTimeout(() => $("#loginEmail").focus(), 60);
+}
+
+function hideLogin() {
+  const screen = $("#loginScreen");
+  screen.classList.add("is-leaving");
+  setTimeout(() => {
+    screen.classList.add("is-hidden");
+    screen.classList.remove("is-leaving");
+  }, 260);
+}
+
+function showLoginStep(id) {
+  ["loginStepEmail", "loginStepCode", "loginStepPlan"].forEach((stepId) => {
+    const step = $(`#${stepId}`);
+    const active = stepId === id;
+    step.hidden = !active;
+    step.classList.toggle("is-active", active);
+  });
+}
+
+function showPlanStep() {
+  $("#loginPlanError").hidden = true;
+  showLoginStep("loginStepPlan");
+  $("#loginPlanHeading").textContent = "Выберите тариф";
+  setTimeout(() => $("#loginStepPlan button.login-submit").focus(), 60);
+}
+
+function applySession(session) {
+  state.session = session;
+  const container = $("#cloudStatus");
+  if (session) {
+    const email = session.user?.email || session.accountName || "";
+    const planLabel = { free: "Бесплатный", pro: "Pro", business: "Business" }[session.plan] || session.plan || "";
+    $("#cloudAccount").innerHTML = `<strong>${escapeHtml(session.accountName || email)}</strong><span>${escapeHtml(planLabel)}</span>`;
+    container.hidden = false;
+  } else {
+    container.hidden = true;
+  }
+}
+
+function clearSessionUI() {
+  state.session = null;
+  $("#cloudStatus").hidden = true;
+  $("#cloudAccount").innerHTML = "";
+}
+
+async function enterApp() {
   try {
     await refreshCore();
     navigate("dashboard");
   } catch (error) {
     toast(`Не удалось загрузить базу: ${error.message}`, "error");
   }
+}
+
+async function requestLoginCode() {
+  const email = $("#loginEmail").value.trim();
+  $("#loginEmailError").hidden = true;
+  if (!email) {
+    showError($("#loginEmailError"), new Error("Укажите email"));
+    return;
+  }
+  const button = $("#loginEmailSubmit");
+  setBusy(button, true, "Отправка…");
+  try {
+    state.loginEmail = email;
+    let result = await unwrap(api.auth.send(email));
+    if (result?.loginable === false) {
+      try {
+        await unwrap(api.auth.setup(email));
+        result = await unwrap(api.auth.send(email));
+      } catch (setupError) {
+        if (setupError?.code !== "user_exists") throw setupError;
+      }
+    }
+    if (result?.loginable === false) {
+      throw new Error("Учётная запись для этого email не найдена. Обратитесь к владельцу аккаунта.");
+    }
+    $("#loginCodeEmail").textContent = email;
+    const codeHint = $("#loginCodeHint");
+    if (result?.code) {
+      codeHint.textContent = `Dev-режим: ваш код — ${result.code}`;
+      codeHint.hidden = false;
+    } else {
+      codeHint.hidden = true;
+    }
+    $("#loginCode").value = "";
+    $("#loginCodeError").hidden = true;
+    showLoginStep("loginStepCode");
+    setTimeout(() => $("#loginCode").focus(), 60);
+  } catch (error) {
+    showError($("#loginEmailError"), error);
+  } finally {
+    setBusy(button, false);
+  }
+}
+
+async function submitLoginCode() {
+  const code = $("#loginCode").value.trim();
+  $("#loginCodeError").hidden = true;
+  if (!/^\d{6}$/.test(code)) {
+    showError($("#loginCodeError"), new Error("Код состоит из 6 цифр"));
+    return;
+  }
+  const button = $("#loginCodeSubmit");
+  setBusy(button, true, "Вход…");
+  try {
+    const result = await unwrap(api.auth.verify(state.loginEmail, code));
+    applySession(result);
+    showPlanStep();
+  } catch (error) {
+    showError($("#loginCodeError"), error);
+  } finally {
+    setBusy(button, false);
+  }
+}
+
+async function submitPlanSelection() {
+  const selected = document.querySelector('input[name="plan"]:checked')?.value;
+  const button = $("#loginPlanSubmit");
+  setBusy(button, true, "Сохранение…");
+  try {
+    if (selected === "business") {
+      const refreshed = await unwrap(api.auth.setPlan("business"));
+      if (refreshed) applySession(refreshed);
+    }
+    await enterAppAfterLogin();
+  } catch (error) {
+    if (error?.status === 404) {
+      showError($("#loginPlanError"), new Error("Смена плана пока недоступна на сервере. Вы можете продолжить на бесплатном тарифе."));
+    } else {
+      showError($("#loginPlanError"), error);
+    }
+  } finally {
+    setBusy(button, false);
+  }
+}
+
+async function enterAppAfterLogin() {
+  hideLogin();
+  await enterApp();
+}
+
+function bindAuthEvents() {
+  $("#loginEmailForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    requestLoginCode();
+  });
+  $("#loginCodeForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    submitLoginCode();
+  });
+  $("#loginResend").addEventListener("click", requestLoginCode);
+  $("#loginBack").addEventListener("click", showLogin);
+  $("#loginPlanBack").addEventListener("click", showLogin);
+  $("#loginPlanSubmit").addEventListener("click", submitPlanSelection);
+  $("#logoutButton").addEventListener("click", async () => {
+    try {
+      await api.auth.logout();
+    } catch (error) {
+      console.warn("Logout failed; clearing local session", error);
+    }
+    clearSessionUI();
+    $("#loginEmail").value = state.loginEmail || "";
+    showLogin();
+  });
+}
+
+async function boot() {
+  bindEvents();
+  bindAuthEvents();
+  try {
+    const systemInfo = await unwrap(api.system.info());
+    window.i18n?.setLanguage(systemInfo.language || "ru");
+  } catch {
+    // language falls back to Russian if the local database is not reachable yet
+  }
+  const hasAuthApi = Boolean(api.auth && api.auth.status);
+  if (!hasAuthApi) {
+    showLogin();
+    return;
+  }
+  try {
+    const status = await unwrap(api.auth.status());
+    state.authBaseUrl = status.baseUrl;
+    if (status?.authenticated && status.session) {
+      applySession(status.session);
+      hideLogin();
+      await enterApp();
+      return;
+    }
+  } catch (error) {
+    // Backend unreachable or no valid session: show only the login screen.
+    // The app data UI stays gated behind authentication.
+    console.warn("Auth restore failed", error);
+  }
+  showLogin();
+}
+
+async function init() {
+  await boot();
 }
 
 function createBrowserDemoApi() {
