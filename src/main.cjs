@@ -1,13 +1,36 @@
-const { app, BrowserWindow, ipcMain, Menu, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, Menu, shell, safeStorage } = require("electron");
 const path = require("node:path");
+const fs = require("node:fs/promises");
 const { pathToFileURL } = require("node:url");
 const { DomBookDatabase } = require("./database.cjs");
+const { createAuthApi } = require("./main/auth.cjs");
+const { createAuthSessionStore } = require("./main/auth-session.cjs");
 
 let mainWindow;
 let database;
+let authApi;
 
 app.setName("DomBook");
 app.setPath("userData", path.join(app.getPath("appData"), "dombook-desktop"));
+
+function electronEncryptionAvailable() {
+  try {
+    return safeStorage.isEncryptionAvailable();
+  } catch {
+    return false;
+  }
+}
+
+function createAuthStore(filePath) {
+  return createAuthSessionStore({
+    filePath,
+    readFile: (p) => fs.readFile(p),
+    writeFile: (p, data) => fs.writeFile(p, data),
+    encrypt: (text) => safeStorage.encryptString(text),
+    decrypt: (buffer) => safeStorage.decryptString(buffer),
+    isEncryptionAvailable: electronEncryptionAvailable,
+  });
+}
 
 function ok(data) {
   return { ok: true, data };
@@ -29,6 +52,27 @@ function handle(channel, action) {
 }
 
 function registerIpc() {
+  handle("auth:status", async () => {
+    try {
+      const session = await authApi.restore();
+      return {
+        authenticated: Boolean(session),
+        session,
+        baseUrl: authApi.baseUrl,
+      };
+    } catch (error) {
+      // Backend unreachable / session rejected: report a signed-out state so
+      // the renderer shows only the login screen (app data is gated behind
+      // authentication).
+      return { authenticated: false, session: null, baseUrl: authApi.baseUrl, offline: true };
+    }
+  });
+  handle("auth:send", (payload) => authApi.send(payload?.email));
+  handle("auth:setup", (payload) => authApi.setup(payload?.email));
+  handle("auth:verify", (payload) => authApi.verify(payload?.email, payload?.code));
+  handle("auth:setPlan", (payload) => authApi.setPlan(payload?.plan));
+  handle("auth:logout", () => authApi.logout());
+
   handle("dashboard:get", () => database.dashboard());
   handle("calendar:get", (payload) => database.calendar(payload?.days ?? 14));
 
@@ -68,7 +112,7 @@ function registerIpc() {
 
 function createWindow() {
   const rendererPath = path.join(__dirname, "renderer", "index.html");
-  const rendererUrl = pathToFileURL(rendererPath).href;
+  const iconPath = path.join(__dirname, "assets", "dombook-icon.png");
   mainWindow = new BrowserWindow({
     width: 1380,
     height: 900,
@@ -76,7 +120,8 @@ function createWindow() {
     minHeight: 680,
     backgroundColor: "#f4f7f5",
     title: "DomBook",
-    show: false,
+    icon: iconPath,
+    show: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -87,15 +132,27 @@ function createWindow() {
 
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   mainWindow.webContents.on("will-navigate", (event, navigationUrl) => {
-    if (navigationUrl !== rendererUrl) event.preventDefault();
+    if (!navigationUrl.startsWith("file://")) {
+      event.preventDefault();
+    }
   });
-  mainWindow.loadFile(rendererPath);
-  mainWindow.once("ready-to-show", () => mainWindow.show());
+  mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
+    console.error("Failed to load:", errorCode, errorDescription, validatedURL);
+  });
+  mainWindow.loadFile(rendererPath).then(() => {
+    if (!mainWindow.isDestroyed()) {
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  }).catch((err) => {
+    console.error("loadFile error:", err);
+  });
 }
 
 function createMenu(language = database?.getLanguage() || "ru") {
   const labels = {
     ru: {
+      file: "Файл",
       about: "О программе",
       quit: "Выйти",
       edit: "Правка",
@@ -111,6 +168,7 @@ function createMenu(language = database?.getLanguage() || "ru") {
       devTools: "Инструменты разработчика",
     },
     az: {
+      file: "Fayl",
       about: "Proqram haqqında",
       quit: "Çıxış",
       edit: "Düzəliş",
@@ -126,6 +184,7 @@ function createMenu(language = database?.getLanguage() || "ru") {
       devTools: "Tərtibatçı alətləri",
     },
     en: {
+      file: "File",
       about: "About",
       quit: "Quit",
       edit: "Edit",
@@ -140,7 +199,22 @@ function createMenu(language = database?.getLanguage() || "ru") {
       fullscreen: "Full Screen",
       devTools: "Developer Tools",
     },
-  }[language] || null;
+  }[language] || {
+    file: "File",
+    about: "About",
+    quit: "Quit",
+    edit: "Edit",
+    view: "View",
+    undo: "Undo",
+    redo: "Redo",
+    cut: "Cut",
+    copy: "Copy",
+    paste: "Paste",
+    selectAll: "Select All",
+    reload: "Reload",
+    fullscreen: "Full Screen",
+    devTools: "Developer Tools",
+  };
   const appMenu = process.platform === "darwin"
     ? [
         { role: "about", label: labels.about },
@@ -150,7 +224,7 @@ function createMenu(language = database?.getLanguage() || "ru") {
     : [{ role: "quit", label: labels.quit }];
   const template = [
     {
-      label: process.platform === "darwin" ? "DomBook" : "Файл",
+      label: process.platform === "darwin" ? "DomBook" : labels.file,
       submenu: appMenu,
     },
     {
@@ -178,21 +252,30 @@ function createMenu(language = database?.getLanguage() || "ru") {
 }
 
 app.whenReady().then(async () => {
-  const iconPath = path.join(__dirname, "assets", "dombook-icon-transparent.png");
-  if (process.platform === "darwin") app.dock.setIcon(iconPath);
-  const userData = app.getPath("userData");
-  database = await new DomBookDatabase({
-    filePath: path.join(userData, "dombook.sqlite"),
-    backupDir: path.join(userData, "backups"),
-    seed: true,
-  }).init();
-  registerIpc();
-  createMenu();
-  createWindow();
+  try {
+    const iconPath = path.join(__dirname, "assets", "dombook-icon-transparent.png");
+    if (process.platform === "darwin") app.dock.setIcon(iconPath);
+    const userData = app.getPath("userData");
+    database = await new DomBookDatabase({
+      filePath: path.join(userData, "dombook.sqlite"),
+      backupDir: path.join(userData, "backups"),
+      seed: true,
+    }).init();
+    const baseUrl = process.env.DOMBOOK_API_URL || "http://127.0.0.1:8787";
+    const store = createAuthStore(path.join(userData, "auth-session.bin"));
+    authApi = createAuthApi({ baseUrl, storage: store });
+    registerIpc();
+    createMenu();
+    createWindow();
 
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
+    app.on("activate", () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
+  } catch (error) {
+    console.error("App startup error:", error);
+  }
+}).catch((error) => {
+  console.error("Electron whenReady error:", error);
 });
 
 app.on("window-all-closed", () => {

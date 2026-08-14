@@ -262,7 +262,13 @@ class DomBookDatabase {
   }
 
   async init() {
-    const wasmPath = require.resolve("sql.js/dist/sql-wasm.wasm");
+    let wasmPath = require.resolve("sql.js/dist/sql-wasm.wasm");
+    if (wasmPath.includes("app.asar")) {
+      const unpackedPath = wasmPath.replace("app.asar", "app.asar.unpacked");
+      if (fs.existsSync(unpackedPath)) {
+        wasmPath = unpackedPath;
+      }
+    }
     this.SQL = await initSqlJs({ locateFile: () => wasmPath });
     fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
     fs.mkdirSync(this.backupDir, { recursive: true });
