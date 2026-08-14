@@ -1072,6 +1072,49 @@ export class Repository {
     return Object.fromEntries(rows.map((row) => [row.plan, Number(row.n)]));
   }
 
+  // -- plan enforcement -----------------------------------------------------
+
+  // Count of currently active (non-archived, non-deleted) places. Only these
+  // count toward the plan's maxPlaces; archived/deleted rows do not.
+  async countActivePlaces(tenantId: string): Promise<number> {
+    const result = await this.prep(
+      "SELECT COUNT(*) AS n FROM places WHERE tenant_id = ? AND status = 'active' AND deleted_at IS NULL",
+      [tenantId],
+    ).first<{ n: number }>();
+    return Number(result?.n ?? 0);
+  }
+
+  // Same semantics as countActivePlaces, for properties (@see plans.ts).
+  async countActiveProperties(tenantId: string): Promise<number> {
+    const result = await this.prep(
+      "SELECT COUNT(*) AS n FROM properties WHERE tenant_id = ? AND status = 'active' AND deleted_at IS NULL",
+      [tenantId],
+    ).first<{ n: number }>();
+    return Number(result?.n ?? 0);
+  }
+
+  // Changes an account's plan. Returns the updated account, or null when the
+  // account does not exist. Used by the owner PATCH and the admin endpoint.
+  async updateAccountPlan(id: string, plan: string): Promise<Account | null> {
+    const existing = await this.getAccount(id);
+    if (!existing) return null;
+    const now = nowIso();
+    await this.prep(
+      "UPDATE accounts SET plan = ?, updated_at = ? WHERE id = ?",
+      [plan, now, id],
+    ).run();
+    await this.audit(id, "account", id, "plan.updated", { from: existing.plan, to: plan });
+    return this.getAccount(id);
+  }
+
+  // Plan definitions joined with the number of accounts currently on each plan.
+  async listPlansWithAccountCounts(): Promise<{ plan: string; accounts: number }[]> {
+    const rows = allRows<{ plan: string; n: number }>(
+      await this.db.prepare("SELECT plan, COUNT(*) AS n FROM accounts GROUP BY plan").all(),
+    );
+    return rows.map((row) => ({ plan: row.plan, accounts: Number(row.n) }));
+  }
+
   // -- helpers --------------------------------------------------------------
 
   private auditStmt(

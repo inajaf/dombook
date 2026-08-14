@@ -73,6 +73,9 @@ describe("places CRUD", () => {
 
   it("rejects a duplicate place name and missing required fields", async () => {
     const { token } = await createAccount("places4@example.test", "Дом");
+    // Two creates are intentional here; run on business so the plan's one-place
+    // limit does not block the duplicate-name validation being tested.
+    await api("PATCH", "/account/plan", { token, body: { plan: "business" } });
     await makePlace(token, { name: "Уникальное название" });
 
     const duplicate = await api("POST", "/places", { token, body: placePayload({ name: "уникальное НАЗВАНИЕ" }) });

@@ -40,6 +40,9 @@ describe("sync pull/push", () => {
 
   it("incremental pull with `since` only returns new changes", async () => {
     const { token } = await createAccount("sync2@example.test", "Дом");
+    // The assertions need two places in one account; run on business so the
+    // free plan's one-place limit does not cap this sync scenario.
+    await api("PATCH", "/account/plan", { token, body: { plan: "business" } });
     await makePlace(token, { name: "Первый дом" });
 
     const afterFirst = await api("GET", "/sync/pull?since=0", { token });
