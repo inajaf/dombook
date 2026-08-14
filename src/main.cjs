@@ -68,7 +68,6 @@ function registerIpc() {
 
 function createWindow() {
   const rendererPath = path.join(__dirname, "renderer", "index.html");
-  const rendererUrl = pathToFileURL(rendererPath).href;
   const iconPath = path.join(__dirname, "assets", "dombook-icon.png");
   mainWindow = new BrowserWindow({
     width: 1380,
@@ -89,7 +88,12 @@ function createWindow() {
 
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   mainWindow.webContents.on("will-navigate", (event, navigationUrl) => {
-    if (navigationUrl !== rendererUrl) event.preventDefault();
+    if (!navigationUrl.startsWith("file://")) {
+      event.preventDefault();
+    }
+  });
+  mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
+    console.error("Failed to load:", errorCode, errorDescription, validatedURL);
   });
   mainWindow.loadFile(rendererPath);
   mainWindow.once("ready-to-show", () => mainWindow.show());
