@@ -95,8 +95,16 @@ function createWindow() {
   mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
     console.error("Failed to load:", errorCode, errorDescription, validatedURL);
   });
-  mainWindow.loadFile(rendererPath);
-  mainWindow.once("ready-to-show", () => mainWindow.show());
+  mainWindow.once("ready-to-show", () => {
+    mainWindow.show();
+  });
+  mainWindow.loadFile(rendererPath).then(() => {
+    if (!mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+      mainWindow.show();
+    }
+  }).catch((err) => {
+    console.error("loadFile error:", err);
+  });
 }
 
 function createMenu(language = database?.getLanguage() || "ru") {
@@ -202,21 +210,27 @@ function createMenu(language = database?.getLanguage() || "ru") {
 }
 
 app.whenReady().then(async () => {
-  const iconPath = path.join(__dirname, "assets", "dombook-icon-transparent.png");
-  if (process.platform === "darwin") app.dock.setIcon(iconPath);
-  const userData = app.getPath("userData");
-  database = await new DomBookDatabase({
-    filePath: path.join(userData, "dombook.sqlite"),
-    backupDir: path.join(userData, "backups"),
-    seed: true,
-  }).init();
-  registerIpc();
-  createMenu();
-  createWindow();
+  try {
+    const iconPath = path.join(__dirname, "assets", "dombook-icon-transparent.png");
+    if (process.platform === "darwin") app.dock.setIcon(iconPath);
+    const userData = app.getPath("userData");
+    database = await new DomBookDatabase({
+      filePath: path.join(userData, "dombook.sqlite"),
+      backupDir: path.join(userData, "backups"),
+      seed: true,
+    }).init();
+    registerIpc();
+    createMenu();
+    createWindow();
 
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
+    app.on("activate", () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
+  } catch (error) {
+    console.error("App startup error:", error);
+  }
+}).catch((error) => {
+  console.error("Electron whenReady error:", error);
 });
 
 app.on("window-all-closed", () => {
