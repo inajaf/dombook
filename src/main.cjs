@@ -77,7 +77,7 @@ function createWindow() {
     backgroundColor: "#f4f7f5",
     title: "DomBook",
     icon: iconPath,
-    show: false,
+    show: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -95,12 +95,10 @@ function createWindow() {
   mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
     console.error("Failed to load:", errorCode, errorDescription, validatedURL);
   });
-  mainWindow.once("ready-to-show", () => {
-    mainWindow.show();
-  });
   mainWindow.loadFile(rendererPath).then(() => {
-    if (!mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+    if (!mainWindow.isDestroyed()) {
       mainWindow.show();
+      mainWindow.focus();
     }
   }).catch((err) => {
     console.error("loadFile error:", err);
