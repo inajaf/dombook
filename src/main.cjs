@@ -69,6 +69,7 @@ function registerIpc() {
 function createWindow() {
   const rendererPath = path.join(__dirname, "renderer", "index.html");
   const rendererUrl = pathToFileURL(rendererPath).href;
+  const iconPath = path.join(__dirname, "assets", "dombook-icon.png");
   mainWindow = new BrowserWindow({
     width: 1380,
     height: 900,
@@ -76,6 +77,7 @@ function createWindow() {
     minHeight: 680,
     backgroundColor: "#f4f7f5",
     title: "DomBook",
+    icon: iconPath,
     show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
@@ -96,6 +98,7 @@ function createWindow() {
 function createMenu(language = database?.getLanguage() || "ru") {
   const labels = {
     ru: {
+      file: "Файл",
       about: "О программе",
       quit: "Выйти",
       edit: "Правка",
@@ -111,6 +114,7 @@ function createMenu(language = database?.getLanguage() || "ru") {
       devTools: "Инструменты разработчика",
     },
     az: {
+      file: "Fayl",
       about: "Proqram haqqında",
       quit: "Çıxış",
       edit: "Düzəliş",
@@ -126,6 +130,7 @@ function createMenu(language = database?.getLanguage() || "ru") {
       devTools: "Tərtibatçı alətləri",
     },
     en: {
+      file: "File",
       about: "About",
       quit: "Quit",
       edit: "Edit",
@@ -140,7 +145,22 @@ function createMenu(language = database?.getLanguage() || "ru") {
       fullscreen: "Full Screen",
       devTools: "Developer Tools",
     },
-  }[language] || null;
+  }[language] || {
+    file: "File",
+    about: "About",
+    quit: "Quit",
+    edit: "Edit",
+    view: "View",
+    undo: "Undo",
+    redo: "Redo",
+    cut: "Cut",
+    copy: "Copy",
+    paste: "Paste",
+    selectAll: "Select All",
+    reload: "Reload",
+    fullscreen: "Full Screen",
+    devTools: "Developer Tools",
+  };
   const appMenu = process.platform === "darwin"
     ? [
         { role: "about", label: labels.about },
@@ -150,7 +170,7 @@ function createMenu(language = database?.getLanguage() || "ru") {
     : [{ role: "quit", label: labels.quit }];
   const template = [
     {
-      label: process.platform === "darwin" ? "DomBook" : "Файл",
+      label: process.platform === "darwin" ? "DomBook" : labels.file,
       submenu: appMenu,
     },
     {
