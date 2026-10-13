@@ -13,7 +13,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const { DomBookDatabase } = require("../src/database.cjs");
+const { RentKeeperDatabase } = require("../src/database.cjs");
 const outbox = require("../src/main/outbox.cjs");
 const { createSyncEngine, shouldAdopt, toLocal, toRemote } = require("../src/main/sync.cjs");
 
@@ -38,7 +38,7 @@ async function freshDatabase(t, options = {}) {
 
 // The database class is constructed directly rather than through a factory; the alias
 // keeps the intent obvious at each call site.
-const DobBookDatabaseShim = DomBookDatabase;
+const DobBookDatabaseShim = RentKeeperDatabase;
 
 /** A transport stub that records what was sent and replays a scripted pull. */
 function stubTransport({ pullResponse = { state: { version: 1 }, changes: {} }, pushResponse = null, fail = null } = {}) {
@@ -109,14 +109,14 @@ test("a queued change survives the database being reopened", async (t) => {
   const dir = tempDir(t);
   const filePath = path.join(dir, "dombook.sqlite");
 
-  const first = new DomBookDatabase({ filePath, backupDir: path.join(dir, "backups"), seed: false });
+  const first = new RentKeeperDatabase({ filePath, backupDir: path.join(dir, "backups"), seed: false });
   await first.init();
   const place = first.createPlace({ name: "Переживший перезапуск", address: "", hasFoodService: false });
   const queuedBefore = first.pendingSyncCount();
   assert.ok(queuedBefore > 0);
 
   // Reopen, as the app does on every launch.
-  const second = new DomBookDatabase({ filePath, backupDir: path.join(dir, "backups"), seed: false });
+  const second = new RentKeeperDatabase({ filePath, backupDir: path.join(dir, "backups"), seed: false });
   await second.init();
 
   const entries = second.query("SELECT row_id FROM sync_outbox WHERE row_id = ?", [place.id]);
@@ -144,7 +144,7 @@ test("acknowledging keeps a newer change made during the push", async (t) => {
 
 test("an acknowledgement cannot delete a newer change with the same timestamp", async (t) => {
   const dir = tempDir(t);
-  const db = new DomBookDatabase({ filePath: path.join(dir, "dombook.sqlite"), backupDir: dir, seed: false });
+  const db = new RentKeeperDatabase({ filePath: path.join(dir, "dombook.sqlite"), backupDir: dir, seed: false });
   await db.init();
 
   // A frozen clock, so both enqueues stamp an identical timestamp. This is not
@@ -190,7 +190,7 @@ test("a failed attempt is recorded and the entry stays queued", async (t) => {
 
 test("outbox helpers ignore rows that are not syncable", async (t) => {
   const dir = tempDir(t);
-  const db = new DomBookDatabase({ filePath: path.join(dir, "dombook.sqlite"), backupDir: dir, seed: false });
+  const db = new RentKeeperDatabase({ filePath: path.join(dir, "dombook.sqlite"), backupDir: dir, seed: false });
   await db.init();
 
   // audit_log is deliberately not replicated; queueing it would send rows the server has

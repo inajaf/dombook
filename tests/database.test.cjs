@@ -4,13 +4,13 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const initSqlJs = require("sql.js");
-const { DomBookDatabase, eachNight } = require("../src/database.cjs");
+const { RentKeeperDatabase, eachNight } = require("../src/database.cjs");
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 async function createTestDatabase(t, today = "2026-07-29") {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "dombook-test-"));
-  const database = await new DomBookDatabase({
+  const database = await new RentKeeperDatabase({
     filePath: path.join(tempDir, "test.sqlite"),
     backupDir: path.join(tempDir, "backups"),
     seed: false,
@@ -126,7 +126,7 @@ test("каждый дом отдыха сохраняет только свои 
   database.createProperty(house({ name: "Отдельный дом", kind: "house", placeId: null }));
   database.close();
 
-  const reopened = await new DomBookDatabase({
+  const reopened = await new RentKeeperDatabase({
     filePath: path.join(tempDir, "test.sqlite"),
     backupDir: path.join(tempDir, "backups"),
     seed: false,
@@ -158,7 +158,7 @@ test("язык интерфейса сохраняется в SQLite и восс
   assert.throws(() => database.setLanguage("de"), /ru, az, en/);
   database.close();
 
-  const reopened = await new DomBookDatabase({
+  const reopened = await new RentKeeperDatabase({
     filePath: path.join(tempDir, "test.sqlite"),
     backupDir: path.join(tempDir, "backups"),
     seed: false,
@@ -232,7 +232,7 @@ test("удаление брони доступно после отмены и с
   assert.notEqual(replacement.id, created.id);
   database.close();
 
-  const reopened = await new DomBookDatabase({
+  const reopened = await new RentKeeperDatabase({
     filePath: path.join(tempDir, "test.sqlite"),
     backupDir: path.join(tempDir, "backups"),
     seed: false,
@@ -813,7 +813,7 @@ async function createLegacyDatabase(t) {
   fs.writeFileSync(filePath, Buffer.from(db.export()));
   db.close();
 
-  const database = await new DomBookDatabase({
+  const database = await new RentKeeperDatabase({
     filePath,
     backupDir: path.join(tempDir, "backups"),
     seed: false,
@@ -921,7 +921,7 @@ test("повторное открытие мигрированной базы н
   const { database, tempDir } = await createLegacyDatabase(t);
   database.close();
 
-  const reopened = await new DomBookDatabase({
+  const reopened = await new RentKeeperDatabase({
     filePath: path.join(tempDir, "legacy.sqlite"),
     backupDir: path.join(tempDir, "backups"),
     seed: false,

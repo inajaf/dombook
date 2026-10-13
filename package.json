@@ -1,10 +1,10 @@
 {
-  "name": "dombook-desktop",
+  "name": "rentkeeper-desktop",
   "version": "0.2.0",
-  "description": "Local desktop booking system for vacation houses and cottages",
+  "description": "Local-first booking and rental manager for guest houses, cottages and flats",
   "main": "src/main.cjs",
   "author": {
-    "name": "DomBook",
+    "name": "RentKeeper",
     "email": "inajaf@users.noreply.github.com"
   },
   "license": "UNLICENSED",
@@ -29,8 +29,8 @@
     "electron-builder": "26.15.3"
   },
   "build": {
-    "appId": "com.dombook.desktop",
-    "productName": "DomBook",
+    "appId": "com.rentkeeper.desktop",
+    "productName": "RentKeeper",
     "asar": true,
     "asarUnpack": [
       "node_modules/sql.js/dist/sql-wasm.wasm"
@@ -59,10 +59,10 @@
       ]
     },
     "nsis": {
-      "artifactName": "DomBook-Setup-${version}-${arch}.${ext}"
+      "artifactName": "RentKeeper-Setup-${version}-${arch}.${ext}"
     },
     "portable": {
-      "artifactName": "DomBook-Portable-${version}-${arch}.${ext}"
+      "artifactName": "RentKeeper-Portable-${version}-${arch}.${ext}"
     },
     "linux": {
       "category": "Office",
@@ -72,6 +72,6 @@
         "deb"
       ]
     },
-    "artifactName": "DomBook-${version}-${os}-${arch}.${ext}"
+    "artifactName": "RentKeeper-${version}-${os}-${arch}.${ext}"
   }
 }

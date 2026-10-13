@@ -1,6 +1,6 @@
 # Shared domain fixtures
 
-These JSON files are the **single source of truth** for DomBook's domain rules.
+These JSON files are the **single source of truth** for RentKeeper's domain rules.
 Both stacks load them in their test suites:
 
 - desktop / web (Node): `tests/fixtures.test.cjs` via `require()`.

@@ -304,7 +304,7 @@ function canonicalName(value) {
   return String(value ?? "").trim().toLocaleLowerCase("ru-RU");
 }
 
-class DomBookDatabase {
+class RentKeeperDatabase {
   constructor({ filePath, backupDir, seed = true, todayProvider = todayInTimeZone }) {
     this.filePath = filePath;
     this.backupDir = backupDir;
@@ -1662,6 +1662,6 @@ class DomBookDatabase {
 
 module.exports = {
   nowIso,
-  DomBookDatabase,
+  RentKeeperDatabase,
   eachNight,
 };

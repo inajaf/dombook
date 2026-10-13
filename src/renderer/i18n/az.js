@@ -1,5 +1,5 @@
-window.DomBookLocales = window.DomBookLocales || {};
-window.DomBookLocales.az = {
+window.RentKeeperLocales = window.RentKeeperLocales || {};
+window.RentKeeperLocales.az = {
   code: "az",
   htmlLang: "az",
   locale: "az-AZ",
@@ -319,7 +319,7 @@ window.DomBookLocales.az = {
     "ночь": "gecə",
     "ночи": "gecə",
     "ночей": "gecə",
-    "Вход в DomBook": "DomBook-ə giriş",
+    "Вход в RentKeeper": "RentKeeper-ə giriş",
     "Войдите, чтобы синхронизировать брони с облаком.": "Rezervasiyaları buludla sinxronlaşdırmaq üçün daxil olun.",
     "Email": "E-poçt",
     "Получить код": "Kodu al",

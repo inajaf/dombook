@@ -2022,7 +2022,7 @@ function createBrowserDemoApi() {
       if (["ru", "az", "en"].includes(saved.language)) interfaceLanguage = saved.language;
     }
   } catch (error) {
-    console.warn("DomBook web storage could not be restored", error);
+    console.warn("RentKeeper web storage could not be restored", error);
   }
   const response = (data) => Promise.resolve({ ok: true, data });
   const error = (message) => Promise.resolve({ ok: false, error: message });

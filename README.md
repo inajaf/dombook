@@ -1,4 +1,4 @@
-# DomBook
+# RentKeeper
 
 A simple booking system for vacation houses and cottages, available for macOS,
 Windows, Linux and the Web.

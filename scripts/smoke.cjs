@@ -1,12 +1,12 @@
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { DomBookDatabase } = require("../src/database.cjs");
+const { RentKeeperDatabase } = require("../src/database.cjs");
 const { todayInTimeZone, addDaysIso } = require("../src/domain/booking/booking-policy.cjs");
 
 async function main() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "dombook-smoke-"));
-  const database = await new DomBookDatabase({
+  const database = await new RentKeeperDatabase({
     filePath: path.join(tempDir, "smoke.sqlite"),
     backupDir: path.join(tempDir, "backups"),
     seed: false,

@@ -1,5 +1,5 @@
 (() => {
-  const locales = window.DomBookLocales || {};
+  const locales = window.RentKeeperLocales || {};
   const textSources = new WeakMap();
   const attributeSources = new WeakMap();
   let currentLanguage = "ru";

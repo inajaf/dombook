@@ -1,4 +1,4 @@
-// Command migrate applies or inspects DomBook database migrations.
+// Command migrate applies or inspects RentKeeper database migrations.
 //
 // Usage:
 //

@@ -1,6 +1,6 @@
 {
-  "name": "DomBook Booking Manager",
-  "short_name": "DomBook",
+  "name": "RentKeeper — booking and rental manager",
+  "short_name": "RentKeeper",
   "description": "Local booking management for resorts, cottages and standalone houses.",
   "start_url": "./index.html",
   "display": "standalone",

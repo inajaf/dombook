@@ -146,6 +146,51 @@ login screen.
   invited role. Implemented in `server/internal/api/invite_routes.go`; verified by
   `scripts/verify-invites.mjs` and `internal/api/invite_routes_test.go`.
 
+## The product is RentKeeper
+
+Renamed from DomBook ("дом" + "book" read as "house book", which suggested a static record
+rather than rental management). **RentKeeper** names what the app does: rents, kept in order.
+It covers both nightly bookings and monthly tenancies, which is why the name is not
+stay-specific.
+
+The rename is complete in everything a user sees — window title, both brand marks, the login
+heading in all three locales, menus, tray label, installer artefacts, `appId`, and the
+userData directory. `tests/` and `server/internal/domain/testdata/` still say `dombook` in
+paths and DSN names deliberately: those are internal identifiers, and changing them would
+break existing installs and CI for no user benefit.
+
+- **`migrateLegacyUserData()` in `src/main.cjs` is load-bearing.** Electron derives the
+  userData path from the app name, so the rename moved where the app looks for its database,
+  logs and encrypted session. Without the migration every existing user opens the renamed app
+  and finds it empty — their bookings, licence and login apparently gone. It moves
+  `dombook-desktop` to `rentkeeper-desktop` only when the new directory does not exist.
+- The SQLite file is still called `dombook.sqlite`. It lives inside the userData directory,
+  which the migration carries over, so renaming the file too would mean rewriting every
+  existing install's path for no gain. Settings shows the real name, whatever it is.
+- `RentKeeperLocales` and `RentKeeperDatabase` replaced the old global/class names.
+
+## End-to-end suites (real app, real database)
+
+`scripts/e2e-all.sh` brings up the stack and drives the actual Electron app over CDP. These
+exist because every serious bug found in this project was invisible to both unit suites:
+
+- **`e2e-scenarios.mjs`** — signup, the plan step, creating a guest house and a unit.
+- **`e2e-booking.mjs`** — a stay booked through the dialog, its nights on the calendar,
+  overlap refusal, back-to-back allowed, capacity enforced.
+- **`e2e-branding.mjs`** — the product name as rendered, in all three locales and both windows.
+- **`e2e-security.mjs`** — two separate tenants; neither can read, write or book into the
+  other's data, and the signed-out bridge refuses everything.
+
+Two lessons worth keeping:
+
+- **A suite that shares demo data with a previous run reports leftovers as failures.** A
+  correct back-to-back booking looked like a bug twice because the seeded demo unit still
+  held an earlier run's nights. Each suite now creates its own place and unit, timestamped.
+- **The renderer caches the unit list.** Creating a unit through the bridge does not make it
+  appear in a dialog; call `refreshCore()` after a bridge-level write, exactly as the app
+  does after a form submit. A test that skips this fills in a form whose `<select>` has no
+  matching option and silently does nothing.
+
 ## Running locally
 
 - Server (Go + PostgreSQL, the target): see `server/README.md`. `createdb dombook_dev`, then `DOMBOOK_DSN=... go run ./cmd/migrate up`. Tests need `DOMBOOK_TEST_DSN`, otherwise the PostgreSQL integration tests skip instead of failing.

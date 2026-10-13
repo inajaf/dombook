@@ -1,4 +1,4 @@
-# DomBook server
+# RentKeeper server
 
 Go + PostgreSQL backend for DomBook. Replaces the Cloudflare Workers/D1
 legacy implementation, which has been removed (see `CUTOVER.md`)

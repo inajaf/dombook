@@ -10,7 +10,7 @@ fs.mkdirSync(path.dirname(outputDir), { recursive: true });
 fs.cpSync(sourceDir, outputDir, { recursive: true });
 
 fs.writeFileSync(path.join(outputDir, "WEB-README.txt"), [
-  "DomBook Web 0.2.0",
+  "RentKeeper Web 0.2.0",
   "",
   "Run this folder through a local static web server.",
   "Example: python3 -m http.server 8080 --directory web",

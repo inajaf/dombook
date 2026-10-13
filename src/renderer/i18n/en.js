@@ -1,5 +1,5 @@
-window.DomBookLocales = window.DomBookLocales || {};
-window.DomBookLocales.en = {
+window.RentKeeperLocales = window.RentKeeperLocales || {};
+window.RentKeeperLocales.en = {
   code: "en",
   htmlLang: "en",
   locale: "en-US",
@@ -327,7 +327,7 @@ window.DomBookLocales.en = {
     "ночь": "night",
     "ночи": "nights",
     "ночей": "nights",
-    "Вход в DomBook": "Sign in to DomBook",
+    "Вход в RentKeeper": "Sign in to RentKeeper",
     "Войдите, чтобы синхронизировать брони с облаком.": "Sign in to sync bookings with the cloud.",
     "Email": "Email",
     "Получить код": "Get code",

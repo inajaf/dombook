@@ -13,12 +13,12 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const { DomBookDatabase } = require("../src/database.cjs");
+const { RentKeeperDatabase } = require("../src/database.cjs");
 
 async function freshDatabase(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dombook-rentals-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const db = new DomBookDatabase({ filePath: path.join(dir, "dombook.sqlite"), backupDir: dir, seed: false });
+  const db = new RentKeeperDatabase({ filePath: path.join(dir, "dombook.sqlite"), backupDir: dir, seed: false });
   await db.init();
   return db;
 }

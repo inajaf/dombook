@@ -13,12 +13,12 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const { DomBookDatabase } = require("../src/database.cjs");
+const { RentKeeperDatabase } = require("../src/database.cjs");
 
 async function freshDatabase(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dombook-entitlements-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const db = new DomBookDatabase({ filePath: path.join(dir, "dombook.sqlite"), backupDir: dir, seed: false });
+  const db = new RentKeeperDatabase({ filePath: path.join(dir, "dombook.sqlite"), backupDir: dir, seed: false });
   await db.init();
   return db;
 }
@@ -177,11 +177,11 @@ test("the policy survives a restart, so an offline device keeps the right window
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const filePath = path.join(dir, "dombook.sqlite");
 
-  const first = new DomBookDatabase({ filePath, backupDir: dir, seed: false });
+  const first = new RentKeeperDatabase({ filePath, backupDir: dir, seed: false });
   await first.init();
   first.setBookingPolicy({ maximumAdvanceDays: 90, maximumStayMonths: 12, timeZone: "UTC" });
 
-  const second = new DomBookDatabase({ filePath, backupDir: dir, seed: false });
+  const second = new RentKeeperDatabase({ filePath, backupDir: dir, seed: false });
   await second.init();
   assert.equal(second.bookingPolicy().maximumAdvanceDays, 90, "the cached window must persist");
 
@@ -199,7 +199,7 @@ test("a cached licence survives a restart, so an offline licensed device stays l
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const filePath = path.join(dir, "dombook.sqlite");
 
-  const first = new DomBookDatabase({ filePath, backupDir: dir, seed: false });
+  const first = new RentKeeperDatabase({ filePath, backupDir: dir, seed: false });
   await first.init();
   first.setEntitlements({
     paid: true, planName: "Пожизненная лицензия", skus: ["app_perpetual"],
@@ -208,7 +208,7 @@ test("a cached licence survives a restart, so an offline licensed device stays l
 
   // Reopening without syncing: the cache has to be on disk, or a licensed customer who opens
   // the app offline is handed the free tier.
-  const second = new DomBookDatabase({ filePath, backupDir: dir, seed: false });
+  const second = new RentKeeperDatabase({ filePath, backupDir: dir, seed: false });
   await second.init();
   assert.equal(second.entitlements()?.paid, true, "the licence must survive a restart");
   assert.equal(second.unitAllowance(), null, "and it must still lift the cap");

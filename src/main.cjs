@@ -1,7 +1,10 @@
 const { app, BrowserWindow, ipcMain, Menu, shell, safeStorage } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs/promises");
-const { DomBookDatabase } = require("./database.cjs");
+// The synchronous API, needed for the one-time data migration below: it must finish before
+// the database path is resolved, and `app.getPath("userData")` is read synchronously later.
+const fsSync = require("node:fs");
+const { RentKeeperDatabase } = require("./database.cjs");
 const { createAuthApi } = require("./main/auth.cjs");
 const { createAuthSessionStore } = require("./main/auth-session.cjs");
 const { createSyncEngine } = require("./main/sync.cjs");
@@ -15,8 +18,40 @@ let syncEngine;
 // Serialises sync attempts and schedules the periodic one.
 let syncTimer = null;
 
-app.setName("DomBook");
-app.setPath("userData", path.join(app.getPath("appData"), "dombook-desktop"));
+app.setName("RentKeeper");
+app.setPath("userData", path.join(app.getPath("appData"), "rentkeeper-desktop"));
+
+/**
+ * Carry an existing installation's data across the rename.
+ *
+ * Electron derives the userData path from the app name, so renaming the product moves where
+ * the app looks for its database, logs and encrypted session. Without this, every existing
+ * user opens the renamed app and finds it EMPTY — their bookings, their licence and their
+ * login all appear to have vanished, which is the worst possible outcome of a cosmetic
+ * change. The old directory is moved only when the new one does not exist, so a user who has
+ * already run the renamed build is never overwritten.
+ */
+function migrateLegacyUserData() {
+  const appData = app.getPath("appData");
+  const next = path.join(appData, "rentkeeper-desktop");
+  const legacy = path.join(appData, "dombook-desktop");
+  if (fsSync.existsSync(next) || !fsSync.existsSync(legacy)) return;
+  try {
+    fsSync.renameSync(legacy, next);
+    console.log(`[migration] moved user data from ${legacy} to ${next}`);
+  } catch (error) {
+    // A cross-device rename cannot work; copy instead, and leave the original in place so
+    // nothing is lost if the copy is interrupted.
+    console.error(`[migration] could not move user data: ${error.message}`);
+    try {
+      fsSync.cpSync(legacy, next, { recursive: true });
+      console.log(`[migration] copied user data to ${next}`);
+    } catch (copyError) {
+      console.error(`[migration] copy failed, continuing with an empty profile: ${copyError.message}`);
+    }
+  }
+}
+migrateLegacyUserData();
 
 function electronEncryptionAvailable() {
   try {
@@ -254,7 +289,7 @@ function registerIpc() {
       minWidth: 980,
       minHeight: 680,
       backgroundColor: "#f4f7f5",
-      title: "DomBook",
+      title: "RentKeeper",
       icon: iconPath,
       show: true,
       webPreferences: {
@@ -359,7 +394,7 @@ function registerIpc() {
       : [{ role: "quit", label: labels.quit }];
     const template = [
       {
-        label: process.platform === "darwin" ? "DomBook" : labels.file,
+        label: process.platform === "darwin" ? "RentKeeper" : labels.file,
         submenu: appMenu,
       },
       {
@@ -391,7 +426,7 @@ function registerIpc() {
     const iconPath = path.join(__dirname, "assets", "dombook-icon-transparent.png");
     if (process.platform === "darwin") app.dock.setIcon(iconPath);
     const userData = app.getPath("userData");
-    database = await new DomBookDatabase({
+    database = await new RentKeeperDatabase({
       filePath: path.join(userData, "dombook.sqlite"),
       backupDir: path.join(userData, "backups"),
       seed: true,

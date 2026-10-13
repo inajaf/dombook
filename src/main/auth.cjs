@@ -1,6 +1,6 @@
 "use strict";
 
-// Thin HTTP client for the DomBook passwordless-auth API, plus JWT session
+// Thin HTTP client for the RentKeeper passwordless-auth API, plus JWT session
 // persistence. Runs in the Electron main process where global `fetch` is
 // available (Electron 43 / Node 18+); no network libraries are used.
 //
@@ -34,7 +34,7 @@ function createAuthApi({ baseUrl, storage }) {
       });
     } catch (error) {
       const wrapped = new Error(
-        `Не удалось связаться с сервером (${baseUrl}). Проверьте подключение и запуск DomBook API.`,
+        `Не удалось связаться с сервером (${baseUrl}). Проверьте подключение и запуск RentKeeper API.`,
       );
       wrapped.cause = error;
       wrapped.status = 0;
