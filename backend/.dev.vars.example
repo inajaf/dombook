@@ -5,3 +5,13 @@ ADMIN_API_KEY="dev-admin-key-change-me"
 # When non-empty, the one-time login code is returned in the API response
 # (development convenience only; in production the code is emailed and this is off).
 AUTH_EXPOSE_CODE="true"
+
+# Paddle Billing sandbox. Keep API/webhook secrets out of git.
+PADDLE_ENVIRONMENT="sandbox"
+PADDLE_API_KEY=""
+PADDLE_CLIENT_TOKEN=""
+PADDLE_WEBHOOK_SECRET=""
+PADDLE_PRICE_PRO=""
+PADDLE_PRICE_BUSINESS=""
+# Optional approved/default payment URL. Leave empty to use Paddle's default.
+PADDLE_CHECKOUT_URL=""

@@ -5,6 +5,8 @@ import { ApiError, badRequest, json, notFound, readJson } from "./http";
 import { randomToken, sha256Hex } from "./crypto";
 import { nowIso, todayInTimeZone } from "./time";
 import { AuthService } from "./auth";
+import { BillingService } from "./billing";
+import type { Env } from "./env";
 import { Router, type RouteContext } from "./router";
 import type { Repository } from "./repository";
 import {
@@ -14,7 +16,7 @@ import {
   validateReservation,
 } from "./validation";
 import { SYNC_TABLES, type SyncTable } from "./types";
-import { assertCanCreatePlace, assertCanCreateProperty, isKnownPlan } from "./plans";
+import { assertCanCreatePlace, assertCanCreateProperty, isKnownPlan, planDefinition } from "./plans";
 
 function ctx(c: RouteContext) {
   return c.auth!;
@@ -48,8 +50,13 @@ function publicInvite(invite: {
   };
 }
 
-export function buildRouter(repo: Repository, auth: AuthService): Router {
+export function buildRouter(repo: Repository, auth: AuthService, env: Env): Router {
   const router = new Router(repo);
+  const billing = new BillingService(env, repo);
+
+  // Paddle authenticates this public endpoint with Paddle-Signature.
+  router.post("/billing/webhook", async (c) => billing.handleWebhook(c.request));
+  router.get("/billing/checkout-page", async (c) => billing.checkoutPage(c.request));
 
   // -- auth ----------------------------------------------------------------
 
@@ -91,18 +98,53 @@ export function buildRouter(repo: Repository, auth: AuthService): Router {
     return json({ ok: true });
   }, "user");
 
-  // Manual plan change (owner-only). Billing automation lands later; for now a
-  // plan switch is applied directly. Returns the fresh account so the client
-  // can re-sync /auth/me state.
+  // Manual plan change (owner-only). Once Paddle billing is configured the
+  // subscription owns the plan, so paid switches must go through
+  // POST /billing/checkout; set BILLING_ALLOW_MANUAL_PLAN_CHANGE=true to keep
+  // direct switching available (e.g. support overrides, local dev). Returns
+  // the fresh account so the client can re-sync /auth/me state.
   router.patch("/account/plan", async (c) => {
     const me = ctx(c);
     ensureRole(me, ["owner"]);
+    if (billing.configured() && env.BILLING_ALLOW_MANUAL_PLAN_CHANGE !== "true") {
+      throw badRequest("billing_managed", "Тариф управляется подпиской Paddle");
+    }
     const body = await readJson(c.request);
     const plan = String(body.plan ?? "").trim();
     if (!isKnownPlan(plan)) throw badRequest("validation_error", "Некорректный тариф плана");
     const updated = await repo.updateAccountPlan(me.accountId, plan);
     if (!updated) throw unauthorized_session();
     return json({ plan: updated.plan });
+  }, "user");
+
+  router.get("/billing/status", async (c) => {
+    return json(await billing.status(ctx(c).accountId));
+  }, "user");
+
+  router.post("/billing/checkout", async (c) => {
+    const me = ctx(c);
+    ensureRole(me, ["owner"]);
+    const body = await readJson(c.request);
+    return billing.createCheckout(me.accountId, String(body.plan ?? ""));
+  }, "user");
+
+  router.get("/account/plan", async (c) => {
+    const me = ctx(c);
+    const account = await repo.getAccount(me.accountId);
+    if (!account) throw unauthorized_session();
+    const [places, properties] = await Promise.all([
+      repo.countActivePlaces(me.accountId),
+      repo.countActiveProperties(me.accountId),
+    ]);
+    const definition = planDefinition(account.plan);
+    return json({
+      plan: definition.id,
+      name: definition.name,
+      usage: {
+        places: quotaUsage(places, definition.maxPlaces),
+        properties: quotaUsage(properties, definition.maxProperties),
+      },
+    });
   }, "user");
 
   router.get("/auth/invites", async (c) => {
@@ -152,10 +194,8 @@ export function buildRouter(repo: Repository, auth: AuthService): Router {
 
   router.post("/places", async (c) => {
     const me = ctx(c);
-    const current = await repo.countActivePlaces(me.accountId);
-    const account = await repo.getAccount(me.accountId);
-    assertCanCreatePlace(current, account?.plan ?? "free");
     const data = validatePlace(await readJson(c.request));
+    if (data.status === "active") await assertPlaceActivationAllowed(repo, me.accountId);
     assertUniqueName(
       await repo.listPlaces(me.accountId),
       data.name,
@@ -175,6 +215,11 @@ export function buildRouter(repo: Repository, auth: AuthService): Router {
   router.put("/places/:id", async (c) => {
     const me = ctx(c);
     const data = validatePlace(await readJson(c.request));
+    const existing = await repo.getPlace(me.accountId, c.params.id!);
+    if (!existing) throw notFound();
+    if (existing.status !== "active" && data.status === "active") {
+      await assertPlaceActivationAllowed(repo, me.accountId);
+    }
     assertUniqueName(
       await repo.listPlaces(me.accountId),
       data.name,
@@ -193,7 +238,11 @@ export function buildRouter(repo: Repository, auth: AuthService): Router {
   }, "user");
 
   router.post("/places/:id/restore", async (c) => {
-    const place = await repo.setPlaceStatus(ctx(c).accountId, c.params.id!, "active", device(c));
+    const me = ctx(c);
+    const existing = await repo.getPlace(me.accountId, c.params.id!);
+    if (!existing) throw notFound();
+    if (existing.status !== "active") await assertPlaceActivationAllowed(repo, me.accountId);
+    const place = await repo.setPlaceStatus(me.accountId, c.params.id!, "active", device(c));
     if (!place) throw notFound();
     return json({ place });
   }, "user");
@@ -213,11 +262,9 @@ export function buildRouter(repo: Repository, auth: AuthService): Router {
 
   router.post("/properties", async (c) => {
     const me = ctx(c);
-    const currentProperties = await repo.countActiveProperties(me.accountId);
-    const account = await repo.getAccount(me.accountId);
-    assertCanCreateProperty(currentProperties, account?.plan ?? "free");
     const body = await readJson(c.request);
     const data = await validateProperty(body, (id) => repo.getPlace(me.accountId, id));
+    if (data.status === "active") await assertPropertyActivationAllowed(repo, me.accountId);
     assertUniqueName(
       await repo.listProperties(me.accountId),
       data.name,
@@ -238,6 +285,11 @@ export function buildRouter(repo: Repository, auth: AuthService): Router {
     const me = ctx(c);
     const body = await readJson(c.request);
     const data = await validateProperty(body, (id) => repo.getPlace(me.accountId, id));
+    const existing = await repo.getProperty(me.accountId, c.params.id!);
+    if (!existing) throw notFound();
+    if (existing.status !== "active" && data.status === "active") {
+      await assertPropertyActivationAllowed(repo, me.accountId);
+    }
     assertUniqueName(
       await repo.listProperties(me.accountId),
       data.name,
@@ -256,7 +308,11 @@ export function buildRouter(repo: Repository, auth: AuthService): Router {
   }, "user");
 
   router.post("/properties/:id/restore", async (c) => {
-    const property = await repo.setPropertyStatus(ctx(c).accountId, c.params.id!, "active", device(c));
+    const me = ctx(c);
+    const existing = await repo.getProperty(me.accountId, c.params.id!);
+    if (!existing) throw notFound();
+    if (existing.status !== "active") await assertPropertyActivationAllowed(repo, me.accountId);
+    const property = await repo.setPropertyStatus(me.accountId, c.params.id!, "active", device(c));
     if (!property) throw notFound();
     return json({ property });
   }, "user");
@@ -375,10 +431,12 @@ export function buildRouter(repo: Repository, auth: AuthService): Router {
       if (!Array.isArray(rows)) throw badRequest("validation_error", `Неверный формат для ${table}`);
       for (const row of rows) {
         if (!row || typeof row !== "object") continue;
-        const pushed = await repo.pushRow(table as SyncTable, me.accountId, {
+        const incoming = {
           ...(row as Record<string, unknown>),
           last_writer: clientId,
-        });
+        };
+        await assertSyncActivationAllowed(repo, me.accountId, table as SyncTable, incoming);
+        const pushed = await repo.pushRow(table as SyncTable, me.accountId, incoming);
         if (pushed) applied += 1;
       }
     }
@@ -438,4 +496,52 @@ function device(c: RouteContext): string {
 
 function unauthorized_session(): ApiError {
   return new ApiError(401, "unauthorized", "Сессия не найдена");
+}
+
+function quotaUsage(current: number, limit: number | null) {
+  return {
+    current,
+    limit,
+    remaining: limit === null ? null : Math.max(0, limit - current),
+    overLimit: limit !== null && current > limit,
+  };
+}
+
+async function accountPlan(repo: Repository, accountId: string): Promise<string> {
+  return (await repo.getAccount(accountId))?.plan ?? "free";
+}
+
+async function assertPlaceActivationAllowed(repo: Repository, accountId: string): Promise<void> {
+  const [current, plan] = await Promise.all([
+    repo.countActivePlaces(accountId),
+    accountPlan(repo, accountId),
+  ]);
+  assertCanCreatePlace(current, plan);
+}
+
+async function assertPropertyActivationAllowed(repo: Repository, accountId: string): Promise<void> {
+  const [current, plan] = await Promise.all([
+    repo.countActiveProperties(accountId),
+    accountPlan(repo, accountId),
+  ]);
+  assertCanCreateProperty(current, plan);
+}
+
+async function assertSyncActivationAllowed(
+  repo: Repository,
+  accountId: string,
+  table: SyncTable,
+  incoming: Record<string, unknown>,
+): Promise<void> {
+  if (table !== "places" && table !== "properties") return;
+  if (!(await repo.wouldPushRow(table, accountId, incoming))) return;
+  const id = String(incoming.id ?? "");
+  const current = id ? await repo.getSyncRow(table, accountId, id) : null;
+  const currentActive = current?.status === "active" && current.deleted_at == null;
+  const nextStatus = "status" in incoming ? incoming.status : current?.status ?? "active";
+  const nextDeletedAt = "deleted_at" in incoming ? incoming.deleted_at : current?.deleted_at ?? null;
+  const nextActive = nextStatus === "active" && nextDeletedAt == null;
+  if (currentActive || !nextActive) return;
+  if (table === "places") await assertPlaceActivationAllowed(repo, accountId);
+  else await assertPropertyActivationAllowed(repo, accountId);
 }

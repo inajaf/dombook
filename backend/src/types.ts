@@ -9,6 +9,28 @@ export interface Account {
   updated_at: string;
 }
 
+export interface BillingSubscription {
+  account_id: string;
+  paddle_subscription_id: string;
+  paddle_customer_id: string | null;
+  plan: "pro" | "business";
+  status: string;
+  price_id: string;
+  current_period_end: string | null;
+  scheduled_change_json: string | null;
+  last_event_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BillingCheckout {
+  transaction_id: string;
+  account_id: string;
+  plan: "pro" | "business";
+  price_id: string;
+  created_at: string;
+}
+
 export interface User {
   id: string;
   account_id: string;

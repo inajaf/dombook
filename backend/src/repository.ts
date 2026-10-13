@@ -14,6 +14,8 @@ import { ApiError } from "./http";
 import type {
   Account,
   AppSetting,
+  BillingCheckout,
+  BillingSubscription,
   Invite,
   Place,
   Property,
@@ -977,13 +979,7 @@ export class Repository {
   // applied the incoming row, false when the stored row won.
   async pushRow(table: SyncTable, tenantId: string, row: SyncRow): Promise<boolean> {
     const columns = SYNC_COLUMNS[table];
-    const clean: SyncRow = {};
-    for (const column of columns) if (column in row) clean[column] = row[column];
-
-    clean.tenant_id = tenantId;
-    clean.last_writer = String(row.last_writer ?? "unknown") || "unknown";
-    const now = nowIso();
-    clean.updated_at = String(clean.updated_at ?? now);
+    const clean = this.cleanSyncRow(table, tenantId, row);
 
     const current = firstRow<SyncRow>(
       await this.prep(`SELECT * FROM ${table} WHERE tenant_id = ? AND id = ?`, [
@@ -1017,6 +1013,29 @@ export class Repository {
       await this.prep(`INSERT INTO ${table}(${writeColumns.join(", ")}) VALUES (${placeholders})`, values).run();
     }
     return true;
+  }
+
+  async wouldPushRow(table: SyncTable, tenantId: string, row: SyncRow): Promise<boolean> {
+    const current = await this.getSyncRow(table, tenantId, String(row.id ?? ""));
+    return !current || rowCompare(this.cleanSyncRow(table, tenantId, row), current) > 0;
+  }
+
+  // Raw sync lookup used by quota preflight. Unlike getPlace/getProperty this
+  // deliberately includes soft-deleted rows, because sync can revive one by
+  // clearing deleted_at.
+  async getSyncRow(table: SyncTable, tenantId: string, id: string): Promise<SyncRow | null> {
+    return firstRow<SyncRow>(
+      await this.prep(`SELECT * FROM ${table} WHERE tenant_id = ? AND id = ?`, [tenantId, id]).first(),
+    ) ?? null;
+  }
+
+  private cleanSyncRow(table: SyncTable, tenantId: string, row: SyncRow): SyncRow {
+    const clean: SyncRow = {};
+    for (const column of SYNC_COLUMNS[table]) if (column in row) clean[column] = row[column];
+    clean.tenant_id = tenantId;
+    clean.last_writer = String(row.last_writer ?? "unknown") || "unknown";
+    clean.updated_at = String(clean.updated_at ?? nowIso());
+    return clean;
   }
 
   // -- admin stats ----------------------------------------------------------
@@ -1105,6 +1124,115 @@ export class Repository {
     ).run();
     await this.audit(id, "account", id, "plan.updated", { from: existing.plan, to: plan });
     return this.getAccount(id);
+  }
+
+  // -- Paddle billing -------------------------------------------------------
+
+  async createBillingCheckout(accountId: string, transactionId: string, plan: string, priceId: string): Promise<void> {
+    await this.prep(
+      `INSERT INTO billing_checkouts(transaction_id, account_id, plan, price_id, created_at)
+       VALUES (?, ?, ?, ?, ?)`,
+      [transactionId, accountId, plan, priceId, nowIso()],
+    ).run();
+  }
+
+  async getBillingCheckout(transactionId: string): Promise<BillingCheckout | null> {
+    return firstRow<BillingCheckout>(
+      await this.prep("SELECT * FROM billing_checkouts WHERE transaction_id = ?", [transactionId]).first(),
+    ) ?? null;
+  }
+
+  async getBillingSubscription(accountId: string): Promise<BillingSubscription | null> {
+    return firstRow<BillingSubscription>(
+      await this.prep("SELECT * FROM billing_subscriptions WHERE account_id = ?", [accountId]).first(),
+    ) ?? null;
+  }
+
+  async getBillingSubscriptionByPaddleId(subscriptionId: string): Promise<BillingSubscription | null> {
+    return firstRow<BillingSubscription>(
+      await this.prep(
+        "SELECT * FROM billing_subscriptions WHERE paddle_subscription_id = ?",
+        [subscriptionId],
+      ).first(),
+    ) ?? null;
+  }
+
+  async hasPaddleEvent(eventId: string): Promise<boolean> {
+    const row = await this.prep(
+      "SELECT 1 AS found FROM paddle_webhook_events WHERE event_id = ?",
+      [eventId],
+    ).first<{ found: number }>();
+    return Boolean(row?.found);
+  }
+
+  async recordPaddleEvent(eventId: string, eventType: string, occurredAt: string, rawBody: string): Promise<void> {
+    await this.prep(
+      `INSERT OR IGNORE INTO paddle_webhook_events(event_id, event_type, occurred_at, processed_at, payload_json)
+       VALUES (?, ?, ?, ?, ?)`,
+      [eventId, eventType, occurredAt, nowIso(), rawBody],
+    ).run();
+  }
+
+  async applyPaddleSubscriptionEvent(input: {
+    eventId: string;
+    eventType: string;
+    occurredAt: string;
+    rawBody: string;
+    accountId: string;
+    subscriptionId: string;
+    customerId: string | null;
+    plan: "pro" | "business";
+    status: string;
+    priceId: string;
+    currentPeriodEnd: string | null;
+    scheduledChange: unknown;
+    accountPlan: string;
+  }): Promise<void> {
+    const now = nowIso();
+    await this.db.batch([
+      this.prep(
+        `INSERT INTO paddle_webhook_events(event_id, event_type, occurred_at, processed_at, payload_json)
+         VALUES (?, ?, ?, ?, ?)`,
+        [input.eventId, input.eventType, input.occurredAt, now, input.rawBody],
+      ),
+      this.prep(
+        `INSERT INTO billing_subscriptions(
+           account_id, paddle_subscription_id, paddle_customer_id, plan, status, price_id,
+           current_period_end, scheduled_change_json, last_event_at, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(account_id) DO UPDATE SET
+           paddle_subscription_id = excluded.paddle_subscription_id,
+           paddle_customer_id = excluded.paddle_customer_id,
+           plan = excluded.plan,
+           status = excluded.status,
+           price_id = excluded.price_id,
+           current_period_end = excluded.current_period_end,
+           scheduled_change_json = excluded.scheduled_change_json,
+           last_event_at = excluded.last_event_at,
+           updated_at = excluded.updated_at
+         WHERE excluded.last_event_at >= billing_subscriptions.last_event_at`,
+        [
+          input.accountId, input.subscriptionId, input.customerId, input.plan, input.status,
+          input.priceId, input.currentPeriodEnd, JSON.stringify(input.scheduledChange),
+          input.occurredAt, now, now,
+        ],
+      ),
+      this.prep(
+        `UPDATE accounts SET plan = ?, updated_at = ?
+         WHERE id = ? AND EXISTS (
+           SELECT 1 FROM billing_subscriptions
+           WHERE account_id = ? AND last_event_at = ? AND plan = ?
+         )`,
+        [input.accountPlan, now, input.accountId, input.accountId, input.occurredAt, input.plan],
+      ),
+      this.auditStmt(input.accountId, "account", input.accountId, "billing.webhook", {
+        eventId: input.eventId,
+        eventType: input.eventType,
+        subscriptionId: input.subscriptionId,
+        status: input.status,
+        plan: input.accountPlan,
+      }, await this.bumpTenantVersion(input.accountId)),
+    ]);
   }
 
   // Plan definitions joined with the number of accounts currently on each plan.

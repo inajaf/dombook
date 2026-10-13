@@ -143,6 +143,59 @@ describe("sync pull/push", () => {
     expect(empty.status).toBe(200);
   });
 
+  it("enforces plan quotas for sync inserts and reactivation", async () => {
+    const { token } = await createAccount("sync-plan-limit@example.test", "Дом");
+    await makePlace(token, { name: "Занимает квоту" });
+    const baseRow = {
+      id: "sync-quota-place",
+      name: "Синхронизируемый дом",
+      address: "",
+      has_food_service: 0,
+      notes: "",
+      created_at: "2026-01-01T00:00:00.000Z",
+      updated_at: "2026-01-01T00:00:00.000Z",
+    };
+
+    const activeInsert = await api("POST", "/sync/push", {
+      token,
+      body: { clientId: "quota-device", changes: { places: [{ ...baseRow, status: "active" }] } },
+    });
+    expect(activeInsert.status).toBe(403);
+    expect((await json<{ error: { code: string } }>(activeInsert)).error.code).toBe("plan_limit");
+
+    const archivedInsert = await api("POST", "/sync/push", {
+      token,
+      body: { clientId: "quota-device", changes: { places: [{ ...baseRow, status: "archived" }] } },
+    });
+    expect(archivedInsert.status).toBe(200);
+    expect((await json<{ applied: number }>(archivedInsert)).applied).toBe(1);
+
+    // A losing LWW update cannot activate anything, so it must be ignored
+    // instead of being rejected by the subscription preflight.
+    const staleActivation = await api("POST", "/sync/push", {
+      token,
+      body: {
+        clientId: "quota-device",
+        changes: {
+          places: [{ ...baseRow, status: "active", updated_at: "2025-12-31T00:00:00.000Z" }],
+        },
+      },
+    });
+    expect(staleActivation.status).toBe(200);
+    expect((await json<{ applied: number }>(staleActivation)).applied).toBe(0);
+
+    const reactivate = await api("POST", "/sync/push", {
+      token,
+      body: {
+        clientId: "quota-device",
+        changes: {
+          places: [{ ...baseRow, status: "active", updated_at: "2026-01-02T00:00:00.000Z" }],
+        },
+      },
+    });
+    expect(reactivate.status).toBe(403);
+  });
+
   it("exports a full backup", async () => {
     const { token, accountId } = await createAccount("sync7@example.test", "Дом");
     const place = await makePlace(token, { name: "Бэкап-дом" });

@@ -23,6 +23,12 @@ export default defineConfig(async () => {
             ADMIN_API_KEY: "test-admin-key",
             AUTH_EXPOSE_CODE: "true",
             SETUP_TOKEN: "test-setup-token",
+            // Never let a developer's real Paddle sandbox secrets from
+            // `.dev.vars` change the semantics of the ordinary test suite.
+            // Billing tests construct their own explicit Env instead.
+            PADDLE_API_KEY: "",
+            PADDLE_WEBHOOK_SECRET: "",
+            BILLING_ALLOW_MANUAL_PLAN_CHANGE: "true",
           },
         },
       }),

@@ -7,6 +7,9 @@ import { env as workerEnv } from "cloudflare:workers";
 const env = workerEnv as unknown as { DB: D1Database };
 
 const TABLES = [
+  "paddle_webhook_events",
+  "billing_subscriptions",
+  "billing_checkouts",
   "reservation_meals",
   "reservation_services",
   "reservation_nights",

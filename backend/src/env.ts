@@ -11,4 +11,13 @@ export interface Env {
   // Optional token that gates the bootstrap /auth/setup endpoint once the
   // first account exists.
   SETUP_TOKEN?: string;
+  PADDLE_ENVIRONMENT?: "sandbox" | "live";
+  PADDLE_API_KEY?: string;
+  PADDLE_CLIENT_TOKEN?: string;
+  PADDLE_WEBHOOK_SECRET?: string;
+  PADDLE_PRICE_PRO?: string;
+  PADDLE_PRICE_BUSINESS?: string;
+  PADDLE_CHECKOUT_URL?: string;
+  // Local/test escape hatch only. Never enable in production.
+  BILLING_ALLOW_MANUAL_PLAN_CHANGE?: string;
 }

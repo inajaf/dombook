@@ -7,11 +7,11 @@
 //   - business = unlimited
 //   - pro exists in the schema as an intermediate plan but is not yet part of
 //     the business logic; leave its limits undefined (unlimited) until the
-//     captain assigns them. Treating an unknown plan as unlimited is the safe
-//     choice: it never blocks an existing account from operating.
+//     captain assigns them. Unknown/corrupt values fail closed to `free`.
 //
-// Limit semantics: limits apply to *creating new active records*. Archive,
-// restore, edit, and soft-delete never consume a limit.
+// Limit semantics: limits apply whenever a record becomes active: create,
+// restore, an archived -> active edit, or an incoming sync row. Plain edits,
+// archive and soft-delete do not consume a slot.
 //
 // Decision on archived rows: archived places/properties do NOT count toward
 // the limit. Rationale: a free user should be able to archive their first
@@ -61,7 +61,7 @@ export const PLAN_BY_ID: Readonly<Record<string, PlanDefinition>> = Object.fromE
 );
 
 export function planDefinition(plan: string): PlanDefinition {
-  return PLAN_BY_ID[plan] ?? (PLAN_BY_ID.business as PlanDefinition);
+  return PLAN_BY_ID[plan] ?? (PLAN_BY_ID.free as PlanDefinition);
 }
 
 export function isKnownPlan(plan: string): boolean {
@@ -77,6 +77,8 @@ export function assertCanCreatePlace(current: number, plan: string): void {
     throw planLimitError(
       "places",
       def.maxPlaces,
+      current,
+      def.id,
       `Тариф «${def.name}» позволяет создать не более ${def.maxPlaces} дома отдыха.`,
     );
   }
@@ -88,6 +90,8 @@ export function assertCanCreateProperty(current: number, plan: string): void {
     throw planLimitError(
       "properties",
       def.maxProperties,
+      current,
+      def.id,
       `Тариф «${def.name}» позволяет создать не более ${def.maxProperties} объекта размещения.`,
     );
   }

@@ -27,8 +27,14 @@ export function forbidden(code = "forbidden", message = "Forbidden"): ApiError {
 // 403 for hitting a plan quota. The message is user-facing Russian that names
 // the current plan and its cap so a client can render an upgrade prompt.
 // `limit` details expose the machine-readable cap to the caller.
-export function planLimitError(resource: "places" | "properties", limit: number, message: string): ApiError {
-  return new ApiError(403, "plan_limit", message, { resource, limit });
+export function planLimitError(
+  resource: "places" | "properties",
+  limit: number,
+  current: number,
+  plan: string,
+  message: string,
+): ApiError {
+  return new ApiError(403, "plan_limit", message, { resource, limit, current, plan });
 }
 
 export function unauthorized(message = "Unauthorized"): ApiError {
@@ -61,6 +67,20 @@ export async function readJson(request: Request): Promise<Record<string, unknown
 export function handleError(error: unknown): Response {
   if (error instanceof ApiError) {
     return json({ error: { code: error.code, message: error.message, details: error.details } }, error.status);
+  }
+  // Database triggers are the final, atomic guard against concurrent requests
+  // both observing a free quota slot. Route preflight normally returns the
+  // richer error; this maps the race loser to the same public API contract.
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("dombook_plan_limit_places")) {
+    return handleError(planLimitError(
+      "places", 1, 1, "free", "Тариф «Бесплатный» позволяет создать не более 1 дома отдыха.",
+    ));
+  }
+  if (message.includes("dombook_plan_limit_properties")) {
+    return handleError(planLimitError(
+      "properties", 1, 1, "free", "Тариф «Бесплатный» позволяет создать не более 1 объекта размещения.",
+    ));
   }
   console.error("Unhandled error:", error);
   return json({ error: { code: "internal", message: "Internal server error" } }, 500);

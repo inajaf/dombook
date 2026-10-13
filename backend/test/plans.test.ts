@@ -54,6 +54,58 @@ describe("plan limits", () => {
     expect(replacement.status).toBe(201);
   });
 
+  it("allows archived rows but blocks every path that would activate above the quota", async () => {
+    const { token } = await createAccount("limits-activate@example.test", "Дом");
+    const active = (await json<{ place: { id: string } }>(
+      await api("POST", "/places", { token, body: placePayload({ name: "Активный" }) }),
+    )).place;
+    const archived = (await json<{ place: { id: string } }>(
+      await api("POST", "/places", {
+        token,
+        body: placePayload({ name: "Архивный", status: "archived" }),
+      }),
+    )).place;
+
+    // Idempotent activation of the already active row must remain usable.
+    expect((await api("POST", `/places/${active.id}/restore`, { token })).status).toBe(200);
+
+    const restore = await api("POST", `/places/${archived.id}/restore`, { token });
+    expect(restore.status).toBe(403);
+    const restoreBody = await json<{
+      error: { code: string; details: { resource: string; current: number; limit: number; plan: string } };
+    }>(restore);
+    expect(restoreBody.error).toMatchObject({
+      code: "plan_limit",
+      details: { resource: "places", current: 1, limit: 1, plan: "free" },
+    });
+
+    const editActivation = await api("PUT", `/places/${archived.id}`, {
+      token,
+      body: placePayload({ name: "Архивный", status: "active" }),
+    });
+    expect(editActivation.status).toBe(403);
+  });
+
+  it("validates payloads before returning a quota error", async () => {
+    const { token } = await createAccount("limits-validation@example.test", "Дом");
+    await api("POST", "/places", { token, body: placePayload({ name: "Занимает квоту" }) });
+
+    const invalid = await api("POST", "/places", { token, body: { name: "" } });
+    expect(invalid.status).toBe(400);
+    expect((await json<{ error: { code: string } }>(invalid)).error.code).toBe("validation_error");
+  });
+
+  it("atomically allows only one of two concurrent free-plan creates", async () => {
+    const { token } = await createAccount("limits-race@example.test", "Дом");
+    const responses = await Promise.all([
+      api("POST", "/places", { token, body: placePayload({ name: "Гонка А" }) }),
+      api("POST", "/places", { token, body: placePayload({ name: "Гонка Б" }) }),
+    ]);
+    expect(responses.map((response) => response.status).sort()).toEqual([201, 403]);
+    const rejected = responses.find((response) => response.status === 403)!;
+    expect((await json<{ error: { code: string } }>(rejected)).error.code).toBe("plan_limit");
+  });
+
   it("allows a business plan to exceed the free limits", async () => {
     const { token } = await createAccount("limits4@example.test", "Дом");
 
@@ -82,6 +134,29 @@ describe("plan limits", () => {
     const prop2 = await api("POST", "/properties", { token, body: propertyPayload({ placeId: p2.id, name: "Объект 2" }) });
     expect(prop2.status).toBe(201);
   });
+
+  it("blocks property restore and edit activation above the free quota", async () => {
+    const { token } = await createAccount("limits-properties-restore@example.test", "Дом");
+    const place = (await json<{ place: { id: string } }>(
+      await api("POST", "/places", { token, body: placePayload() }),
+    )).place;
+    await api("POST", "/properties", {
+      token,
+      body: propertyPayload({ placeId: place.id, name: "Активный объект" }),
+    });
+    const archived = (await json<{ property: { id: string } }>(
+      await api("POST", "/properties", {
+        token,
+        body: propertyPayload({ placeId: place.id, name: "Архивный объект", status: "archived" }),
+      }),
+    )).property;
+
+    expect((await api("POST", `/properties/${archived.id}/restore`, { token })).status).toBe(403);
+    expect((await api("PUT", `/properties/${archived.id}`, {
+      token,
+      body: propertyPayload({ placeId: place.id, name: "Архивный объект", status: "active" }),
+    })).status).toBe(403);
+  });
 });
 
 describe("manual plan change", () => {
@@ -98,6 +173,35 @@ describe("manual plan change", () => {
 
     const meAfter = await json<{ plan: string }>(await api("GET", "/auth/me", { token }));
     expect(meAfter.plan).toBe("business");
+  });
+
+  it("reports quota usage and grandfathers active rows after a downgrade", async () => {
+    const { token } = await createAccount("plan-usage@example.test", "Дом");
+    await api("PATCH", "/account/plan", { token, body: { plan: "business" } });
+    const first = (await json<{ place: { id: string } }>(
+      await api("POST", "/places", { token, body: placePayload({ name: "Первый" }) }),
+    )).place;
+    await api("POST", "/places", { token, body: placePayload({ name: "Второй" }) });
+
+    expect((await api("PATCH", "/account/plan", { token, body: { plan: "free" } })).status).toBe(200);
+    const usage = await json<{
+      plan: string;
+      usage: { places: { current: number; limit: number; remaining: number; overLimit: boolean } };
+    }>(await api("GET", "/account/plan", { token }));
+    expect(usage).toMatchObject({
+      plan: "free",
+      usage: { places: { current: 2, limit: 1, remaining: 0, overLimit: true } },
+    });
+
+    // Existing rows remain editable; only a new activation is blocked.
+    expect((await api("PUT", `/places/${first.id}`, {
+      token,
+      body: placePayload({ name: "Первый обновлён" }),
+    })).status).toBe(200);
+    expect((await api("POST", "/places", {
+      token,
+      body: placePayload({ name: "Третий" }),
+    })).status).toBe(403);
   });
 
   it("rejects an invalid plan value", async () => {

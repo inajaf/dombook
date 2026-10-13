@@ -23,7 +23,7 @@ function handleOptions(): Response {
     status: 204,
     headers: {
       "access-control-allow-origin": "*",
-      "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
       "access-control-allow-headers": "content-type, authorization, x-client-id",
       "access-control-max-age": "86400",
     },
@@ -36,7 +36,7 @@ export default {
 
     const repo = new Repository(env.DB);
     const auth = new AuthService(env, repo);
-    const customerRouter = buildRouter(repo, auth);
+    const customerRouter = buildRouter(repo, auth, env);
     const adminRouter = buildAdminRouter(repo);
 
     try {

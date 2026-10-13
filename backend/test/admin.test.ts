@@ -5,6 +5,17 @@ const ADMIN_KEY = "test-admin-key";
 const SETUP_TOKEN = "test-setup-token";
 
 describe("admin API", () => {
+  it("allows PATCH in browser CORS preflight", async () => {
+    const response = await api("OPTIONS", "/account/plan", {
+      headers: {
+        origin: "https://app.dombook.test",
+        "access-control-request-method": "PATCH",
+      },
+    });
+    expect(response.status).toBe(204);
+    expect(response.headers.get("access-control-allow-methods")).toContain("PATCH");
+  });
+
   it("rejects requests without the admin key", async () => {
     for (const path of ["/admin/health", "/admin/overview", "/admin/accounts"]) {
       const response = await api("GET", path);
