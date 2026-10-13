@@ -1,0 +1,157 @@
+{
+  "$comment": "Long-term rental terms shared by the server (Go) and the desktop (JS). wholeMonthsBetween is a PRICING rule, not formatting: rent = monthlyRate x months, so the two implementations must agree exactly or the same tenancy costs different amounts offline and online. The subtle cases are month-end clamping (31 Jan -> 28 Feb is one whole month, because AddCalendarMonths clamps) and sub-month spans (a one-day span is 0 months in BOTH directions, not -0 one way and 0 the other).",
+  "cases": [
+    {
+      "op": "wholeMonthsBetween",
+      "from": "2026-01-15",
+      "to": "2026-04-15",
+      "expect": 3,
+      "$comment": "the ordinary case: a quarter"
+    },
+    {
+      "op": "wholeMonthsBetween",
+      "from": "2026-01-15",
+      "to": "2026-04-14",
+      "expect": 2,
+      "$comment": "one day short of a quarter, so the third month is not complete"
+    },
+    {
+      "op": "wholeMonthsBetween",
+      "from": "2026-01-15",
+      "to": "2026-01-15",
+      "expect": 0
+    },
+    {
+      "op": "wholeMonthsBetween",
+      "from": "2026-01-15",
+      "to": "2026-02-15",
+      "expect": 1
+    },
+    {
+      "op": "wholeMonthsBetween",
+      "from": "2026-01-15",
+      "to": "2026-01-16",
+      "expect": 0,
+      "$comment": "a day is not a month"
+    },
+    {
+      "op": "wholeMonthsBetween",
+      "from": "2026-01-31",
+      "to": "2026-02-28",
+      "expect": 1,
+      "$comment": "clamping: the shortest 'one month later' from 31 Jan is 28 Feb"
+    },
+    {
+      "op": "wholeMonthsBetween",
+      "from": "2026-01-31",
+      "to": "2026-02-27",
+      "expect": 0,
+      "$comment": "one day short of the clamped month"
+    },
+    {
+      "op": "wholeMonthsBetween",
+      "from": "2026-01-31",
+      "to": "2026-03-31",
+      "expect": 2
+    },
+    {
+      "op": "wholeMonthsBetween",
+      "from": "2026-05-31",
+      "to": "2026-06-30",
+      "expect": 1,
+      "$comment": "another clamp, from a 31-day month into a 30-day one"
+    },
+    {
+      "op": "wholeMonthsBetween",
+      "from": "2026-01-15",
+      "to": "2027-01-15",
+      "expect": 12,
+      "$comment": "a one-year lease"
+    },
+    {
+      "op": "wholeMonthsBetween",
+      "from": "2025-12-15",
+      "to": "2026-12-15",
+      "expect": 12,
+      "$comment": "year crossing"
+    },
+    {
+      "op": "wholeMonthsBetween",
+      "from": "2026-12-31",
+      "to": "2027-01-01",
+      "expect": 0,
+      "$comment": "one day across a year boundary is still not a month"
+    },
+    {
+      "op": "wholeMonthsBetween",
+      "from": "2028-01-15",
+      "to": "2028-02-15",
+      "expect": 1,
+      "$comment": "leap February is still one month"
+    },
+    {
+      "op": "wholeMonthsBetween",
+      "from": "2028-02-29",
+      "to": "2028-03-29",
+      "expect": 1,
+      "$comment": "from a leap day"
+    },
+    {
+      "op": "wholeMonthsBetween",
+      "from": "2026-01-14",
+      "to": "2026-01-15",
+      "expect": 0
+    },
+    {
+      "op": "wholeMonthsBetween",
+      "from": "2026-01-15",
+      "to": "2026-01-14",
+      "expect": 0,
+      "$comment": "backwards by a day is 0, NOT -1: the count is taken from the earlier date so the result stays antisymmetric"
+    },
+    {
+      "op": "wholeMonthsBetween",
+      "from": "2026-04-15",
+      "to": "2026-01-15",
+      "expect": -3,
+      "$comment": "backwards by a quarter"
+    },
+    {
+      "op": "wholeMonthsBetween",
+      "from": "2026-03-15",
+      "to": "2026-01-15",
+      "expect": -2
+    },
+    {
+      "op": "rentFor",
+      "monthlyRateMinor": 60000,
+      "from": "2026-01-15",
+      "to": "2027-01-15",
+      "expect": 720000,
+      "$comment": "600 AZN/month for 12 months = 7200 AZN; the headline case"
+    },
+    {
+      "op": "rentFor",
+      "monthlyRateMinor": 60000,
+      "from": "2026-01-15",
+      "to": "2026-04-15",
+      "expect": 180000
+    },
+    {
+      "op": "rentFor",
+      "monthlyRateMinor": 60000,
+      "from": "2026-01-15",
+      "to": "2026-04-14",
+      "expect": 120000,
+      "$comment": "a day short of the quarter pays for two months, not three"
+    },
+    {
+      "op": "rentFor",
+      "monthlyRateMinor": 60000,
+      "from": "2026-01-31",
+      "to": "2026-02-28",
+      "expect": 60000,
+      "$comment": "the clamped month is a full month's rent"
+    }
+  ]
+}

@@ -84,6 +84,54 @@ func (d Date) AddDays(days int) Date {
 	return Date{year: t.Year(), month: t.Month(), day: t.Day()}
 }
 
+// WholeMonthsBetween returns how many whole calendar months fit from d to other.
+//
+// It is the inverse of AddCalendarMonths: the result is the largest n for which
+// d.AddCalendarMonths(n) does not pass other. So 2026-01-15 -> 2026-04-15 is 3,
+// and 2026-01-15 -> 2026-04-14 is 2, because a rent month is only complete when
+// its day-of-month is reached.
+//
+// Days are deliberately NOT divided by 30: that would make February cheaper than
+// January, and it would disagree with the month-end clamping AddCalendarMonths
+// already applies. Going through the clamp is also what makes 2026-01-31 ->
+// 2026-02-28 a whole month — the shortest expression of "one month later" from
+// 31 January is 28 February, so by the inverse definition that month is complete.
+//
+// Rent for a tenancy is computed from this, so the definition is a pricing rule,
+// not a formatting detail. It is mirrored in src/domain/booking/booking-policy.cjs
+// and pinned by fixtures/rental-terms-cases.json.
+//
+// Negative when other precedes d. The count is always taken from the EARLIER date
+// and the sign applied afterwards, which keeps the result antisymmetric: a
+// one-day span is 0 months whichever way round it is asked, rather than -0 in one
+// direction and 0 in the other.
+func (d Date) WholeMonthsBetween(other Date) int {
+	if other.Before(d) {
+		// The negation is of a non-negative count, so no sign normalisation is
+		// needed here: an int has no negative zero. The JS mirror does need one,
+		// which is why it normalises explicitly.
+		return -wholeMonthsForward(other, d)
+	}
+	return wholeMonthsForward(d, other)
+}
+
+// wholeMonthsForward counts whole months from an earlier-or-equal date to a later
+// one, using the same clamping AddCalendarMonths applies.
+func wholeMonthsForward(from, to Date) int {
+	// A month difference computed from the year/month fields is an upper bound;
+	// adding it can overshoot because of day-of-month, so step back while it does.
+	months := (to.year-from.year)*12 + int(to.month) - int(from.month)
+	if months < 0 {
+		// Later date in an earlier month number, e.g. 2026-12-31 -> 2027-01-01:
+		// the span is under a month, so zero is the right answer.
+		months = 0
+	}
+	for months > 0 && from.AddCalendarMonths(months).After(to) {
+		months--
+	}
+	return months
+}
+
 // NightsBetween returns the number of nights from d to other. A stay from the
 // 11th to the 14th is 3 nights. Negative when other precedes d.
 func (d Date) NightsBetween(other Date) int {

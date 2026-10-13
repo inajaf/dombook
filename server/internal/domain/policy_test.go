@@ -20,6 +20,7 @@ func TestEmbeddedFixturesMatchCanonical(t *testing.T) {
 		"booking-policy-cases.json",
 		"date-math-cases.json",
 		"plan-limit-cases.json",
+		"rental-terms-cases.json",
 	} {
 		t.Run(name, func(t *testing.T) {
 			embedded := readFixture(t, name)

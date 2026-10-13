@@ -50,6 +50,53 @@ function addCalendarMonths(value, months) {
   return target.toISOString().slice(0, 10);
 }
 
+/**
+ * How many whole calendar months fit from `from` to `to`.
+ *
+ * The inverse of addCalendarMonths: the largest n for which
+ * addCalendarMonths(from, n) does not pass `to`. It is a PRICING rule, not a
+ * formatting detail — rent is monthlyRate x months — so it is mirrored in Go
+ * (`Date.WholeMonthsBetween`) and pinned by fixtures/rental-terms-cases.json.
+ *
+ * Days are deliberately not divided by 30: that would make February cheaper than
+ * January and disagree with the month-end clamping above. Going through the clamp
+ * is what makes 31 Jan -> 28 Feb a whole month.
+ *
+ * The count is always taken from the earlier date with the sign applied
+ * afterwards, so a one-day span is 0 months in BOTH directions rather than -0 one
+ * way and 0 the other. Negative when `to` precedes `from`.
+ */
+function wholeMonthsBetween(from, to) {
+  // Always count from the earlier date and apply the sign afterwards, so the
+  // result is antisymmetric: a one-day span is 0 months either way round.
+  //
+  // The zero is normalised because negating a zero count yields -0, which is a
+  // different value to Object.is and serialises as "-0" in JSON. "Negative zero
+  // months" is not a thing, and letting it through would make the two stacks
+  // disagree on a value that is otherwise equal.
+  if (to < from) return -wholeMonthsForward(to, from) || 0;
+  return wholeMonthsForward(from, to);
+}
+
+function wholeMonthsForward(from, to) {
+  if (to < from) return 0;
+  const [fromYear, fromMonth] = from.split("-").map(Number);
+  const [toYear, toMonth] = to.split("-").map(Number);
+  // An upper bound from the year/month fields; adding it can overshoot because of
+  // day-of-month, so step back while it does.
+  let months = (toYear - fromYear) * 12 + (toMonth - fromMonth);
+  if (months < 0) months = 0;
+  while (months > 0 && addCalendarMonths(from, months) > to) months -= 1;
+  return months;
+}
+
+/** Rent for a term: whole months x the monthly rate. */
+function rentFor(from, to, monthlyRateMinor) {
+  const months = wholeMonthsBetween(from, to);
+  if (months <= 0) return 0;
+  return months * Number(monthlyRateMinor || 0);
+}
+
 function todayInTimeZone(date = new Date(), timeZone = BOOKING_POLICY.timeZone) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone,
@@ -114,10 +161,12 @@ function assertBookingDates({
 
 module.exports = {
   BOOKING_POLICY,
+  rentFor,
   resolvePolicy,
   addCalendarMonths,
   addDaysIso,
   assertBookingDates,
   bookingLimits,
   todayInTimeZone,
+  wholeMonthsBetween,
 };
