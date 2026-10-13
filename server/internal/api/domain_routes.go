@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -310,13 +311,16 @@ type unitView struct {
 	Capacity       int     `json:"capacity"`
 	BasePriceMinor int64   `json:"basePriceMinor"`
 	DepositMinor   int64   `json:"depositMinor"`
-	Currency       string  `json:"currency"`
-	CheckInTime    string  `json:"checkInTime"`
-	CheckOutTime   string  `json:"checkOutTime"`
-	Status         string  `json:"status"`
-	Notes          string  `json:"notes"`
-	Version        int64   `json:"version"`
-	UpdatedAt      string  `json:"updatedAt"`
+	// MonthlyRateMinor is the rent for a long-term let; 0 means the unit is not offered
+	// for rent, which is how the Rentals screen decides what to list.
+	MonthlyRateMinor int64  `json:"monthlyRateMinor"`
+	Currency         string `json:"currency"`
+	CheckInTime      string `json:"checkInTime"`
+	CheckOutTime     string `json:"checkOutTime"`
+	Status           string `json:"status"`
+	Notes            string `json:"notes"`
+	Version          int64  `json:"version"`
+	UpdatedAt        string `json:"updatedAt"`
 }
 
 func toUnitView(unit *store.Unit) unitView {
@@ -324,21 +328,22 @@ func toUnitView(unit *store.Unit) unitView {
 		return unitView{}
 	}
 	return unitView{
-		ID:             unit.ID,
-		PlaceID:        unit.PlaceID,
-		Kind:           unit.Kind,
-		Name:           unit.Name,
-		Location:       unit.Location,
-		Capacity:       unit.Capacity,
-		BasePriceMinor: unit.BasePriceMinor,
-		DepositMinor:   unit.DepositMinor,
-		Currency:       unit.Currency,
-		CheckInTime:    unit.CheckInTime,
-		CheckOutTime:   unit.CheckOutTime,
-		Status:         unit.Status,
-		Notes:          unit.Notes,
-		Version:        unit.Version,
-		UpdatedAt:      unit.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
+		ID:               unit.ID,
+		PlaceID:          unit.PlaceID,
+		Kind:             unit.Kind,
+		Name:             unit.Name,
+		Location:         unit.Location,
+		Capacity:         unit.Capacity,
+		BasePriceMinor:   unit.BasePriceMinor,
+		DepositMinor:     unit.DepositMinor,
+		MonthlyRateMinor: unit.MonthlyRateMinor,
+		Currency:         unit.Currency,
+		CheckInTime:      unit.CheckInTime,
+		CheckOutTime:     unit.CheckOutTime,
+		Status:           unit.Status,
+		Notes:            unit.Notes,
+		Version:          unit.Version,
+		UpdatedAt:        unit.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
 	}
 }
 
@@ -373,17 +378,22 @@ type serviceView struct {
 }
 
 type reservationView struct {
-	ID                 string        `json:"id"`
-	UnitID             string        `json:"unitId"`
-	GuestName          string        `json:"guestName"`
-	GuestPhone         string        `json:"guestPhone"`
-	GuestEmail         string        `json:"guestEmail"`
-	CheckInDate        string        `json:"checkInDate"`
-	CheckOutDate       string        `json:"checkOutDate"`
-	ActualCheckOutDate *string       `json:"actualCheckOutDate"`
-	Adults             int           `json:"adults"`
-	Children           int           `json:"children"`
-	Status             string        `json:"status"`
+	ID                 string  `json:"id"`
+	UnitID             string  `json:"unitId"`
+	GuestName          string  `json:"guestName"`
+	GuestPhone         string  `json:"guestPhone"`
+	GuestEmail         string  `json:"guestEmail"`
+	CheckInDate        string  `json:"checkInDate"`
+	CheckOutDate       string  `json:"checkOutDate"`
+	ActualCheckOutDate *string `json:"actualCheckOutDate"`
+	Adults             int     `json:"adults"`
+	Children           int     `json:"children"`
+	Status             string  `json:"status"`
+	// BookingKind is "stay" or "rental". A tenancy is a reservation with a long range,
+	// which is what lets one exclusion constraint cover both modes.
+	BookingKind        string        `json:"bookingKind"`
+	MonthlyRateMinor   int64         `json:"monthlyRateMinor"`
+	MeterReadings      any           `json:"meterReadings"`
 	NightlyRateMinor   int64         `json:"nightlyRateMinor"`
 	AccommodationMinor int64         `json:"accommodationMinor"`
 	ServicesMinor      int64         `json:"servicesMinor"`
@@ -454,6 +464,9 @@ func toReservationView(reservation *store.Reservation) reservationView {
 		DepositMinor:       reservation.DepositMinor,
 		DepositStatus:      reservation.DepositStatus,
 		Notes:              reservation.Notes,
+		BookingKind:        reservation.BookingKind,
+		MonthlyRateMinor:   reservation.MonthlyRateMinor,
+		MeterReadings:      decodeJSONOrEmpty(reservation.MeterReadings),
 		Nights:             nights,
 		Meals:              meals,
 		Services:           services,
@@ -469,4 +482,20 @@ func toReservationViews(reservations []store.Reservation) []reservationView {
 		views = append(views, toReservationView(&reservations[i]))
 	}
 	return views
+}
+
+// decodeJSONOrEmpty renders a jsonb column for the wire.
+//
+// An unreadable value becomes `{}` rather than null or an error: meter readings are
+// reference data an operator typed in, and a malformed blob must not make an otherwise
+// valid booking unreadable.
+func decodeJSONOrEmpty(raw []byte) any {
+	if len(raw) == 0 {
+		return map[string]any{}
+	}
+	var decoded any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return map[string]any{}
+	}
+	return decoded
 }

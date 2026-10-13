@@ -419,7 +419,7 @@ func (s *Service) GetReservation(ctx context.Context, tenantID, reservationID st
 }
 
 // reservationDeps assembles what the reservation validator needs from storage.
-func (s *Service) reservationDeps(ctx context.Context, tenantID string, existing *store.Reservation) (domain.ReservationDeps, error) {
+func (s *Service) reservationDeps(ctx context.Context, tenantID string, existing *store.Reservation, kind domain.BookingKind) (domain.ReservationDeps, error) {
 	policy, err := s.policyFor(ctx, tenantID)
 	if err != nil {
 		return domain.ReservationDeps{}, translate(err)
@@ -439,17 +439,19 @@ func (s *Service) reservationDeps(ctx context.Context, tenantID string, existing
 	deps := domain.ReservationDeps{
 		Policy: policy,
 		Today:  today,
+		Kind:   kind,
 		Unit: func(unitID string) (*domain.ValidatedUnit, bool) {
 			unit, err := s.store.GetUnit(ctx, tenantID, unitID)
 			if err != nil || unit == nil {
 				return nil, false
 			}
 			return &domain.ValidatedUnit{
-				ID:             unit.ID,
-				PlaceID:        unit.PlaceID,
-				Capacity:       unit.Capacity,
-				BasePriceMinor: unit.BasePriceMinor,
-				Status:         unit.Status,
+				ID:               unit.ID,
+				PlaceID:          unit.PlaceID,
+				Capacity:         unit.Capacity,
+				BasePriceMinor:   unit.BasePriceMinor,
+				MonthlyRateMinor: unit.MonthlyRateMinor,
+				Status:           unit.Status,
 			}, true
 		},
 		PlaceHasFoodService: func(placeID string) bool {
@@ -467,6 +469,7 @@ func (s *Service) reservationDeps(ctx context.Context, tenantID string, existing
 			UnitID:             existing.UnitID,
 			CheckIn:            existing.CheckInDate,
 			CheckOut:           existing.CheckOutDate,
+			MonthlyRateMinor:   existing.MonthlyRateMinor,
 			NightlyRateMinor:   existing.NightlyRateMinor,
 			AccommodationMinor: existing.AccommodationMinor,
 			ActualCheckOut:     existing.ActualCheckOutDate,
@@ -477,7 +480,11 @@ func (s *Service) reservationDeps(ctx context.Context, tenantID string, existing
 
 // CreateReservation validates and stores a booking.
 func (s *Service) CreateReservation(ctx context.Context, tenantID, writer string, payload map[string]any) (*store.Reservation, error) {
-	deps, err := s.reservationDeps(ctx, tenantID, nil)
+	// The kind has to be read BEFORE deps are built, because it selects which policy
+	// bound the validator applies. Reading it afterwards would validate a tenancy against
+	// the stay window and refuse it.
+	kind := domain.ParseBookingKind(payload["bookingKind"])
+	deps, err := s.reservationDeps(ctx, tenantID, nil, kind)
 	if err != nil {
 		return nil, err
 	}
@@ -507,7 +514,13 @@ func (s *Service) UpdateReservation(ctx context.Context, tenantID, reservationID
 	if err != nil {
 		return nil, translate(err)
 	}
-	deps, err := s.reservationDeps(ctx, tenantID, existing)
+	// An edit that does not mention the kind keeps the stored one: a tenancy must not
+	// silently become a stay, which would re-judge it against the shorter window.
+	kind := domain.ParseBookingKind(existing.BookingKind)
+	if _, present := payload["bookingKind"]; present {
+		kind = domain.ParseBookingKind(payload["bookingKind"])
+	}
+	deps, err := s.reservationDeps(ctx, tenantID, existing, kind)
 	if err != nil {
 		return nil, err
 	}

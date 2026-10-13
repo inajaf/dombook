@@ -132,6 +132,12 @@ func ValidateUnit(input map[string]any, lookup UnitLookup) (*UnitInput, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The rent for a long-term let. Optional, so a unit listed only for nightly stays
+	// does not have to send it; 0 means "not offered for rent".
+	monthlyRate, err := Money(defaultIfNil(input["monthlyRateMinor"], 0), "monthlyRateMinor", "Месячная ставка")
+	if err != nil {
+		return nil, err
+	}
 
 	currency := strings.ToUpper(strings.TrimSpace(toString(input["currency"])))
 	if currency == "" {
@@ -177,18 +183,19 @@ func ValidateUnit(input map[string]any, lookup UnitLookup) (*UnitInput, error) {
 	}
 
 	return &UnitInput{
-		PlaceID:        placeID,
-		Kind:           kind,
-		Name:           name,
-		Location:       location,
-		Capacity:       capacity,
-		BasePriceMinor: basePrice,
-		DepositMinor:   deposit,
-		Currency:       currency,
-		CheckInTime:    checkInTime,
-		CheckOutTime:   checkOutTime,
-		Notes:          notes,
-		Status:         parseStatus(input["status"]),
+		PlaceID:          placeID,
+		Kind:             kind,
+		Name:             name,
+		Location:         location,
+		Capacity:         capacity,
+		BasePriceMinor:   basePrice,
+		DepositMinor:     deposit,
+		MonthlyRateMinor: monthlyRate,
+		Currency:         currency,
+		CheckInTime:      checkInTime,
+		CheckOutTime:     checkOutTime,
+		Notes:            notes,
+		Status:           parseStatus(input["status"]),
 	}, nil
 }
 
@@ -253,6 +260,11 @@ type ReservationDeps struct {
 	Policy Policy
 	// Today is the current date in the policy timezone.
 	Today Date
+	// Kind selects which policy bound applies: a tenancy is exempt from the advance
+	// window and bounded by MaximumTenancyMonths instead. Carried in Deps rather than
+	// read from the input, because it decides the RULE while the input merely carries
+	// the dates the rule is applied to.
+	Kind BookingKind
 }
 
 // ValidatedUnit is the subset of a unit the reservation validator needs.
@@ -261,13 +273,36 @@ type ValidatedUnit struct {
 	PlaceID        *string
 	Capacity       int
 	BasePriceMinor int64
-	Status         string
+	// MonthlyRateMinor prices a tenancy. It is captured from the unit at creation, like
+	// BasePriceMinor, so a later rate change does not reprice an existing lease.
+	MonthlyRateMinor int64
+	Status           string
+}
+
+// suppliedMoney reports a money field's value when the client actually sent one.
+//
+// Distinct from Money(), which cannot tell an absent field from a zero: for a negotiated
+// rent the difference matters, because "0" is not a plausible override while "absent"
+// means "use the rate".
+func suppliedMoney(raw any) (int64, bool) {
+	if raw == nil {
+		return 0, false
+	}
+	if text, ok := raw.(string); ok && strings.TrimSpace(text) == "" {
+		return 0, false
+	}
+	value, err := Money(raw, "accommodationMinor", "Сумма проживания")
+	if err != nil {
+		return 0, false
+	}
+	return value, true
 }
 
 // ExistingReservation carries the stored values of the booking being updated.
 type ExistingReservation struct {
 	ID                 string
 	UnitID             string
+	MonthlyRateMinor   int64
 	CheckIn            Date
 	CheckOut           Date
 	NightlyRateMinor   int64
@@ -360,7 +395,7 @@ func ValidateReservation(input map[string]any, deps ReservationDeps) (*Reservati
 	if existing != nil {
 		existingBooking = &ExistingBooking{CheckIn: existing.CheckIn, CheckOut: existing.CheckOut}
 	}
-	if err := deps.Policy.AssertBookingDates(checkIn, checkOut, deps.Today, existingBooking); err != nil {
+	if err := deps.Policy.AssertBookingDatesFor(deps.Kind, checkIn, checkOut, deps.Today, existingBooking); err != nil {
 		return nil, err
 	}
 
@@ -387,16 +422,54 @@ func ValidateReservation(input map[string]any, deps ReservationDeps) (*Reservati
 		}
 	}
 
-	// The rate is captured when the booking is created and preserved on edit unless
-	// the unit changes, so a later price rise does not silently reprice old stays.
-	nightlyRate := unit.BasePriceMinor
-	if existing != nil && existing.UnitID == unitID && existing.NightlyRateMinor > 0 {
-		nightlyRate = existing.NightlyRateMinor
+	// Pricing branches on the kind, because a tenancy is priced by the month and a stay by
+	// the night. They must NOT share an arithmetic path: multiplying a nightly rate by 365
+	// produces a number that looks like a year's rent and is not one.
+	//
+	// Both rates are captured at creation and preserved on edit unless the unit changes, so
+	// a later price rise does not silently reprice an existing booking.
+	var (
+		nightlyRate        int64
+		monthlyRateMinor   int64
+		accommodationMinor int64
+	)
+
+	if deps.Kind == KindRental {
+		monthlyRateMinor = unit.MonthlyRateMinor
+		if existing != nil && existing.UnitID == unitID && existing.MonthlyRateMinor > 0 {
+			monthlyRateMinor = existing.MonthlyRateMinor
+		}
+
+		// One whole calendar month is the shortest tenancy. A shorter span has a month
+		// count of zero, which would make the rent zero — a free let, silently.
+		months := checkIn.WholeMonthsBetween(checkOut)
+		if months < 1 {
+			return nil, &FieldError{
+				Code:    CodeRentalTooShort,
+				Field:   "checkOutDate",
+				Message: "Аренда не может быть короче одного календарного месяца",
+			}
+		}
+
+		accommodationMinor = int64(months) * monthlyRateMinor
+	} else {
+		nightlyRate = unit.BasePriceMinor
+		if existing != nil && existing.UnitID == unitID && existing.NightlyRateMinor > 0 {
+			nightlyRate = existing.NightlyRateMinor
+		}
+		accommodationMinor = int64(len(nights)) * nightlyRate
 	}
 
-	accommodationMinor := int64(len(nights)) * nightlyRate
+	// An explicitly supplied amount wins over the computed one. This is the negotiated
+	// figure — the whole reason the field is not simply derived on every read — and it
+	// applies to both kinds.
+	if supplied, ok := suppliedMoney(input["accommodationMinor"]); ok {
+		accommodationMinor = supplied
+	}
+
 	if actualCheckOut != nil && existing != nil {
-		// Already-charged amount: the guest was billed for the original stay.
+		// Already-charged amount: the guest was billed for the original booking, so an
+		// early departure must not restate it.
 		accommodationMinor = existing.AccommodationMinor
 	}
 
@@ -464,6 +537,8 @@ func ValidateReservation(input map[string]any, deps ReservationDeps) (*Reservati
 		Adults:             adults,
 		Children:           children,
 		Status:             ParseReservationStatus(input["status"]),
+		Kind:               deps.Kind,
+		MonthlyRateMinor:   monthlyRateMinor,
 		NightlyRateMinor:   nightlyRate,
 		AccommodationMinor: accommodationMinor,
 		Meals:              meals,
