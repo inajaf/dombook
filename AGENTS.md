@@ -34,6 +34,21 @@ anywhere would let a customer who paid once fall back to the free cap.
 - There is **no payment endpoint in the Go server yet**. Entitlements are granted by an operator or a
   future webhook; the desktop's licence button says so rather than opening a subscription checkout.
 
+## Client/server parity
+
+The desktop and the server must judge a booking by the same rules, and a client-side rule that
+is never given the account's real configuration is the failure mode to watch for.
+
+- The server owns `today` and the booking window; the client caches both and validates against
+  the cache. `src/database.cjs` passes `policy: this.bookingPolicy()` into `assertBookingDates` —
+  omit it and the client silently applies the compiled 21-day default while the server accepts
+  the booking, so the user is refused a booking they are entitled to make. Gated by
+  `tests/entitlements.test.cjs` and `scripts/verify-policy-parity.mjs`.
+- **`upsertSetting` writes only to the in-memory database.** Every caller must call `persist()`
+  itself, or the value is lost on restart. `setBookingPolicy`, `setEntitlements`, and
+  `ensureDeviceId` all do; `setLanguage` already did. A cache that does not survive a restart is
+  useless exactly when it is needed — offline, on a licensed device.
+
 ## Cutover from D1
 
 `server/CUTOVER.md` is the procedure. `server/cmd/migrate-d1` moves a D1 file into PostgreSQL;

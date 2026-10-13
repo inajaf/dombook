@@ -622,6 +622,11 @@ class DomBookDatabase {
       maximumStayMonths: resolved.maximumStayMonths,
       timeZone: resolved.timeZone,
     }));
+    // Persist immediately. `upsertSetting` only writes to the in-memory database, and the file
+    // is rewritten by the mutating methods that wrap themselves in `transaction`. Without this
+    // the cached window lives only until the next restart — which is precisely the situation
+    // the cache exists for, since an offline device restarts with no way to re-fetch it.
+    this.persist();
     return resolved;
   }
 
@@ -665,6 +670,10 @@ class DomBookDatabase {
   /** Record the entitlements the server reported. */
   setEntitlements(entitlements) {
     this.upsertSetting("entitlements", JSON.stringify({ ...entitlements, cachedAt: nowIso() }));
+    // Persisted for the same reason as the booking policy: a licence cached only in memory
+    // would be lost on restart, and a licensed user opening the app offline would be treated
+    // as unlicensed.
+    this.persist();
     return this.entitlements();
   }
 
@@ -751,6 +760,7 @@ class DomBookDatabase {
     }
     this.writerId = crypto.randomUUID();
     this.upsertSetting("device_id", this.writerId);
+    this.persist();
   }
 
   seedDemoData() {
@@ -1111,6 +1121,14 @@ class DomBookDatabase {
       checkOutDate,
       today: this.todayProvider(),
       existingReservation: existing,
+      // The account's window, as last reported by the server.
+      //
+      // Without this the client applies the compiled 21-day default regardless of what the
+      // account is configured for, so an owner who widened the window would still be refused
+      // locally while the server — which reads the real policy — would have accepted it. The
+      // two have to judge by the same rule, or the client invents a limit the account does
+      // not have.
+      policy: this.bookingPolicy(),
     });
     const actualCheckOutDate = existing?.actual_check_out_date || null;
     if (actualCheckOutDate && (actualCheckOutDate < checkInDate || actualCheckOutDate >= checkOutDate)) {
