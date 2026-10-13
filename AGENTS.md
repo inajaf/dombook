@@ -83,6 +83,28 @@ subscription-shaped (`free | pro | business`, 1 place + 1 property), which the p
 licensing model replaced — see the licences section above. Its migration files are the source
 of the D1 shapes that `internal/d1import` reads.
 
+## The renderer is sandboxed (desktop)
+
+`src/renderer/app.js` runs with `sandbox: true` and cannot `require` anything. It must not
+reimplement a rule that also lives in the shared domain module — that is the drift
+`fixtures/*.json` exists to prevent.
+
+- When a screen needs a computed domain value, compute it in `src/main.cjs` and send it over
+  IPC. The rentals page reads `rental_months`, computed in the main process, for exactly this
+  reason.
+- **`form.reset()` leaves `<select>` elements UNSELECTED** (`selectedIndex === -1`), and
+  assigning a value that is not among the options leaves them unselected too. On a `required`
+  select, submit then does *nothing at all* with no error shown. Set `selectedIndex`
+  explicitly, and make sure a default id comes from the list actually offered — a dialog that
+  filters its options must not default to an entry it filtered out.
+
+## The IPC authentication gate (desktop)
+
+Hiding the workspace behind the login screen is presentation, not security. Every IPC channel
+except `SIGNED_OUT_CHANNELS` in `src/main.cjs` requires a session; without that, `places.list`
+and `places.create` both answered while signed out. Gated by `tests/ipc-gate.test.cjs`, which
+fails if a data channel is allowlisted or an allowlisted channel is misspelled.
+
 ## Cloud auth (desktop login)
 
 Desktop auth lives in `src/main/auth.cjs` and persists the JWT encrypted through

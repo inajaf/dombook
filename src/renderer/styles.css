@@ -635,3 +635,35 @@ tbody tr:last-child td { border-bottom: 0; }
 .policy-form input { padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; font: inherit; }
 .policy-form input:invalid { border-color: #a33636; }
 .policy-form .form-error { margin: 0; color: #a33636; font-size: 12px; }
+
+/* Long-term rentals. The cards are read as a portfolio, so the money figures sit in one row
+   of four rather than being spread down the card. */
+.rental-totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-top: 18px; }
+.rental-totals > div {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: var(--surface);
+  display: grid;
+  gap: 4px;
+}
+.rental-totals span { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.rental-totals strong { font-size: 17px; }
+
+.rental-list { display: grid; gap: 14px; margin-top: 16px; }
+.rental-card {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 18px 20px;
+  background: var(--surface);
+  display: grid;
+  gap: 12px;
+}
+.rental-card > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.rental-card h3 { margin: 2px 0 0; font-size: 16px; }
+.rental-card header small { color: var(--muted); }
+.rental-terms { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 14px; margin: 0; }
+.rental-terms dt { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.rental-terms dd { margin: 3px 0 0; font-weight: 700; }
+.rental-readings { margin: 0; font-size: 12px; }
+.rental-actions { display: flex; gap: 10px; flex-wrap: wrap; }

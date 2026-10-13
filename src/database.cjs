@@ -13,6 +13,7 @@ const {
   assertBookingDates,
   bookingLimits,
   resolvePolicy,
+  wholeMonthsBetween,
   todayInTimeZone,
 } = require("./domain/booking/booking-policy.cjs");
 
@@ -81,6 +82,7 @@ const SCHEMA_TABLES = {
     location TEXT NOT NULL DEFAULT '',
     capacity INTEGER NOT NULL CHECK(capacity > 0),
     base_price_minor INTEGER NOT NULL DEFAULT 0 CHECK(base_price_minor >= 0),
+    monthly_rate_minor INTEGER NOT NULL DEFAULT 0 CHECK(monthly_rate_minor >= 0),
     deposit_minor INTEGER NOT NULL DEFAULT 0 CHECK(deposit_minor >= 0),
     currency TEXT NOT NULL DEFAULT 'AZN',
     check_in_time TEXT NOT NULL DEFAULT '15:00',
@@ -104,6 +106,9 @@ const SCHEMA_TABLES = {
     adults INTEGER NOT NULL DEFAULT 1 CHECK(adults > 0),
     children INTEGER NOT NULL DEFAULT 0 CHECK(children >= 0),
     status TEXT NOT NULL CHECK(status IN ('hold','confirmed','checked_in','checked_out','cancelled','no_show')),
+    booking_kind TEXT NOT NULL DEFAULT 'stay' CHECK(booking_kind IN ('stay','rental')),
+    monthly_rate_minor INTEGER NOT NULL DEFAULT 0 CHECK(monthly_rate_minor >= 0),
+    meter_readings TEXT NOT NULL DEFAULT '{}',
     nightly_rate_minor INTEGER NOT NULL DEFAULT 0 CHECK(nightly_rate_minor >= 0),
     accommodation_minor INTEGER NOT NULL DEFAULT 0 CHECK(accommodation_minor >= 0),
     services_minor INTEGER NOT NULL DEFAULT 0 CHECK(services_minor >= 0),
@@ -194,6 +199,34 @@ const SCHEMA_INDEXES = [
   "CREATE INDEX IF NOT EXISTS audit_created_idx ON audit_log(created_at DESC)",
   "CREATE UNIQUE INDEX IF NOT EXISTS app_settings_key_idx ON app_settings(setting_key)",
 ];
+
+/**
+ * Normalise meter readings for storage.
+ *
+ * Stored as a JSON string, defaulting to "{}" rather than NULL so every read has a string
+ * to parse. An unparseable value becomes "{}" rather than throwing: meter readings are
+ * reference data an operator typed in, and losing a whole booking because of a typo in them
+ * would be a far worse failure than losing the readings.
+ */
+function normalizeMeterReadings(raw) {
+  if (raw === undefined || raw === null || raw === "") return "{}";
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      return typeof parsed === "object" && parsed !== null ? JSON.stringify(parsed) : "{}";
+    } catch {
+      return "{}";
+    }
+  }
+  if (typeof raw === "object") {
+    try {
+      return JSON.stringify(raw);
+    } catch {
+      return "{}";
+    }
+  }
+  return "{}";
+}
 
 function nowIso() {
   return new Date().toISOString();
@@ -342,6 +375,13 @@ class DomBookDatabase {
       this.ensureColumn("reservations", "accommodation_minor", "INTEGER NOT NULL DEFAULT 0 CHECK(accommodation_minor >= 0)");
       this.ensureColumn("reservations", "services_minor", "INTEGER NOT NULL DEFAULT 0 CHECK(services_minor >= 0)");
       this.ensureColumn("reservations", "actual_check_out_date", "TEXT");
+      // Long-term rentals. Added to existing databases in place, like the columns above:
+      // an installed app must gain the rental fields without a rebuild that would lose
+      // local data.
+      this.ensureColumn("properties", "monthly_rate_minor", "INTEGER NOT NULL DEFAULT 0 CHECK(monthly_rate_minor >= 0)");
+      this.ensureColumn("reservations", "booking_kind", "TEXT NOT NULL DEFAULT 'stay'");
+      this.ensureColumn("reservations", "monthly_rate_minor", "INTEGER NOT NULL DEFAULT 0 CHECK(monthly_rate_minor >= 0)");
+      this.ensureColumn("reservations", "meter_readings", "TEXT NOT NULL DEFAULT '{}'");
       this.db.run(`
         UPDATE reservations
         SET accommodation_minor = total_minor
@@ -995,6 +1035,10 @@ class DomBookDatabase {
       location: optionalText(input.location, 200),
       capacity: integer(input.capacity, "Вместимость", 1, 100),
       basePriceMinor: money(input.basePriceMinor, "Базовая цена"),
+      // The rent for a long-term let. Defaults to 0, meaning the unit is not offered for
+      // rent — which is how the Rentals screen decides what to list, rather than a separate
+      // availability flag that could disagree with the price.
+      monthlyRateMinor: money(input.monthlyRateMinor ?? 0, "Месячная ставка"),
       depositMinor: money(input.depositMinor, "Депозит"),
       currency: requiredText(input.currency || "AZN", "Валюта", 3).toUpperCase(),
       checkInTime: requiredText(input.checkInTime || "15:00", "Время заезда", 5),
@@ -1015,11 +1059,13 @@ class DomBookDatabase {
       const id = crypto.randomUUID();
       this.run(
         `INSERT INTO properties(
-          id, place_id, kind, name, location, capacity, base_price_minor, deposit_minor, currency,
+          id, place_id, kind, name, location, capacity, base_price_minor, monthly_rate_minor,
+          deposit_minor, currency,
           check_in_time, check_out_time, status, notes, created_at, updated_at, version, last_writer
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
         [
-          id, data.placeId, data.kind, data.name, data.location, data.capacity, data.basePriceMinor, data.depositMinor,
+          id, data.placeId, data.kind, data.name, data.location, data.capacity, data.basePriceMinor,
+          data.monthlyRateMinor, data.depositMinor,
           data.currency, data.checkInTime, data.checkOutTime, data.status, data.notes,
           timestamp, timestamp, this.writerId,
         ],
@@ -1043,12 +1089,14 @@ class DomBookDatabase {
       if (duplicate) throw new Error("Объект с таким наименованием уже существует");
       this.run(
         `UPDATE properties SET
-          place_id = ?, kind = ?, name = ?, location = ?, capacity = ?, base_price_minor = ?, deposit_minor = ?,
+          place_id = ?, kind = ?, name = ?, location = ?, capacity = ?, base_price_minor = ?,
+          monthly_rate_minor = ?, deposit_minor = ?,
           currency = ?, check_in_time = ?, check_out_time = ?, status = ?, notes = ?,
           updated_at = ?, version = version + 1, last_writer = ?
         WHERE id = ?`,
         [
-          data.placeId, data.kind, data.name, data.location, data.capacity, data.basePriceMinor, data.depositMinor,
+          data.placeId, data.kind, data.name, data.location, data.capacity, data.basePriceMinor,
+          data.monthlyRateMinor, data.depositMinor,
           data.currency, data.checkInTime, data.checkOutTime, data.status, data.notes,
           nowIso(), this.writerId, propertyId,
         ],
@@ -1125,6 +1173,10 @@ class DomBookDatabase {
     const checkInDate = validDate(input.checkInDate, "Дата заезда");
     const checkOutDate = validDate(input.checkOutDate, "Дата выезда");
     const nights = eachNight(checkInDate, checkOutDate);
+    // "stay" or "rental". Read before validation, because the kind decides which booking
+    // window applies: a tenancy is exempt from the advance window, so judging it as a stay
+    // would refuse an ordinary lease.
+    const bookingKind = input.bookingKind === "rental" ? "rental" : "stay";
     const status = ALLOWED_RESERVATION_STATUSES.has(input.status) ? input.status : "hold";
     const depositStatus = ALLOWED_DEPOSIT_STATUSES.has(input.depositStatus) ? input.depositStatus : "none";
     const adults = integer(input.adults ?? 1, "Взрослые", 1, 100);
@@ -1148,17 +1200,51 @@ class DomBookDatabase {
       // two have to judge by the same rule, or the client invents a limit the account does
       // not have.
       policy: this.bookingPolicy(),
+      kind: bookingKind,
     });
     const actualCheckOutDate = existing?.actual_check_out_date || null;
     if (actualCheckOutDate && (actualCheckOutDate < checkInDate || actualCheckOutDate >= checkOutDate)) {
       throw new Error("После досрочного выезда даты проживания нельзя сдвинуть за фактическую дату выезда");
     }
+    // Pricing branches on the kind. A tenancy is rent for whole calendar months; a stay is
+    // nights x nightly rate. They must not share an arithmetic path — multiplying a nightly
+    // rate by 365 produces a number that looks like a year's rent and is not one. The month
+    // count comes from the same helper the server uses, pinned in both languages by
+    // fixtures/rental-terms-cases.json.
     const nightlyRateMinor = existing && existing.property_id === propertyId
       ? existing.nightly_rate_minor
       : property.base_price_minor;
-    const accommodationMinor = actualCheckOutDate
-      ? existing.accommodation_minor
-      : nightlyRateMinor * nights.length;
+    const monthlyRateMinor = existing && existing.property_id === propertyId && existing.monthly_rate_minor > 0
+      ? existing.monthly_rate_minor
+      : property.monthly_rate_minor || 0;
+
+    // A negotiated amount is read first, because it replaces the computed figure entirely.
+    // Checking the unit's rate before this would refuse a let that the owner has already
+    // agreed a price for — the negotiated amount is the whole reason the field exists.
+    const hasNegotiated = input.accommodationMinor !== undefined
+      && input.accommodationMinor !== null
+      && input.accommodationMinor !== "";
+
+    let accommodationMinor;
+    if (hasNegotiated) {
+      accommodationMinor = money(input.accommodationMinor, "Сумма проживания");
+    } else if (bookingKind === "rental") {
+      const months = wholeMonthsBetween(checkInDate, checkOutDate);
+      if (months < 1) {
+        // Zero whole months would price the let at nothing, silently.
+        throw new Error("Аренда не может быть короче одного календарного месяца");
+      }
+      if (!monthlyRateMinor) {
+        throw new Error("Для аренды укажите месячную ставку объекта или сумму вручную");
+      }
+      accommodationMinor = months * monthlyRateMinor;
+    } else {
+      accommodationMinor = nightlyRateMinor * nights.length;
+    }
+
+    if (actualCheckOutDate) {
+      accommodationMinor = existing.accommodation_minor;
+    }
     const place = property.place_id ? this.getPlace(property.place_id) : null;
     if (!Array.isArray(input.mealItems ?? [])) {
       throw new Error("Питание: неверный формат данных");
@@ -1206,6 +1292,12 @@ class DomBookDatabase {
       adults,
       children,
       status,
+      bookingKind,
+      monthlyRateMinor,
+      // Meter readings are typed in per tenancy and stored as text. A malformed value
+      // falls back to an empty object rather than failing the save: they are reference
+      // data, and a typo in them must not lose the booking.
+      meterReadings: normalizeMeterReadings(input.meterReadings),
       nightlyRateMinor,
       accommodationMinor,
       meals,
@@ -1272,13 +1364,15 @@ class DomBookDatabase {
       this.run(
         `INSERT INTO reservations(
           id, property_id, guest_name, guest_phone, guest_email, check_in_date, check_out_date,
-          adults, children, status, nightly_rate_minor, accommodation_minor, services_minor,
+          adults, children, status, booking_kind, monthly_rate_minor, meter_readings,
+          nightly_rate_minor, accommodation_minor, services_minor,
           total_minor, prepaid_minor, deposit_minor, deposit_status, notes, created_at, updated_at,
           version, last_writer
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
         [
           id, data.propertyId, data.guestName, data.guestPhone, data.guestEmail,
           data.checkInDate, data.checkOutDate, data.adults, data.children, data.status,
+          data.bookingKind, data.monthlyRateMinor, data.meterReadings,
           data.nightlyRateMinor, data.accommodationMinor, data.servicesMinor,
           data.totalMinor, data.prepaidMinor, data.depositMinor, data.depositStatus,
           data.notes, timestamp, timestamp, this.writerId,

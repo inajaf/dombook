@@ -81,6 +81,7 @@
     <symbol id="i-calendar" viewBox="0 0 24 24"><path d="M7 3v3m10-3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v14H4V6a1 1 0 0 1 1-1Z"/></symbol>
     <symbol id="i-house" viewBox="0 0 24 24"><path d="m3 11 9-7 9 7v9h-6v-6H9v6H3z"/></symbol>
     <symbol id="i-book" viewBox="0 0 24 24"><path d="M6 3h12a2 2 0 0 1 2 2v16H7a3 3 0 0 1-3-3V5a2 2 0 0 1 2-2Zm1 14h13M8 7h8M8 11h6"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><path d="M14.5 5a4.5 4.5 0 1 0-3.9 6.8L4 18.5V21h3l1-1.5h2v-2h2l1.5-1.5A4.5 4.5 0 0 0 14.5 5Zm1.5 3.5v.01"/></symbol>
     <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4 2.5 20h19L12 4Zm0 6v5m0 3v.5"/></symbol>
     <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5"/></symbol>
     <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm8 3 2 2-2 3-3-.5-1 1.5.5 3-3 1.5-2-2-2 2-3-1.5.5-3L5 16.5 2 17l-2-3 2-2-2-2 2-3 3 .5L6.5 6 6 3l3-1.5 2 2 2-2L16 3l-.5 3L17 7.5l3-.5 2 3Z"/></symbol>
@@ -120,6 +121,10 @@
 
       <div class="sidebar-spacer"></div>
       <nav class="nav-list nav-secondary">
+        <button class="nav-item" data-page="rentals">
+          <svg><use href="#i-key"/></svg><span>Аренда</span>
+          <span class="nav-badge" id="rentalBadge" hidden>0</span>
+        </button>
         <button class="nav-item" data-page="conflicts">
           <svg><use href="#i-alert"/></svg><span>Конфликты</span>
           <span class="nav-badge" id="conflictBadge" hidden>0</span>
@@ -223,6 +228,22 @@
             <h3>Добавьте первый объект</h3><p>Это может быть отдельный дом или коттедж внутри дома отдыха.</p>
             <button class="button primary" data-quick="property"><svg><use href="#i-plus"/></svg>Добавить объект</button>
           </div>
+        </section>
+
+        <section class="page" id="page-rentals" aria-labelledby="rentals-heading">
+          <div class="section-head">
+            <div>
+              <p class="section-note">Договоры аренды на месяц и больше</p>
+              <h2 id="rentals-heading">Долгосрочная аренда</h2>
+            </div>
+            <button class="button primary compact" id="newRental">Новый договор</button>
+          </div>
+          <p class="muted" id="rentalsIntro">
+            Здесь договоры аренды. Занятость общая с посуточными бронями: квартира не может быть
+            сдана посуточно на даты, занятые договором.
+          </p>
+          <div class="rental-totals" id="rentalTotals"></div>
+          <div class="rental-list" id="rentalList"></div>
         </section>
 
         <section class="page" id="page-conflicts" aria-labelledby="conflicts-heading">
@@ -345,6 +366,7 @@
           <label class="field"><span>Вместимость <b aria-hidden="true">*</b></span><input name="capacity" type="number" min="1" max="100" value="4" required></label>
           <label class="field"><span>Валюта</span><select name="currency"><option value="AZN">AZN — манат</option><option value="USD">USD — доллар</option><option value="EUR">EUR — евро</option></select></label>
           <label class="field"><span>Цена за ночь</span><div class="money-input"><input name="basePrice" type="number" min="0" step="0.01" value="0"><span>₼</span></div></label>
+          <label class="field"><span>Цена за месяц</span><div class="money-input"><input name="monthlyRate" type="number" min="0" step="0.01" value="0"><span>₼</span></div><small>Для долгосрочной аренды. Оставьте 0, если объект сдаётся только посуточно.</small></label>
           <label class="field"><span>Страховой депозит</span><div class="money-input"><input name="deposit" type="number" min="0" step="0.01" value="0"><span>₼</span></div></label>
           <label class="field"><span>Заезд</span><input name="checkInTime" type="time" value="15:00"></label>
           <label class="field"><span>Выезд</span><input name="checkOutTime" type="time" value="11:00"></label>
@@ -393,6 +415,13 @@
         <div class="form-section">
           <h3><span>1</span>Дом и даты</h3>
           <div class="form-grid">
+            <label class="field span-2"><span>Тип брони</span>
+              <select name="bookingKind" id="reservationKind">
+                <option value="stay">Посуточная бронь</option>
+                <option value="rental">Долгосрочная аренда</option>
+              </select>
+              <small id="bookingKindHelp">Для аренды посуточные ограничения по датам не действуют.</small>
+            </label>
             <label class="field span-2"><span>Дом <b aria-hidden="true">*</b></span><select name="propertyId" id="reservationProperty" required></select></label>
             <label class="field"><span>Заезд <b aria-hidden="true">*</b></span><input name="checkInDate" type="date" required><small id="checkInDateHelp">Бронь доступна максимум на 21 день вперёд.</small></label>
             <label class="field"><span>Выезд <b aria-hidden="true">*</b></span><input name="checkOutDate" type="date" required><small id="checkOutDateHelp">Проживание — максимум 3 календарных месяца.</small></label>

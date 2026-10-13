@@ -3,6 +3,7 @@ const PAGE_META = {
   calendar: { eyebrow: "Доступность", title: "Календарь", action: "Новая бронь", actionType: "reservation", search: false },
   reservations: { eyebrow: "Гости и деньги", title: "Бронирования", action: "Новая бронь", actionType: "reservation", search: true },
   properties: { eyebrow: "Инвентарь", title: "Объекты", action: "Добавить объект", actionType: "property", search: true },
+  rentals: { eyebrow: "Договоры", title: "Аренда", action: "Новый договор", actionType: "rental", search: true },
   conflicts: { eyebrow: "Целостность данных", title: "Конфликты", action: "Новая бронь", actionType: "reservation", search: false },
   settings: { eyebrow: "Надёжность", title: "Настройки", action: "Создать backup", actionType: "backup", search: false },
 };
@@ -50,6 +51,9 @@ const state = {
   // The account's licence, as last reported by the server. Cached in the main process so an
   // offline device still knows what it may do.
   entitlements: null,
+  // Tenancies, filtered from the same reservation list the rest of the app uses. Kept
+  // separate so the page and its badge do not re-scan the list on every render.
+  rentals: [],
 };
 
 const api = window.domBook || createBrowserDemoApi();
@@ -233,7 +237,11 @@ async function refreshCore() {
   // count correct from startup: an operator must not have to open the page to learn that
   // something needs attention.
   state.conflicts = reservations.filter((item) => item.status === "conflict");
+  // Tenancies are reservations with a kind, so they are derived from the same load rather
+  // than fetched separately: a second query could disagree with this list.
+  state.rentals = reservations.filter((item) => item.booking_kind === "rental");
   updateConflictBadge();
+  if (state.page === "rentals") renderRentals();
   if (state.page === "conflicts") renderConflicts();
   refreshSyncStatus().catch(() => {});
 }
@@ -297,6 +305,7 @@ function navigate(page) {
     refreshEntitlements().catch(() => {});
   }
   if (page === "conflicts") refreshConflicts().catch((error) => toast(error.message, "error"));
+  if (page === "rentals") renderRentals();
   $("#main-content").focus({ preventScroll: true });
 }
 
@@ -424,6 +433,146 @@ function filteredProperties() {
     if (!showArchived && property.status === "archived") return false;
     return !query || [property.name, property.location, property.place_name].some((value) => String(value || "").toLocaleLowerCase("ru").includes(query));
   });
+}
+
+/**
+ * Render the rentals page.
+ *
+ * Tenancies are reservations with `booking_kind = "rental"`, so this reads the same list the
+ * reservations page does and filters it. That is deliberate: a tenancy and a stay share one
+ * availability calendar, and a second data source could disagree with it.
+ */
+function renderRentals() {
+  const list = $("#rentalList");
+  const rentals = state.rentals || [];
+
+  const badge = $("#rentalBadge");
+  if (badge) {
+    badge.textContent = String(rentals.length);
+    badge.hidden = rentals.length === 0;
+  }
+
+  if (rentals.length === 0) {
+    list.innerHTML = `
+      <div class="empty-state">
+        <strong>Договоров пока нет</strong>
+        <p>Нажмите «Новый договор», чтобы сдать объект на месяц или дольше. Для этого у объекта
+        должна быть указана цена за месяц.</p>
+      </div>`;
+    $("#rentalTotals").innerHTML = "";
+    return;
+  }
+
+  // A small summary, because the first question about a portfolio of leases is what it is
+  // worth and what is due.
+  const rentTotal = rentals.reduce((sum, item) => sum + (item.accommodation_minor || 0), 0);
+  const dueTotal = rentals.reduce((sum, item) => sum + Math.max((item.total_minor || 0) - (item.prepaid_minor || 0), 0), 0);
+  const depositHeld = rentals.reduce((sum, item) => sum + (item.deposit_minor || 0), 0);
+  $("#rentalTotals").innerHTML = `
+    <div><span>Договоров</span><strong>${rentals.length}</strong></div>
+    <div><span>Сумма аренды</span><strong>${money(rentTotal)}</strong></div>
+    <div><span>Остаток к оплате</span><strong>${money(dueTotal)}</strong></div>
+    <div><span>Депозиты</span><strong>${money(depositHeld)}</strong></div>`;
+
+  list.innerHTML = rentals.map((rental) => {
+    const unit = state.properties.find((item) => item.id === rental.property_id);
+    // Precomputed by the main process, which owns the one implementation of the month
+    // count. The renderer is sandboxed and cannot load modules, and a second copy of this
+    // arithmetic here is exactly the drift the shared fixtures exist to prevent.
+    const months = rental.rental_months || 0;
+    const readings = readMeterReadings(rental.meter_readings);
+    const readingsText = Object.entries(readings)
+      .map(([name, value]) => `${escapeHtml(name)}: ${escapeHtml(String(value?.start ?? "—"))} → ${escapeHtml(String(value?.end ?? "—"))}`)
+      .join(" · ");
+    return `
+      <article class="rental-card" data-rental="${escapeHtml(rental.id)}">
+        <header>
+          <div>
+            <p class="eyebrow">${escapeHtml(reservationStatusLabel(rental.status))}</p>
+            <h3 data-i18n-ignore>${escapeHtml(rental.guest_name)}</h3>
+            <small data-i18n-ignore>${escapeHtml(unit?.name || "Объект удалён")}</small>
+          </div>
+          <span class="pill">${months} мес.</span>
+        </header>
+        <dl class="rental-terms">
+          <div><dt>Срок</dt><dd data-i18n-ignore>${escapeHtml(rental.check_in_date)} — ${escapeHtml(rental.check_out_date)}</dd></div>
+          <div><dt>Аренда</dt><dd>${money(rental.accommodation_minor)}</dd></div>
+          <div><dt>Депозит</dt><dd>${money(rental.deposit_minor)}</dd></div>
+          <div><dt>Остаток</dt><dd>${money(Math.max((rental.total_minor || 0) - (rental.prepaid_minor || 0), 0))}</dd></div>
+        </dl>
+        ${readingsText ? `<p class="muted rental-readings">Показания: <span data-i18n-ignore>${readingsText}</span></p>` : ""}
+        <footer class="rental-actions">
+          <button class="button secondary compact" data-edit-rental="${escapeHtml(rental.id)}">Изменить</button>
+        </footer>
+      </article>`;
+  }).join("");
+}
+
+/**
+ * The Russian label for a reservation status.
+ *
+ * The rentals page rendered the raw stored value ("HOLD"), which is an internal token rather
+ * than something an owner should read. An unknown status falls back to the raw value so a new
+ * status is visible rather than blank.
+ */
+const RESERVATION_STATUS_LABELS = {
+  hold: "Предварительная",
+  confirmed: "Подтверждена",
+  checked_in: "Гость в доме",
+  checked_out: "Завершена",
+  cancelled: "Отменена",
+  no_show: "Не приехал",
+  conflict: "Конфликт",
+};
+
+function reservationStatusLabel(status) {
+  return RESERVATION_STATUS_LABELS[status] || status || "";
+}
+
+/** Parse stored meter readings, tolerating anything unreadable. */
+function readMeterReadings(raw) {
+  if (!raw) return {};
+  try {
+    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Reflect the booking kind in the dialog's hint text.
+ *
+ * The two kinds are judged by different limits — a tenancy is exempt from the advance window
+ * and bounded by the month cap instead — so leaving the stay wording in place would tell the
+ * user the wrong rule while they fill the form in.
+ */
+function applyKindToDialog(kind) {
+  const isRental = kind === "rental";
+  const policy = state.systemInfo?.bookingPolicy || {};
+  const checkInHelp = $("#checkInDateHelp");
+  const checkOutHelp = $("#checkOutDateHelp");
+  if (checkInHelp) {
+    checkInHelp.textContent = isRental
+      ? "Для аренды ограничение по сроку подачи заявки не действует."
+      : `Бронь доступна максимум на ${policy.maximumAdvanceDays ?? 21} день вперёд.`;
+  }
+  if (checkOutHelp) {
+    checkOutHelp.textContent = isRental
+      ? `Аренда — до ${policy.maximumTenancyMonths ?? 24} календарных месяцев.`
+      : `Проживание — максимум ${policy.maximumStayMonths ?? 3} календарных месяца.`;
+  }
+  // Meals are a per-night service and are refused for a tenancy, so the section is hidden
+  // rather than left visible and rejected on submit.
+  const mealsSection = $("#mealSection") || document.querySelector("[data-meal-section]");
+  if (mealsSection) mealsSection.hidden = isRental;
+}
+
+/** Open the reservation dialog as a rental. */
+function openRentalDialog(rental = null) {
+  // Rentals are reservations, so this is the ordinary dialog with the kind preset. A second
+  // dialog would be a second place for validation to diverge.
+  openReservationDialog(rental, { bookingKind: "rental" });
 }
 
 function renderProperties() {
@@ -912,13 +1061,26 @@ function updateReservationDateLimits() {
   const isNew = !form.elements.id.value;
   const checkInChanged = isNew || checkIn.value !== form.dataset.originalCheckIn;
   const datesChanged = checkInChanged || isNew || checkOut.value !== form.dataset.originalCheckOut;
-  const checkInWithinWindow = checkIn.value >= policy.today && checkIn.value <= policy.maximumCheckInDate;
+
+  // A tenancy is judged by different rules, and the DATE INPUTS must reflect that or the
+  // browser's own validation blocks the form before any of our checks run: a `max` of
+  // today + 21 days makes a lease a year out an invalid field, and submit() silently does
+  // nothing. So the bounds are computed per kind rather than once.
+  const isRental = form.elements.bookingKind?.value === "rental";
+  const maximumStayMonths = isRental
+    ? (policy.maximumTenancyMonths ?? 24)
+    : (policy.maximumStayMonths ?? 3);
+  // The advance window does not apply to a tenancy, so its upper bound is open.
+  const maximumCheckInDate = isRental ? "" : policy.maximumCheckInDate;
+  const checkInWithinWindow = isRental
+    ? Boolean(checkIn.value) && checkIn.value >= policy.today
+    : Boolean(checkIn.value) && checkIn.value >= policy.today && checkIn.value <= policy.maximumCheckInDate;
   const maximumCheckOutDate = checkIn.value && checkInWithinWindow
-    ? addCalendarMonthsIso(checkIn.value, policy.maximumStayMonths)
+    ? addCalendarMonthsIso(checkIn.value, maximumStayMonths)
     : "";
 
   checkIn.min = checkInChanged ? policy.today : "";
-  checkIn.max = checkInChanged ? policy.maximumCheckInDate : "";
+  checkIn.max = checkInChanged ? maximumCheckInDate : "";
   checkOut.min = datesChanged && checkIn.value ? addDaysIso(checkIn.value) : "";
   checkOut.max = datesChanged ? maximumCheckOutDate : "";
 
@@ -926,7 +1088,7 @@ function updateReservationDateLimits() {
   let checkOutError = "";
   if (checkInChanged && checkIn.value < policy.today) {
     checkInError = "Дата заезда не может быть в прошлом";
-  } else if (checkInChanged && checkIn.value > policy.maximumCheckInDate) {
+  } else if (checkInChanged && !isRental && checkIn.value > policy.maximumCheckInDate) {
     checkInError = interfaceLanguage() === "en"
       ? `Check-in is available only through ${longDate(policy.maximumCheckInDate)}`
       : interfaceLanguage() === "az"
@@ -947,12 +1109,18 @@ function updateReservationDateLimits() {
 
   const checkInHelp = $("#checkInDateHelp");
   const checkOutHelp = $("#checkOutDateHelp");
-  checkInHelp.textContent = checkInError || bookingWindowHelp(policy.today, policy.maximumCheckInDate);
+  checkInHelp.textContent = checkInError || (isRental
+    ? "Для аренды ограничение по сроку подачи заявки не действует."
+    : bookingWindowHelp(policy.today, policy.maximumCheckInDate));
   checkOutHelp.textContent = checkOutError || (maximumCheckOutDate
-    ? maximumCheckoutHelp(maximumCheckOutDate)
+    ? (isRental
+      ? `Аренда — до ${maximumStayMonths} календарных месяцев.`
+      : maximumCheckoutHelp(maximumCheckOutDate))
     : checkInError
       ? "Сначала выберите допустимую дату заезда."
-      : maximumStayHelp(policy.maximumStayMonths));
+      : (isRental
+        ? `Аренда — до ${maximumStayMonths} календарных месяцев.`
+        : maximumStayHelp(policy.maximumStayMonths)));
   checkInHelp.classList.toggle("limit-error", Boolean(checkInError));
   checkOutHelp.classList.toggle("limit-error", Boolean(checkOutError));
 }
@@ -967,14 +1135,33 @@ function openReservationDialog(reservation = null, defaults = {}) {
   const form = $("#reservationForm");
   form.reset();
   $("#reservationFormError").hidden = true;
-  $("#reservationProperty").innerHTML = houses.map((property) =>
+
+  // The kind decides which units can be chosen. A tenancy needs a monthly rate: offering a
+  // unit without one would let the user fill in a whole form and only then be told the let
+  // cannot be priced.
+  const kind = reservation?.booking_kind === "rental" || defaults.bookingKind === "rental" ? "rental" : "stay";
+  form.elements.bookingKind.value = kind;
+  const eligible = kind === "rental"
+    ? houses.filter((property) => (property.monthly_rate_minor || 0) > 0)
+    : houses;
+  if (kind === "rental" && eligible.length === 0) {
+    toast("Ни у одного объекта не указана цена за месяц", "error");
+    navigate("properties");
+    return;
+  }
+  $("#reservationProperty").innerHTML = eligible.map((property) =>
     `<option value="${property.id}">${escapeHtml(property.place_name ? `${property.place_name} — ${property.name}` : property.name)} · ${escapeHtml(capacityLabel(property.capacity))}</option>`
   ).join("");
+  applyKindToDialog(kind);
   const today = state.systemInfo?.bookingPolicy?.today || new Date().toISOString().slice(0, 10);
   const tomorrow = addDaysIso(today);
   const afterTomorrow = addDaysIso(today, 2);
   form.elements.id.value = reservation?.id || "";
-  form.elements.propertyId.value = reservation?.property_id || defaults.propertyId || houses[0].id;
+  // The default unit comes from the ELIGIBLE list, not the full one. Using houses[0] would
+  // assign a unit that is not an option for a tenancy, and assigning an unknown value to a
+  // <select> silently leaves it unselected — which, on a required field, makes submit do
+  // nothing at all with no error shown.
+  form.elements.propertyId.value = reservation?.property_id || defaults.propertyId || eligible[0].id;
   form.elements.checkInDate.value = reservation?.check_in_date || defaults.checkInDate || tomorrow;
   form.elements.checkOutDate.value = reservation?.check_out_date || defaults.checkOutDate || afterTomorrow;
   form.dataset.originalCheckIn = reservation?.check_in_date || "";
@@ -1153,6 +1340,8 @@ async function submitProperty(event) {
     capacity: Number(form.elements.capacity.value),
     currency: form.elements.currency.value,
     basePriceMinor: decimalToMinor(form.elements.basePrice.value),
+    // 0 means "not offered for rent", which is how the Rentals page decides what to list.
+    monthlyRateMinor: decimalToMinor(form.elements.monthlyRate.value),
     depositMinor: decimalToMinor(form.elements.deposit.value),
     checkInTime: form.elements.checkInTime.value,
     checkOutTime: form.elements.checkOutTime.value,
@@ -1216,6 +1405,7 @@ async function submitReservation(event) {
   const errorBox = $("#reservationFormError");
   errorBox.hidden = true;
   const payload = {
+    bookingKind: form.elements.bookingKind?.value === "rental" ? "rental" : "stay",
     propertyId: form.elements.propertyId.value,
     checkInDate: form.elements.checkInDate.value,
     checkOutDate: form.elements.checkOutDate.value,
@@ -1356,6 +1546,12 @@ function bindEvents() {
   $("#buyLicense")?.addEventListener("click", () => {
     purchaseLicense().catch((error) => toast(error.message, "error"));
   });
+  $("#newRental")?.addEventListener("click", () => openRentalDialog());
+  $("#reservationKind")?.addEventListener("change", (event) => {
+    // Re-filter the unit list: a tenancy needs a unit with a monthly rate, so changing the
+    // kind can change what is selectable.
+    openReservationDialog(null, { bookingKind: event.target.value });
+  });
   $("#syncNow")?.addEventListener("click", () => {
     syncNow().catch((error) => toast(error.message, "error"));
   });
@@ -1459,6 +1655,12 @@ function bindEvents() {
         .then(() => toast("Дом отдыха восстановлен"))
         .catch((error) => toast(error.message, "error"));
     }
+    if (target.dataset.editRental) {
+      const rental = (state.rentals || []).find((item) => item.id === target.dataset.editRental);
+      if (rental) openRentalDialog(rental);
+      return;
+    }
+
     if (target.dataset.conflictAction) {
       const action = target.dataset.conflictAction;
       const reservationId = target.dataset.id;
@@ -1510,6 +1712,7 @@ function bindEvents() {
     const action = $("#primaryAction").dataset.actionType || PAGE_META[state.page].actionType;
     if (action === "property") openPropertyDialog();
     else if (action === "backup") createBackup();
+    else if (action === "rental") openRentalDialog();
     else openReservationDialog();
   });
 
@@ -1645,8 +1848,18 @@ async function requestLoginCode() {
     let result = await unwrap(api.auth.send(email));
     if (result?.loginable === false) {
       try {
+        // Provisioning the account makes the address loginable, but the code the send above
+        // already issued remains valid — it is keyed by address, not by account. Asking for a
+        // SECOND code here would be refused by the send throttle (one per address per minute),
+        // which is exactly how first-run signup used to fail: the account was created and the
+        // user was left staring at "too many requests". Reuse the code when the server echoed
+        // one, which it does only with AUTH_EXPOSE_CODE on.
+        const alreadyIssued = result?.code;
         await unwrap(api.auth.setup(email));
-        result = await unwrap(api.auth.send(email));
+        // Provisioning the account is exactly what makes the address loginable, so the
+        // judgement made a moment ago is now stale. Without this, the client rejects the
+        // account it just created — "no account for this email" on the user's own signup.
+        result = alreadyIssued ? { ...result, loginable: true } : await unwrap(api.auth.send(email));
       } catch (setupError) {
         if (setupError?.code !== "user_exists") throw setupError;
       }

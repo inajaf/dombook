@@ -5,6 +5,7 @@ const { DomBookDatabase } = require("./database.cjs");
 const { createAuthApi } = require("./main/auth.cjs");
 const { createAuthSessionStore } = require("./main/auth-session.cjs");
 const { createSyncEngine } = require("./main/sync.cjs");
+const { wholeMonthsBetween } = require("./domain/booking/booking-policy.cjs");
 const { nowIso } = require("./database.cjs");
 
 let mainWindow;
@@ -45,10 +46,67 @@ function fail(error) {
   return { ok: false, error: error?.message || "Неизвестная ошибка" };
 }
 
+/**
+ * IPC channels that must work while signed out.
+ *
+ * Everything else is refused without a session. The renderer hides the workspace behind the
+ * login screen, but hiding is presentation: without a gate here, anything that can reach the
+ * bridge — a compromised renderer, DevTools, or simply a stale window — could read and write
+ * the whole local database without signing in.
+ */
+const SIGNED_OUT_CHANNELS = new Set([
+  "auth:status",
+  "auth:send",
+  "auth:setup",
+  "auth:verify",
+  "auth:setPlan",
+  "auth:checkout",
+  "auth:logout",
+  // The login screen shows the language selector and reads app paths before anyone signs in.
+  "system:info",
+  "system:setLanguage",
+]);
+
+// The session is cached rather than read from disk per call: every data channel would
+// otherwise decrypt the stored session, and the cache is refreshed on sign-in and sign-out.
+let sessionCache;
+let sessionCacheAt = 0;
+const SESSION_CACHE_MS = 5_000;
+
+async function hasSession() {
+  if (!authApi) return false;
+  const now = Date.now();
+  if (sessionCache !== undefined && now - sessionCacheAt < SESSION_CACHE_MS) return sessionCache;
+  try {
+    sessionCache = Boolean(await authApi.restore());
+  } catch {
+    // Unreachable server or a rejected token both mean no usable session.
+    sessionCache = false;
+  }
+  sessionCacheAt = now;
+  return sessionCache;
+}
+
+/** Drop the cached session so the next check re-reads it. */
+function invalidateSessionCache() {
+  sessionCache = undefined;
+  sessionCacheAt = 0;
+}
+
 function handle(channel, action) {
   ipcMain.handle(channel, async (_event, payload) => {
     try {
-      return ok(await action(payload));
+      if (!SIGNED_OUT_CHANNELS.has(channel) && !(await hasSession())) {
+        // A distinct code, so the renderer can return to the login screen rather than
+        // showing a generic failure for what is really "you are not signed in".
+        return fail(Object.assign(new Error("Требуется вход в аккаунт"), { code: "unauthenticated", status: 401 }));
+      }
+      const result = await action(payload);
+      // Signing in or out changes the answer, so the cache must not outlive it.
+      if (channel === "auth:verify" || channel === "auth:logout" || channel === "auth:checkout") {
+        invalidateSessionCache();
+      }
+      return ok(result);
     } catch (error) {
       return fail(error);
     }
@@ -137,6 +195,15 @@ function registerIpc() {
 
     handle("dashboard:get", () => database.dashboard());
     handle("calendar:get", (payload) => database.calendar(payload?.days ?? 14));
+  // The renderer is sandboxed and cannot load modules, so the month count a tenancy displays
+  // is computed here, where the shared booking-policy module already lives. One
+  // implementation, pinned in both languages by fixtures/rental-terms-cases.json.
+  handle("reservations:list", () => database.listReservations().map((reservation) => ({
+    ...reservation,
+    rental_months: reservation.booking_kind === "rental"
+      ? wholeMonthsBetween(reservation.check_in_date, reservation.check_out_date)
+      : 0,
+  })));
 
     handle("places:list", (payload) => database.listPlaces(payload));
     handle("places:create", (payload) => database.createPlace(payload));
@@ -150,7 +217,6 @@ function registerIpc() {
     handle("properties:archive", (payload) => database.archiveProperty(payload.id));
     handle("properties:restore", (payload) => database.restoreProperty(payload.id));
 
-    handle("reservations:list", () => database.listReservations());
     handle("reservations:create", (payload) => database.createReservation(payload));
     handle("reservations:update", (payload) => database.updateReservation(payload.id, payload.data));
     handle("reservations:cancel", (payload) => database.cancelReservation(payload.id));
