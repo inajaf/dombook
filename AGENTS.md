@@ -98,6 +98,32 @@ reimplement a rule that also lives in the shared domain module — that is the d
   explicitly, and make sure a default id comes from the list actually offered — a dialog that
   filters its options must not default to an entry it filtered out.
 
+## Syncing a lease (known gap)
+
+A tenancy is a reservation, so it syncs through the same path — and that path has bitten three
+times while testing the rentals UI. Two are fixed and pinned; one is open.
+
+- **Nights must be queued, not just the booking.** `insertNights` inserted rows directly and
+  never called `enqueueSync`, so a lease reached the server with no nights and every other
+  device showed the unit as free for the whole term. Gated by `tests/rentals.test.cjs`.
+- **`has_food_service` is an integer locally and a boolean on the server.** pgx cannot encode a
+  Go int as bool, so the push failed with "unable to encode 0 into binary format for bool" and
+  the outbox never drained. `toRemote` coerces the columns listed in `BOOLEAN_COLUMNS`; a SQL
+  cast does NOT help, because the failure is while encoding, before the cast.
+- **The push payload must be in dependency order.** It is built from a JS object, and relying
+  on insertion order is intermittent. `SYNC_ORDER` in `src/main/sync.cjs` mirrors the server's
+  `SyncTables`, and a test asserts `reservations` precedes `reservation_nights`.
+- **OPEN: `reservation_nights_reservation_id_fkey` still fails on a large first push.** A
+  seeded demo account (4 units, 2 bookings, 730 nights) pushing in one batch is refused with a
+  foreign key violation even with the ordering fix in place. Not diagnosed. Pushing in smaller
+  batches, or sending children only after their parent was acknowledged, are the obvious
+  directions.
+
+Note also that the desktop seeds a demo dataset on first run that **cannot fit a free account**
+(4 units against a cap of 1), so a brand-new free user's first sync fails on
+`dombook_plan_limit_units` / `dombook_plan_limit_places`. That is a product decision — seed
+less, or seed only for a licensed account — not a bug in the push path.
+
 ## The IPC authentication gate (desktop)
 
 Hiding the workspace behind the login screen is presentation, not security. Every IPC channel

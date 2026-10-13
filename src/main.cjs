@@ -147,39 +147,46 @@ function registerIpc() {
     // against the same rule the server will apply.
     handle("bookingPolicy:get", async (_payload) => {
       try {
-        const policy = await authApi.bookingPolicy();
+        // authApi returns the whole response envelope, so the policy sits one level in.
+        // Spreading the envelope made the renderer read `data.data.maximumTenancyMonths`,
+        // which is undefined — the settings panel then showed nothing for the field while
+        // the value was present.
+        const response = await authApi.bookingPolicy();
+        const policy = response?.data ?? response ?? {};
         database.setBookingPolicy(policy);
-        const cached = database.bookingPolicy();
-        return ok({ ...policy, ...cached });
+        return { ...policy, ...database.bookingPolicy() };
       } catch (error) {
         // Offline is a normal state, not a failure: report the cached window so the UI keeps
         // working and say that it is cached.
-        return ok({ ...database.bookingPolicy(), stale: true, error: error?.message ?? String(error) });
+        return { ...database.bookingPolicy(), stale: true, error: error?.message ?? String(error) };
       }
     });
 
     handle("bookingPolicy:set", async (payload) => {
-      const policy = await authApi.setBookingPolicy(payload ?? {});
+      const response = await authApi.setBookingPolicy(payload ?? {});
+      const policy = response?.data ?? response ?? {};
       database.setBookingPolicy(policy);
-      return ok({ ...policy, ...database.bookingPolicy() });
+      return { ...policy, ...database.bookingPolicy() };
     });
 
-    // Cached locally so the client can explain the account's limits without a round trip, and
-    // so an offline device keeps working.
+
     handle("entitlements:get", async () => {
       try {
-        const entitlements = await authApi.entitlements();
+        // Same envelope as the policy call: the licence sits one level in, and spreading the
+        // envelope would have made `paid` undefined so a licensed account read as unlicensed.
+        const response = await authApi.entitlements();
+        const entitlements = response?.data ?? response ?? {};
         database.setEntitlements(entitlements);
-        return ok({ ...entitlements, stale: false, allowance: database.unitAllowanceStatus() });
+        return { ...entitlements, stale: false, allowance: database.unitAllowanceStatus() };
       } catch (error) {
         // Offline is expected, not an error: report the cached copy and say it is cached.
         const cached = database.entitlements();
-        return ok({
+        return {
           ...(cached ?? { paid: false, planName: "Бесплатный", unitLimit: 1, features: [] }),
           stale: true,
           error: error?.message ?? String(error),
           allowance: database.unitAllowanceStatus(),
-        });
+        };
       }
     });
 

@@ -263,3 +263,118 @@ test("rentals are distinguishable from stays in the list the UI reads", async (t
   assert.equal(rentals.length, 1, "exactly the tenancy is a rental");
   assert.equal(all.filter((r) => r.booking_kind !== "rental").length, 1, "the stay is not");
 });
+
+
+test("a tenancy's nights are queued for sync, not just the booking", async (t) => {
+  const db = await freshDatabase(t);
+  const place = seedPlace(db);
+  const flat = unit(db, place, { name: "Квартира", monthlyRateMinor: 60000 });
+  const today = todayOf(db);
+
+  const rental = db.createReservation({
+    propertyId: flat.id, guestName: "Арендатор",
+    checkInDate: addMonths(today, 1), checkOutDate: addMonths(addMonths(today, 1), 3),
+    bookingKind: "rental", status: "confirmed",
+    prepaidMinor: 0, depositMinor: 0, depositStatus: "none", adults: 2, children: 0,
+  });
+
+  const nights = db.query(
+    "SELECT COUNT(*) AS n FROM reservation_nights WHERE reservation_id = ?",
+    [rental.id],
+  )[0].n;
+  assert.ok(nights > 80, `the lease should occupy ~3 months of nights, got ${nights}`);
+
+  // `reservation_nights` is a synced table. Queueing only the reservation sent the booking
+  // without its nights, so a second device held a tenancy that blocked nothing and showed the
+  // unit as free for the whole term — a double-booking waiting to happen.
+  const queued = db.query(
+    `SELECT COUNT(*) AS n FROM sync_outbox
+      WHERE table_name = 'reservation_nights'
+        AND row_id IN (SELECT id FROM reservation_nights WHERE reservation_id = ?)`,
+    [rental.id],
+  )[0].n;
+  assert.equal(queued, nights, "every night of the tenancy must be queued for sync");
+});
+
+test("an ordinary stay also queues its nights", async (t) => {
+  const db = await freshDatabase(t);
+  const place = seedPlace(db);
+  const cottage = unit(db, place, { name: "Коттедж", basePriceMinor: 20000, kind: "cottage" });
+  const today = todayOf(db);
+
+  const stay = db.createReservation({
+    propertyId: cottage.id, guestName: "Гость",
+    checkInDate: addDays(today, 5), checkOutDate: addDays(today, 8),
+    status: "confirmed", prepaidMinor: 0, depositMinor: 0, depositStatus: "none",
+    adults: 2, children: 0,
+  });
+
+  const queued = db.query(
+    `SELECT COUNT(*) AS n FROM sync_outbox
+      WHERE table_name = 'reservation_nights'
+        AND row_id IN (SELECT id FROM reservation_nights WHERE reservation_id = ?)`,
+    [stay.id],
+  )[0].n;
+  assert.equal(queued, 3, "a 3-night stay must queue 3 nights");
+});
+
+
+// --- push payload ordering and column types ---------------------------------
+//
+// Both of these were found by pushing a real lease to the server: the sync failed with
+// "unable to encode 0 into binary format for bool" and then with a foreign key violation. A
+// unit suite that never speaks to the server cannot see either.
+
+const { toRemote } = require("../src/main/sync.cjs");
+
+test("a boolean column is sent as a boolean, not as SQLite's 0/1", async (t) => {
+  // SQLite has no boolean type, so has_food_service is an integer locally. The server's column
+  // is a real boolean and pgx encodes a Go int as int8: the parameter cannot be converted, the
+  // whole batch is refused, and the outbox never drains. A numeric cast in SQL does not help,
+  // because the failure happens while encoding, before the cast.
+  const remote = toRemote("places", { id: "p1", name: "Дом", has_food_service: 1 });
+  assert.equal(remote.has_food_service, true, "1 must become true");
+  assert.equal(toRemote("places", { id: "p1", name: "Дом", has_food_service: 0 }).has_food_service, false,
+    "0 must become false");
+});
+
+test("the push payload is ordered so a booking precedes its child rows", async (t) => {
+  const { createSyncEngine, TABLE_MAP } = require("../src/main/sync.cjs");
+  assert.ok(TABLE_MAP, "TABLE_MAP is exported");
+
+  const db = await freshDatabase(t);
+  const place = seedPlace(db);
+  const flat = unit(db, place, { name: "Квартира", monthlyRateMinor: 60000 });
+  const today = todayOf(db);
+  db.createReservation({
+    propertyId: flat.id, guestName: "Арендатор",
+    checkInDate: addMonths(today, 1), checkOutDate: addMonths(addMonths(today, 1), 3),
+    bookingKind: "rental", status: "confirmed",
+    prepaidMinor: 0, depositMinor: 0, depositStatus: "none", adults: 2, children: 0,
+  });
+
+  let sentOrder = null;
+  const engine = createSyncEngine({
+    db,
+    transport: {
+      async push(payload) {
+        sentOrder = Object.keys(payload.changes);
+        return { applied: 0, stale: 0, conflicts: 0, rejected: 0, results: [], state: { version: 1 } };
+      },
+      async pull() { return { state: { version: 1 }, changes: {} }; },
+    },
+    nowIso: () => new Date().toISOString(),
+    deviceId: () => "test-device",
+  });
+  await engine.sync();
+
+  assert.ok(sentOrder, "a push was issued");
+  const reservationAt = sentOrder.indexOf("reservations");
+  const nightsAt = sentOrder.indexOf("reservation_nights");
+  assert.ok(reservationAt >= 0 && nightsAt >= 0, `both tables must be sent, got ${sentOrder}`);
+  assert.ok(
+    reservationAt < nightsAt,
+    `reservations must precede reservation_nights or the nights violate the foreign key and ` +
+    `the whole batch is rolled back; got ${sentOrder}`,
+  );
+});

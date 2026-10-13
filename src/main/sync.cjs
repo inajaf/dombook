@@ -46,6 +46,39 @@ const COLUMN_MAP = {
   reservation_nights: { property_id: "unit_id" },
 };
 
+/**
+ * Columns that are BOOLEAN on the server but 0/1 integers in the local SQLite schema.
+ *
+ * SQLite has no boolean type, so `has_food_service` is stored as an integer. The server's
+ * column is a real boolean and pgx encodes a Go int as int8, which cannot be converted to
+ * bool — the push fails with "unable to encode 0 into binary format for bool", the whole
+ * batch is rejected, and the outbox never drains. A numeric cast in SQL does not help,
+ * because the failure happens while ENCODING the parameter, before the cast.
+ */
+const BOOLEAN_COLUMNS = {
+  places: ["has_food_service"],
+};
+
+/**
+ * The order tables must be pushed in.
+ *
+ * It mirrors `SyncTables` in the server's `internal/store/sync_tables.go`, and it matters:
+ * a reservation must exist before its nights, or the nights violate the foreign key and the
+ * ENTIRE batch is rolled back. Relying on JavaScript object key order made this
+ * intermittent — a lease created after a place happened to be sent in a safe order, while one
+ * created when only nights and bookings were queued sent the nights first and failed with
+ * `reservation_nights_reservation_id_fkey`.
+ */
+const SYNC_ORDER = [
+  "places",
+  "units",
+  "reservations",
+  "reservation_nights",
+  "reservation_services",
+  "reservation_meals",
+  "app_settings",
+];
+
 /** Columns the server owns and the client must not send or overwrite. */
 const SERVER_OWNED = new Set(["tenant_id", "version", "last_writer", "updated_at", "conflict_code", "conflict_details", "resolved_at"]);
 
@@ -57,10 +90,12 @@ const SERVER_OWNED = new Set(["tenant_id", "version", "last_writer", "updated_at
  */
 function toRemote(tableName, row) {
   const mapping = COLUMN_MAP[tableName] ?? {};
+  const booleans = BOOLEAN_COLUMNS[tableName] ?? [];
   const out = {};
   for (const [key, value] of Object.entries(row)) {
     if (SERVER_OWNED.has(key)) continue;
-    out[mapping[key] ?? key] = value;
+    const remote = mapping[key] ?? key;
+    out[remote] = booleans.includes(remote) ? Boolean(value) : value;
   }
   return out;
 }
@@ -198,7 +233,17 @@ function createSyncEngine({ db, transport, nowIso, deviceId, onStateChange }) {
         }
 
         if (sent.length > 0) {
-          const response = await transport.push({ clientId: deviceId(), changes });
+          // Rebuild the payload in dependency order rather than trusting insertion order.
+          const ordered = {};
+          for (const remote of SYNC_ORDER) {
+            if (changes[remote]) ordered[remote] = changes[remote];
+          }
+          // Anything the client sends that is not in the list would be dropped, which would
+          // lose data silently — so it is carried through in its original position instead.
+          for (const [remote, rows] of Object.entries(changes)) {
+            if (!(remote in ordered)) ordered[remote] = rows;
+          }
+          const response = await transport.push({ clientId: deviceId(), changes: ordered });
 
           // Only entries the server actually stored are acknowledged. A row it rejected
           // stays queued so the problem is visible rather than silently dropped.

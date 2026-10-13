@@ -1319,12 +1319,21 @@ class DomBookDatabase {
       : data.nights;
     effectiveNights.forEach((night) => {
       try {
+        const nightId = crypto.randomUUID();
         this.run(
           `INSERT INTO reservation_nights(
             id, reservation_id, property_id, night_date, created_at, updated_at, version, last_writer
           ) VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
-          [crypto.randomUUID(), reservationId, data.propertyId, night, timestamp, timestamp, this.writerId],
+          [nightId, reservationId, data.propertyId, night, timestamp, timestamp, this.writerId],
         );
+        // Queue the night as well as the booking.
+        //
+        // `reservation_nights` is a synced table, so without this a lease reaches the server
+        // with no nights. The other device then shows the unit as free for the whole term —
+        // the tenancy exists but blocks nothing, which is the exact double-booking the shared
+        // exclusion constraint exists to prevent. It went unnoticed because the reservation
+        // itself synced fine and the local calendar reads the local rows.
+        this.enqueueSync("reservation_nights", nightId);
       } catch (error) {
         if (/UNIQUE constraint failed/.test(error.message)) {
           const conflict = this.query(
