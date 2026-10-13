@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -25,6 +26,7 @@ import (
 
 const reservationColumns = `id, tenant_id, unit_id, guest_name, guest_phone, guest_email,
 	check_in_date, check_out_date, adults, children, status,
+	booking_kind, monthly_rate_minor, meter_readings,
 	nightly_rate_minor, accommodation_minor, services_minor, total_minor,
 	prepaid_minor, deposit_minor, deposit_status, notes, actual_check_out_date,
 	conflict_code, conflict_details, created_at, updated_at, deleted_at, version, last_writer`
@@ -36,6 +38,7 @@ func scanReservation(row rowScanner) (*Reservation, error) {
 		&reservation.GuestName, &reservation.GuestPhone, &reservation.GuestEmail,
 		&reservation.CheckInDate, &reservation.CheckOutDate,
 		&reservation.Adults, &reservation.Children, &reservation.Status,
+		&reservation.BookingKind, &reservation.MonthlyRateMinor, &reservation.MeterReadings,
 		&reservation.NightlyRateMinor, &reservation.AccommodationMinor,
 		&reservation.ServicesMinor, &reservation.TotalMinor,
 		&reservation.PrepaidMinor, &reservation.DepositMinor, &reservation.DepositStatus,
@@ -223,17 +226,36 @@ func (s *Store) CreateReservation(ctx context.Context, tenantID string, input *d
 			return err
 		}
 
+		// Default to a stay when the caller did not say: an older client that omits the
+		// field must not create an untyped row.
+		kind := string(input.Kind)
+		if kind == "" {
+			kind = string(domain.KindStay)
+		}
+		// An empty reading set is `{}`, never NULL: the column is NOT NULL and a NULL
+		// would make every later read need a nil check for no benefit.
+		meterReadings := []byte("{}")
+		if len(input.MeterReadings) > 0 {
+			encoded, err := json.Marshal(input.MeterReadings)
+			if err != nil {
+				return fmt.Errorf("encode meter readings: %w", err)
+			}
+			meterReadings = encoded
+		}
+
 		reservation, err = scanReservation(tx.QueryRow(ctx, `
 			INSERT INTO reservations(
 				id, tenant_id, unit_id, guest_name, guest_phone, guest_email,
 				check_in_date, check_out_date, adults, children, status,
+				booking_kind, monthly_rate_minor, meter_readings,
 				nightly_rate_minor, accommodation_minor, services_minor, total_minor,
 				prepaid_minor, deposit_minor, deposit_status, notes,
 				actual_check_out_date, version, last_writer)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
 			RETURNING `+reservationColumns,
 			id, tenantID, input.UnitID, input.GuestName, input.GuestPhone, input.GuestEmail,
 			input.CheckIn, input.CheckOut, input.Adults, input.Children, string(input.Status),
+			kind, input.MonthlyRateMinor, meterReadings,
 			input.NightlyRateMinor, input.AccommodationMinor, input.ServicesMinor, input.TotalMinor,
 			input.PrepaidMinor, input.DepositMinor, string(input.DepositStatus), input.Notes,
 			input.ActualCheckOut, version, writer))

@@ -88,11 +88,14 @@ type UnitInput struct {
 	Capacity       int
 	BasePriceMinor int64
 	DepositMinor   int64
-	Currency       string
-	CheckInTime    string
-	CheckOutTime   string
-	Notes          string
-	Status         string
+	// MonthlyRateMinor is the rent for a long-term let. Zero means the unit is not
+	// offered for rent.
+	MonthlyRateMinor int64
+	Currency         string
+	CheckInTime      string
+	CheckOutTime     string
+	Notes            string
+	Status           string
 }
 
 // UnitLookup resolves a place id so the validator can confirm it is active.
@@ -202,17 +205,26 @@ type MealInput struct {
 
 // ReservationInput is a validated booking, with every derived amount computed.
 type ReservationInput struct {
-	UnitID             string
-	UnitCapacity       int
-	GuestName          string
-	GuestPhone         string
-	GuestEmail         string
-	CheckIn            Date
-	CheckOut           Date
-	Nights             []Date
-	Adults             int
-	Children           int
-	Status             ReservationStatus
+	UnitID       string
+	UnitCapacity int
+	GuestName    string
+	GuestPhone   string
+	GuestEmail   string
+	CheckIn      Date
+	CheckOut     Date
+	Nights       []Date
+	Adults       int
+	Children     int
+	Status       ReservationStatus
+	// Kind is "stay" or "rental". A rental is priced by the month and is exempt from
+	// the advance window.
+	Kind BookingKind
+	// MonthlyRateMinor is the agreed rent. Captured here so a later price change does
+	// not silently reprice an existing lease.
+	MonthlyRateMinor int64
+	// MeterReadings are the utility readings taken at the start and end of a tenancy,
+	// e.g. {"electricity": {"start": 1200, "end": 1340}}.
+	MeterReadings      map[string]any
 	NightlyRateMinor   int64
 	AccommodationMinor int64
 	Meals              []MealInput

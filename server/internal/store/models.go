@@ -200,31 +200,44 @@ type Unit struct {
 	Capacity       int
 	BasePriceMinor int64
 	DepositMinor   int64
-	Currency       string
-	CheckInTime    string
-	CheckOutTime   string
-	Status         string
-	Notes          string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	DeletedAt      *time.Time
-	Version        int64
-	LastWriter     string
+	// MonthlyRateMinor is the rent for a long-term let. Zero means the unit is not
+	// offered for rent, which is what the Rentals screen filters on — a separate
+	// availability flag could disagree with the price and offer a let with no rate.
+	MonthlyRateMinor int64
+	Currency         string
+	CheckInTime      string
+	CheckOutTime     string
+	Status           string
+	Notes            string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	DeletedAt        *time.Time
+	Version          int64
+	LastWriter       string
 }
 
 // Reservation is a booking, with its child rows loaded.
 type Reservation struct {
-	ID                 string
-	TenantID           string
-	UnitID             string
-	GuestName          string
-	GuestPhone         string
-	GuestEmail         string
-	CheckInDate        Date
-	CheckOutDate       Date
-	Adults             int
-	Children           int
-	Status             string
+	ID           string
+	TenantID     string
+	UnitID       string
+	GuestName    string
+	GuestPhone   string
+	GuestEmail   string
+	CheckInDate  Date
+	CheckOutDate Date
+	Adults       int
+	Children     int
+	Status       string
+	// BookingKind is "stay" or "rental". A tenancy is a reservation with a long date
+	// range, which is what lets the single exclusion constraint keep both modes from
+	// overlapping.
+	BookingKind      string
+	MonthlyRateMinor int64
+	// MeterReadings holds the utility readings for a tenancy, e.g.
+	// {"electricity": {"start": 1200, "end": 1340}}. jsonb because the set of
+	// utilities varies by building.
+	MeterReadings      []byte
 	NightlyRateMinor   int64
 	AccommodationMinor int64
 	ServicesMinor      int64

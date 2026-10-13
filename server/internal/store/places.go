@@ -222,14 +222,15 @@ func (s *Store) SoftDeletePlace(ctx context.Context, tenantID, placeID, writer s
 // ---------------------------------------------------------------------------
 
 const unitColumns = `id, tenant_id, place_id, kind, name, location, capacity,
-	base_price_minor, deposit_minor, currency, check_in_time, check_out_time,
+	base_price_minor, deposit_minor, monthly_rate_minor, currency, check_in_time, check_out_time,
 	status, notes, created_at, updated_at, deleted_at, version, last_writer`
 
 func scanUnit(row rowScanner) (*Unit, error) {
 	var unit Unit
 	err := row.Scan(
 		&unit.ID, &unit.TenantID, &unit.PlaceID, &unit.Kind, &unit.Name, &unit.Location,
-		&unit.Capacity, &unit.BasePriceMinor, &unit.DepositMinor, &unit.Currency,
+		&unit.Capacity, &unit.BasePriceMinor, &unit.DepositMinor, &unit.MonthlyRateMinor,
+		&unit.Currency,
 		&unit.CheckInTime, &unit.CheckOutTime, &unit.Status, &unit.Notes,
 		&unit.CreatedAt, &unit.UpdatedAt, &unit.DeletedAt, &unit.Version, &unit.LastWriter,
 	)
@@ -304,12 +305,12 @@ func (s *Store) CreateUnit(ctx context.Context, tenantID string, input *domain.U
 		}
 		unit, err = scanUnit(tx.QueryRow(ctx, `
 			INSERT INTO units(id, tenant_id, place_id, kind, name, location, capacity,
-				base_price_minor, deposit_minor, currency, check_in_time, check_out_time,
-				status, notes, version, last_writer)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+				base_price_minor, deposit_minor, monthly_rate_minor, currency,
+				check_in_time, check_out_time, status, notes, version, last_writer)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
 			RETURNING `+unitColumns,
 			id, tenantID, input.PlaceID, input.Kind, input.Name, input.Location,
-			input.Capacity, input.BasePriceMinor, input.DepositMinor, input.Currency,
+			input.Capacity, input.BasePriceMinor, input.DepositMinor, input.MonthlyRateMinor, input.Currency,
 			input.CheckInTime, input.CheckOutTime, input.Status, input.Notes,
 			version, writer))
 		if err != nil {

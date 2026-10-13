@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/inajaf/dombook/server/internal/domain"
 	"github.com/inajaf/dombook/server/internal/store"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -228,4 +229,177 @@ func equalFoldASCII(a, b string) bool {
 		}
 	}
 	return true
+}
+
+// TestRentalFieldsSurviveSync is the regression test for the failure mode this codebase
+// has already hit once: a column that exists in the schema and in the service, but is
+// absent from the sync allowlist, is silently dropped on push. The row still syncs, so
+// nothing errors — the field just quietly stays at its default, and a tenancy arrives at
+// the other device with no monthly rate and no kind.
+func TestRentalFieldsSurviveSync(t *testing.T) {
+	app := repoStore(t)
+	ctx := context.Background()
+	account, place := newTenantWithPlace(t, app, "Rental sync")
+	unit := newUnit(t, app, account.ID, place.ID, "Квартира", 2, 5000)
+
+	reservationID := mustID(t)
+
+	// Push the fields the way a client would.
+	result, err := app.Push(ctx, account.ID, "device-rental", map[store.SyncTable][]store.SyncRow{
+		store.TableReservations: {{
+			"id": reservationID, "unit_id": unit.ID, "guest_name": "Арендатор",
+			"check_in_date": "2026-09-01", "check_out_date": "2027-09-01",
+			"status":              "confirmed",
+			"booking_kind":        "rental",
+			"monthly_rate_minor":  int64(60000),
+			"accommodation_minor": int64(720000),
+			"meter_readings":      map[string]any{"electricity": map[string]any{"start": 1200, "end": 1340}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+	if result.Applied != 1 {
+		t.Fatalf("applied = %d, want 1 (results: %+v)", result.Applied, result.Results)
+	}
+
+	stored, err := app.GetReservation(ctx, account.ID, reservationID)
+	if err != nil {
+		t.Fatalf("GetReservation: %v", err)
+	}
+
+	// The kind decides which policy the row was judged by, so losing it would silently
+	// turn a tenancy into a stay.
+	if stored.BookingKind != string(domain.KindRental) {
+		t.Errorf("booking_kind = %q, want %q", stored.BookingKind, domain.KindRental)
+	}
+	if stored.MonthlyRateMinor != 60000 {
+		t.Errorf("monthly_rate_minor = %d, want 60000 — the rate was dropped by the allowlist",
+			stored.MonthlyRateMinor)
+	}
+	if stored.AccommodationMinor != 720000 {
+		t.Errorf("accommodation_minor = %d, want 720000", stored.AccommodationMinor)
+	}
+	if len(stored.MeterReadings) == 0 || string(stored.MeterReadings) == "{}" {
+		t.Errorf("meter_readings = %s, want the pushed readings", stored.MeterReadings)
+	}
+
+	// And it comes back on a pull, so a second device sees the same tenancy.
+	changes, _, err := app.Pull(ctx, account.ID, -1)
+	if err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	var found bool
+	for _, row := range changes.Reservations {
+		if row["id"] != reservationID {
+			continue
+		}
+		found = true
+		if row["booking_kind"] != string(domain.KindRental) {
+			t.Errorf("pulled booking_kind = %v", row["booking_kind"])
+		}
+		if row["monthly_rate_minor"] != int64(60000) {
+			t.Errorf("pulled monthly_rate_minor = %v, want 60000", row["monthly_rate_minor"])
+		}
+	}
+	if !found {
+		t.Fatal("the pushed tenancy is missing from a full pull")
+	}
+}
+
+// TestUnitMonthlyRateSurvivesSync covers the other new column, on the other table. A unit's
+// monthly rate is what the Rentals screen offers, so losing it on push would make a flat
+// look unavailable for rent on every other device.
+func TestUnitMonthlyRateSurvivesSync(t *testing.T) {
+	app := repoStore(t)
+	ctx := context.Background()
+	account, _ := newTenantWithPlace(t, app, "Unit rate sync")
+
+	unitID := mustID(t)
+	if _, err := app.Push(ctx, account.ID, "device-rate", map[store.SyncTable][]store.SyncRow{
+		store.TableUnits: {{
+			"id": unitID, "name": "Квартира с арендой", "capacity": 2,
+			"base_price_minor": int64(5000), "monthly_rate_minor": int64(60000),
+			"currency": "AZN", "status": "active",
+		}},
+	}); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+
+	units, err := app.ListUnits(ctx, account.ID, nil)
+	if err != nil {
+		t.Fatalf("ListUnits: %v", err)
+	}
+	for _, unit := range units {
+		if unit.ID != unitID {
+			continue
+		}
+		if unit.MonthlyRateMinor != 60000 {
+			t.Errorf("monthly_rate_minor = %d, want 60000 — dropped by the allowlist",
+				unit.MonthlyRateMinor)
+		}
+		return
+	}
+	t.Fatal("the pushed unit was not stored")
+}
+
+// TestEverySyncColumnExistsInTheSchema catches the mistake at its source. Adding a column to
+// the allowlist that the table does not have produces a runtime insert error on the first
+// push rather than a build failure, and forgetting to add one produces the silent drop above.
+// Comparing the two lists turns both into a test failure.
+func TestEverySyncColumnExistsInTheSchema(t *testing.T) {
+	app := repoStore(t)
+	ctx := context.Background()
+
+	tables := map[store.SyncTable]string{
+		store.TablePlaces:              "places",
+		store.TableUnits:               "units",
+		store.TableReservations:        "reservations",
+		store.TableReservationNights:   "reservation_nights",
+		store.TableReservationServices: "reservation_services",
+		store.TableReservationMeals:    "reservation_meals",
+		store.TableAppSettings:         "app_settings",
+	}
+
+	for table, physical := range tables {
+		allowed := map[string]bool{}
+		for _, column := range store.SyncColumns(table) {
+			allowed[column] = true
+		}
+
+		var missing []string
+		err := app.WithAdmin(ctx, func(tx pgx.Tx) error {
+			rows, err := tx.Query(ctx, `
+				SELECT column_name FROM information_schema.columns
+				WHERE table_schema = 'public' AND table_name = $1`, physical)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var name string
+				if err := rows.Scan(&name); err != nil {
+					return err
+				}
+				// Server-owned columns are deliberately not client-writable.
+				switch name {
+				case "tenant_id", "version", "updated_at", "last_writer",
+					"conflict_code", "conflict_details", "resolved_at":
+					continue
+				}
+				if !allowed[name] {
+					missing = append(missing, name)
+				}
+			}
+			return rows.Err()
+		})
+		if err != nil {
+			t.Fatalf("read %s columns: %v", physical, err)
+		}
+
+		if len(missing) > 0 {
+			t.Errorf("%s has columns absent from the sync allowlist, so a client pushing them "+
+				"would have them silently dropped: %v", physical, missing)
+		}
+	}
 }

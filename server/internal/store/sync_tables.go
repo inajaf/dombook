@@ -61,14 +61,15 @@ var syncColumns = map[SyncTable][]string{
 	},
 	TableUnits: {
 		"id", "place_id", "kind", "name", "location", "capacity",
-		"base_price_minor", "deposit_minor", "currency", "check_in_time",
-		"check_out_time", "status", "notes", "created_at", "deleted_at",
+		"base_price_minor", "deposit_minor", "monthly_rate_minor", "currency",
+		"check_in_time", "check_out_time", "status", "notes", "created_at", "deleted_at",
 	},
 	TableReservations: {
 		"id", "unit_id", "guest_name", "guest_phone", "guest_email",
 		"check_in_date", "check_out_date", "adults", "children", "status",
 		"nightly_rate_minor", "accommodation_minor", "services_minor", "total_minor",
 		"prepaid_minor", "deposit_minor", "deposit_status", "actual_check_out_date",
+		"booking_kind", "monthly_rate_minor", "meter_readings",
 		"notes", "created_at", "deleted_at",
 	},
 	TableReservationNights: {
@@ -192,7 +193,8 @@ var syncColumnTypes = map[SyncTable]map[string]string{
 	TableUnits: {
 		"place_id": "uuid", "kind": "text", "name": "citext", "location": "text",
 		"capacity": "integer", "base_price_minor": "bigint", "deposit_minor": "bigint",
-		"currency": "text", "check_in_time": "text", "check_out_time": "text",
+		"monthly_rate_minor": "bigint",
+		"currency":           "text", "check_in_time": "text", "check_out_time": "text",
 		"status": "text", "notes": "text", "created_at": "timestamptz", "deleted_at": "timestamptz",
 	},
 	TableReservations: {
@@ -201,6 +203,7 @@ var syncColumnTypes = map[SyncTable]map[string]string{
 		"status": "text", "nightly_rate_minor": "bigint", "accommodation_minor": "bigint",
 		"services_minor": "bigint", "total_minor": "bigint", "prepaid_minor": "bigint",
 		"deposit_minor": "bigint", "deposit_status": "text", "actual_check_out_date": "date",
+		"booking_kind": "text", "monthly_rate_minor": "bigint", "meter_readings": "jsonb",
 		"notes": "text", "created_at": "timestamptz", "deleted_at": "timestamptz",
 	},
 	TableReservationNights: {
