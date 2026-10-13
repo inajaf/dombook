@@ -309,7 +309,7 @@ window.DomBookLocales.en = {
     "Бесплатно": "Free",
     "1 локация и 1 объект": "1 location and 1 property",
     "Business": "Business",
-    "$19/месяц · без ограничений": "$19/month · no limits",
+    "Без ограничений": "No limits",
     "Paddle checkout открыт в браузере. Business включится после подтверждения оплаты.": "Paddle checkout opened in your browser. Business will activate after payment is confirmed.",
     "Продолжить": "Continue",
     "← Назад": "← Back",

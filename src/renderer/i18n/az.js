@@ -309,7 +309,7 @@ window.DomBookLocales.az = {
     "Бесплатно": "Pulsuz",
     "1 локация и 1 объект": "1 məkan və 1 obyekt",
     "Business": "Business",
-    "$19/месяц · без ограничений": "$19/ay · məhdudiyyət yoxdur",
+    "Без ограничений": "Məhdudiyyət yoxdur",
     "Paddle checkout открыт в браузере. Business включится после подтверждения оплаты.": "Paddle ödəniş səhifəsi brauzerdə açıldı. Ödəniş təsdiqləndikdən sonra Business aktivləşəcək.",
     "Продолжить": "Davam et",
     "← Назад": "← Geri",

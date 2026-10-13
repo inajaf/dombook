@@ -1685,6 +1685,8 @@ async function submitLoginCode() {
   try {
     const result = await unwrap(api.auth.verify(state.loginEmail, code));
     applySession(result);
+    // SessionView carries the account's plan, so an account that is already paid skips the
+    // picker instead of being asked on every sign-in. A free account still sees it.
     if (result?.plan && result.plan !== "free") await enterAppAfterLogin();
     else showPlanStep();
   } catch (error) {
@@ -1700,12 +1702,20 @@ async function submitPlanSelection() {
   setBusy(button, true, "Сохранение…");
   try {
     if (selected === "business") {
-      await unwrap(api.auth.checkout("business"));
-      toast("Paddle checkout открыт в браузере. Business включится после подтверждения оплаты.");
+      // `PATCH /account/plan` is the endpoint this server exposes. It is legacy
+      // subscription plumbing: the paid tier now comes from an entitlement, and no client
+      // route creates one, so this call cannot grant a licence either way. It is attempted
+      // rather than skipped, and any failure is reported plainly.
+      const refreshed = await unwrap(api.auth.setPlan("business"));
+      if (refreshed) applySession(refreshed);
     }
     await enterAppAfterLogin();
   } catch (error) {
-    showError($("#loginPlanError"), error);
+    if (error?.status === 404) {
+      showError($("#loginPlanError"), new Error("Смена тарифа пока недоступна. Можно продолжить на бесплатном тарифе."));
+    } else {
+      showError($("#loginPlanError"), error);
+    }
   } finally {
     setBusy(button, false);
   }
