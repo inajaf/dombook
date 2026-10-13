@@ -1,13 +1,41 @@
-const { app, BrowserWindow, ipcMain, Menu, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, Menu, shell, safeStorage } = require("electron");
 const path = require("node:path");
+const fs = require("node:fs/promises");
 const { pathToFileURL } = require("node:url");
 const { DomBookDatabase } = require("./database.cjs");
+const { createAuthApi } = require("./main/auth.cjs");
+const { createAuthSessionStore } = require("./main/auth-session.cjs");
+const { createSyncEngine } = require("./main/sync.cjs");
+const { nowIso } = require("./database.cjs");
 
 let mainWindow;
 let database;
+let authApi;
+let syncEngine;
+// Serialises sync attempts and schedules the periodic one.
+let syncTimer = null;
 
 app.setName("DomBook");
 app.setPath("userData", path.join(app.getPath("appData"), "dombook-desktop"));
+
+function electronEncryptionAvailable() {
+  try {
+    return safeStorage.isEncryptionAvailable();
+  } catch {
+    return false;
+  }
+}
+
+function createAuthStore(filePath) {
+  return createAuthSessionStore({
+    filePath,
+    readFile: (p) => fs.readFile(p),
+    writeFile: (p, data) => fs.writeFile(p, data),
+    encrypt: (text) => safeStorage.encryptString(text),
+    decrypt: (buffer) => safeStorage.decryptString(buffer),
+    isEncryptionAvailable: electronEncryptionAvailable,
+  });
+}
 
 function ok(data) {
   return { ok: true, data };
@@ -29,6 +57,85 @@ function handle(channel, action) {
 }
 
 function registerIpc() {
+  handle("auth:status", async () => {
+    try {
+      const session = await authApi.restore();
+      return {
+        authenticated: Boolean(session),
+        session,
+        baseUrl: authApi.baseUrl,
+      };
+    } catch (error) {
+      // Backend unreachable / session rejected: report a signed-out state so
+      // the renderer shows only the login screen (app data is gated behind
+      // authentication).
+      return { authenticated: false, session: null, baseUrl: authApi.baseUrl, offline: true };
+    }
+  });
+  handle("auth:send", (payload) => authApi.send(payload?.email));
+  handle("auth:setup", (payload) => authApi.setup(payload?.email));
+  handle("auth:verify", (payload) => authApi.verify(payload?.email, payload?.code));
+  handle("auth:setPlan", (payload) => authApi.setPlan(payload?.plan));
+  handle("auth:checkout", async (payload) => {
+    const checkout = await authApi.checkout(payload?.plan);
+    if (!checkout?.checkoutUrl) throw new Error("Paddle не вернул ссылку на оплату");
+    await shell.openExternal(checkout.checkoutUrl);
+    return checkout;
+  });
+  handle("auth:logout", () => authApi.logout());
+
+  // Sync. The renderer only triggers and observes; the merge itself happens in the main
+  // process, where the local database and the session token both live.
+  // The booking window is fetched on demand and cached locally, so the client validates
+  // against the same rule the server will apply.
+  handle("bookingPolicy:get", async (_payload, ) => {
+    try {
+      const policy = await authApi.bookingPolicy();
+      database.setBookingPolicy(policy);
+      const cached = database.bookingPolicy();
+      return ok({ ...policy, ...cached });
+    } catch (error) {
+      // Offline is a normal state, not a failure: report the cached window so the UI keeps
+      // working and say that it is cached.
+      return ok({ ...database.bookingPolicy(), stale: true, error: error?.message ?? String(error) });
+    }
+  });
+
+  handle("bookingPolicy:set", async (payload) => {
+    const policy = await authApi.setBookingPolicy(payload ?? {});
+    database.setBookingPolicy(policy);
+    return ok({ ...policy, ...database.bookingPolicy() });
+  });
+
+  // Cached locally so the client can explain the account's limits without a round trip, and
+  // so an offline device keeps working.
+  handle("entitlements:get", async () => {
+    try {
+      const entitlements = await authApi.entitlements();
+      database.setEntitlements(entitlements);
+      return ok({ ...entitlements, stale: false, allowance: database.unitAllowanceStatus() });
+    } catch (error) {
+      // Offline is expected, not an error: report the cached copy and say it is cached.
+      const cached = database.entitlements();
+      return ok({
+        ...(cached ?? { paid: false, planName: "Бесплатный", unitLimit: 1, features: [] }),
+        stale: true,
+        error: error?.message ?? String(error),
+        allowance: database.unitAllowanceStatus(),
+      });
+    }
+  });
+
+  handle("sync:now", async () => {
+    if (!syncEngine) return { ok: false, error: "Синхронизация не настроена" };
+    return syncEngine.sync();
+  });
+  handle("sync:status", async () => ({
+    pending: database?.pendingSyncCount?.() ?? 0,
+    lastResult: syncEngine?.lastResult?.() ?? null,
+    cursor: syncEngine?.readWatermark?.() ?? 0,
+  }));
+
   handle("dashboard:get", () => database.dashboard());
   handle("calendar:get", (payload) => database.calendar(payload?.days ?? 14));
 
@@ -186,6 +293,27 @@ app.whenReady().then(async () => {
     backupDir: path.join(userData, "backups"),
     seed: true,
   }).init();
+  const baseUrl = process.env.DOMBOOK_API_URL || "http://127.0.0.1:8787";
+  const store = createAuthStore(path.join(userData, "auth-session.bin"));
+  authApi = createAuthApi({ baseUrl, storage: store });
+
+  // The engine is wired to the local database and the authenticated transport. Nothing in
+  // it runs until asked, so a signed-out or offline app simply never syncs.
+  syncEngine = createSyncEngine({
+    db: database,
+    transport: {
+      push: (payload) => authApi.syncPush(payload),
+      pull: (since) => authApi.syncPull(since),
+    },
+    nowIso,
+    deviceId: () => database.writerId || "unknown",
+    onStateChange: (state) => {
+      // The renderer shows an unsynced indicator; pushing it rather than making it poll
+      // keeps a failed sync visible instead of silent.
+      mainWindow?.webContents?.send("sync:changed", state);
+    },
+  });
+
   registerIpc();
   createMenu();
   createWindow();
@@ -193,10 +321,29 @@ app.whenReady().then(async () => {
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+
+  // Periodic sync. Local-first means the app is fully usable without it, so this is a
+  // background convenience rather than a dependency: a failure is recorded and retried on
+  // the next tick, and the queued changes stay queued.
+  const SYNC_INTERVAL_MS = 60_000;
+  syncTimer = setInterval(async () => {
+    if (!authApi || !syncEngine) return;
+    try {
+      const session = await authApi.restore();
+      if (!session) return; // signed out: nothing to sync against
+      await syncEngine.sync();
+    } catch {
+      // Already recorded on the queue entry; a periodic failure must not spam the UI.
+    }
+  }, SYNC_INTERVAL_MS);
+  if (syncTimer.unref) syncTimer.unref();
 });
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-app.on("before-quit", () => database?.close());
+app.on("before-quit", () => {
+  if (syncTimer) clearInterval(syncTimer);
+  database?.close();
+});

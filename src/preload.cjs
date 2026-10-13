@@ -31,6 +31,25 @@ contextBridge.exposeInMainWorld("domBook", {
     delete: (id) => invoke("reservations:delete", { id }),
     earlyCheckout: (id, data) => invoke("reservations:earlyCheckout", { id, data }),
   },
+  bookingPolicy: {
+    get: () => invoke("bookingPolicy:get"),
+    set: (policy) => invoke("bookingPolicy:set", policy),
+  },
+  entitlements: {
+    get: () => invoke("entitlements:get"),
+  },
+  sync: {
+    now: () => invoke("sync:now"),
+    status: () => invoke("sync:status"),
+    onChanged: (callback) => {
+      const listener = (_event, state) => callback(state);
+      // The listener is returned so a caller can detach it; leaving listeners attached
+      // across a window reload would multiply the callbacks.
+      if (typeof callback !== "function") return () => {};
+      ipcRenderer.on("sync:changed", listener);
+      return () => ipcRenderer.removeListener("sync:changed", listener);
+    },
+  },
   backups: {
     list: () => invoke("backups:list"),
     create: () => invoke("backups:create"),
@@ -39,5 +58,14 @@ contextBridge.exposeInMainWorld("domBook", {
     info: () => invoke("system:info"),
     setLanguage: (language) => invoke("system:setLanguage", { language }),
     openBackupDirectory: () => invoke("system:openBackupDirectory"),
+  },
+  auth: {
+    status: () => invoke("auth:status"),
+    send: (email) => invoke("auth:send", { email }),
+    setup: (email) => invoke("auth:setup", { email }),
+    verify: (email, code) => invoke("auth:verify", { email, code }),
+    setPlan: (plan) => invoke("auth:setPlan", { plan }),
+    checkout: (plan) => invoke("auth:checkout", { plan }),
+    logout: () => invoke("auth:logout"),
   },
 });

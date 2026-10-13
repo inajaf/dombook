@@ -1,0 +1,56 @@
+# Local development environment.
+#
+# `postgres` is the DomBook Go server's database (Phase 1 onward). A local
+# PostgreSQL installed via Homebrew works just as well; this service exists so a
+# new machine or CI can reach the same schema without manual setup.
+#
+# The `api` service below still builds the legacy Cloudflare Workers backend from
+# ./backend. It is kept only until the port reaches parity; both cannot serve
+# 127.0.0.1:8787 at once, so bring up api and server separately.
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: dombook-postgres
+    environment:
+      POSTGRES_USER: dombook
+      POSTGRES_PASSWORD: dombook
+      POSTGRES_DB: dombook_dev
+      # Deterministic collation: citext uniqueness and ORDER BY must not change
+      # meaning between the developer's macOS cluster and the CI container.
+      POSTGRES_INITDB_ARGS: "--locale=C.UTF-8 --encoding=UTF8"
+    ports:
+      # Non-default host port to avoid colliding with a Homebrew PostgreSQL on 5432.
+      - "55432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dombook -d dombook_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ./backend
+    container_name: dombook-saas-api
+    ports:
+      - "8787:8787"
+    volumes:
+      - wrangler-state:/app/.wrangler
+      - ./backend/.dev.vars:/app/.dev.vars:ro
+    environment:
+      - NODE_ENV=development
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/auth/me').then(r=>process.exit(r.status===0?1:0)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 25s
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  wrangler-state:

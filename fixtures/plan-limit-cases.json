@@ -1,0 +1,70 @@
+{
+  "$comment": "Quota rules. The legacy D1 backend capped free at 1 place AND 1 property, which let a free account hold 1 resort + 1 cottage but said nothing about a resort full of cottages. The cap is now on bookable UNITS: a free account gets exactly one unit total. Enforced by internal/billing (allowance) and the database trigger; the legacy backend was removed at cutover.",
+  "current": {
+    "$comment": "What the removed legacy backend enforced, kept to document the rule this one replaced.",
+    "plans": [
+      { "id": "free", "maxPlaces": 1, "maxProperties": 1 },
+      { "id": "pro", "maxPlaces": null, "maxProperties": null },
+      { "id": "business", "maxPlaces": null, "maxProperties": null }
+    ]
+  },
+  "target": {
+    "$comment": "What Phase 4 must enforce. maxUnits=null means unlimited.",
+    "plans": [
+      { "id": "free", "maxUnits": 1 },
+      { "id": "pro", "maxUnits": null },
+      { "id": "business", "maxUnits": null }
+    ]
+  },
+  "cases": [
+    {
+      "name": "free allows the first unit",
+      "plan": "free",
+      "resource": "units",
+      "current": 0,
+      "expect": { "ok": true }
+    },
+    {
+      "name": "free rejects a second unit",
+      "plan": "free",
+      "resource": "units",
+      "current": 1,
+      "expect": { "ok": false, "code": "plan_limit", "limit": 1 }
+    },
+    {
+      "name": "free allows the first place",
+      "plan": "free",
+      "resource": "places",
+      "current": 0,
+      "expect": { "ok": true }
+    },
+    {
+      "name": "free rejects a second place",
+      "plan": "free",
+      "resource": "places",
+      "current": 1,
+      "expect": { "ok": false, "code": "plan_limit", "limit": 1 }
+    },
+    {
+      "name": "business is unlimited for units",
+      "plan": "business",
+      "resource": "units",
+      "current": 500,
+      "expect": { "ok": true }
+    },
+    {
+      "name": "pro is unlimited for units",
+      "plan": "pro",
+      "resource": "units",
+      "current": 500,
+      "expect": { "ok": true }
+    },
+    {
+      "name": "an unknown plan fails closed to free limits",
+      "plan": "enterprise_typo",
+      "resource": "units",
+      "current": 1,
+      "expect": { "ok": false, "code": "plan_limit", "limit": 1 }
+    }
+  ]
+}

@@ -7,3 +7,5 @@ coverage/
 data/
 backups/
 
+# Generated analysis output (graphify). Machine-specific absolute paths; not source.
+graphify-out/

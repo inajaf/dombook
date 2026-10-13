@@ -1,0 +1,76 @@
+{
+  "$comment": "Booking-window rules. Mirrors src/domain/booking/booking-policy.cjs and the Go port. Assertions use stable error codes, never localized prose, so message wording stays a presentation concern.",
+  "op": "assertBookingDates",
+  "policy": {
+    "maximumAdvanceDays": 21,
+    "maximumStayMonths": 3,
+    "timeZone": "Asia/Baku"
+  },
+  "cases": [
+    {
+      "name": "accepts check-in today with a one-night stay",
+      "today": "2026-08-11",
+      "checkInDate": "2026-08-11",
+      "checkOutDate": "2026-08-12",
+      "expect": { "ok": true }
+    },
+    {
+      "name": "accepts check-in exactly on the last day of the advance window",
+      "today": "2026-08-11",
+      "checkInDate": "2026-09-01",
+      "checkOutDate": "2026-09-02",
+      "expect": { "ok": true }
+    },
+    {
+      "name": "accepts a stay exactly at the maximum length",
+      "today": "2026-08-11",
+      "checkInDate": "2026-08-11",
+      "checkOutDate": "2026-11-11",
+      "expect": { "ok": true }
+    },
+    {
+      "name": "rejects check-in in the past",
+      "today": "2026-08-11",
+      "checkInDate": "2026-08-10",
+      "checkOutDate": "2026-08-11",
+      "expect": { "ok": false, "code": "check_in_past" }
+    },
+    {
+      "name": "rejects check-in one day beyond the advance window",
+      "today": "2026-08-11",
+      "checkInDate": "2026-09-02",
+      "checkOutDate": "2026-09-03",
+      "expect": { "ok": false, "code": "check_in_too_far" }
+    },
+    {
+      "name": "rejects a stay one day longer than the maximum",
+      "today": "2026-08-11",
+      "checkInDate": "2026-08-11",
+      "checkOutDate": "2026-11-12",
+      "expect": { "ok": false, "code": "stay_too_long" }
+    },
+    {
+      "name": "rejects a long stay whose check-out lands past the clamped month end",
+      "today": "2026-01-31",
+      "checkInDate": "2026-01-31",
+      "checkOutDate": "2026-05-01",
+      "expect": { "ok": false, "code": "stay_too_long" }
+    },
+    {
+      "name": "skips every date check when neither date changed on update",
+      "today": "2026-08-11",
+      "checkInDate": "2020-01-01",
+      "checkOutDate": "2020-01-02",
+      "existingReservation": { "check_in_date": "2020-01-01", "check_out_date": "2020-01-02" },
+      "expect": { "ok": true }
+    },
+    {
+      "name": "re-checks only check-out when check-in is unchanged on a past-dated booking",
+      "today": "2026-08-11",
+      "checkInDate": "2020-01-01",
+      "checkOutDate": "2027-01-01",
+      "existingReservation": { "check_in_date": "2020-01-01", "check_out_date": "2020-01-02" },
+      "expect": { "ok": false, "code": "stay_too_long" }
+    }
+  ]
+}

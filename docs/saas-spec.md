@@ -1,6 +1,16 @@
 # DomBook SaaS — Technical Specification
 
-Status: **implemented (phase 1)** · Applies to: `backend/` (Cloudflare Workers + D1)
+> **Historical.** This document specified the Cloudflare Workers + D1 implementation. That
+> code has been **removed**; it is recoverable from git history. The Go + PostgreSQL server in
+> `server/` is the implementation now, and `server/README.md` + `server/CUTOVER.md` describe it.
+>
+> Kept because the product decisions below — the data model, the sync protocol, the tenancy
+> model, the payment reasoning — still apply, and several of them are the reason the Go server
+> looks the way it does. Where the two disagree, the code in `server/` wins. In particular:
+> plans are now one-time licences rather than subscriptions, a bookable unit is called a `unit`
+> rather than a `property`, and sync carries server-stamped timestamps.
+
+Status: **historical** — the implementation it describes has been removed · Originally applied to: `backend/` (Cloudflare Workers + D1)
 Last updated: 2026-08-11
 
 This document is the canonical specification for the DomBook multi-tenant cloud

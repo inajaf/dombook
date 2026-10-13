@@ -3,6 +3,7 @@ const PAGE_META = {
   calendar: { eyebrow: "Доступность", title: "Календарь", action: "Новая бронь", actionType: "reservation", search: false },
   reservations: { eyebrow: "Гости и деньги", title: "Бронирования", action: "Новая бронь", actionType: "reservation", search: true },
   properties: { eyebrow: "Инвентарь", title: "Объекты", action: "Добавить объект", actionType: "property", search: true },
+  conflicts: { eyebrow: "Целостность данных", title: "Конфликты", action: "Новая бронь", actionType: "reservation", search: false },
   settings: { eyebrow: "Надёжность", title: "Настройки", action: "Создать backup", actionType: "backup", search: false },
 };
 
@@ -36,6 +37,19 @@ const state = {
   reservationFilter: "all",
   search: "",
   expandedGroups: new Set(),
+  session: null,
+  authBaseUrl: null,
+  // Conflicts are bookings that arrived from a device that was offline and collided with
+  // dates already sold. They are stored rather than rejected, so they are visible here
+  // instead of silently missing from the calendar.
+  conflicts: [],
+  sync: { pending: 0, lastResult: null, cursor: 0 },
+  // The account's booking window as last reported by the server. Cached so the panel shows
+  // real values offline rather than defaults it would invite the owner to overwrite.
+  bookingPolicy: null,
+  // The account's licence, as last reported by the server. Cached in the main process so an
+  // offline device still knows what it may do.
+  entitlements: null,
 };
 
 const api = window.domBook || createBrowserDemoApi();
@@ -213,6 +227,15 @@ async function refreshCore() {
   renderReservations();
   renderProperties();
   updateBadge();
+
+  // Conflicted bookings are ordinary reservation rows, so the badge and the queue can be
+  // derived from what was just loaded instead of issuing a second query. This keeps the
+  // count correct from startup: an operator must not have to open the page to learn that
+  // something needs attention.
+  state.conflicts = reservations.filter((item) => item.status === "conflict");
+  updateConflictBadge();
+  if (state.page === "conflicts") renderConflicts();
+  refreshSyncStatus().catch(() => {});
 }
 
 async function refreshSettings() {
@@ -267,7 +290,13 @@ function navigate(page) {
     state.search = "";
     $("#globalSearch").value = "";
   }
-  if (page === "settings") refreshSettings().catch((error) => toast(error.message, "error"));
+  if (page === "settings") {
+    refreshSettings().catch((error) => toast(error.message, "error"));
+    refreshSyncStatus().catch(() => {});
+    refreshBookingPolicy().catch(() => {});
+    refreshEntitlements().catch(() => {});
+  }
+  if (page === "conflicts") refreshConflicts().catch((error) => toast(error.message, "error"));
   $("#main-content").focus({ preventScroll: true });
 }
 
@@ -362,6 +391,7 @@ function filteredReservations() {
 
 function renderReservations() {
   const reservations = filteredReservations();
+  const hasFilter = Boolean(state.search.trim()) || state.reservationFilter !== "all";
   $("#reservationTableBody").innerHTML = reservations.map((reservation) => `
     <tr>
       <td class="primary-cell"><strong data-i18n-ignore>${escapeHtml(reservation.guest_name)}</strong><small ${reservation.guest_phone || reservation.guest_email ? "data-i18n-ignore" : ""}>${escapeHtml(reservation.guest_phone || reservation.guest_email || "Контакт не указан")}</small></td>
@@ -378,6 +408,11 @@ function renderReservations() {
       </div></td>
     </tr>
   `).join("");
+  $("#reservationEmptyTitle").textContent = hasFilter ? "Бронирования не найдены" : "Бронирований пока нет";
+  $("#reservationEmptyText").textContent = hasFilter
+    ? "Измените поисковый запрос или выбранный фильтр."
+    : "Создайте первую бронь — система проверит даты и рассчитает остаток.";
+  $("#reservationEmptyAction").hidden = hasFilter;
   $("#reservationEmpty").hidden = reservations.length > 0;
   $(".table-scroll", $("#page-reservations")).hidden = reservations.length === 0;
 }
@@ -468,6 +503,315 @@ function renderProperties() {
     </section>
   `}).join("");
   $("#propertyEmpty").hidden = groups.length > 0;
+}
+
+/**
+ * Render the conflict queue.
+ *
+ * Conflicted bookings live in the local database like everything else, so this page is
+ * fully usable offline. That matters: the operator most likely to need it is the one whose
+ * device has been offline.
+ */
+function renderConflicts() {
+  const list = $("#conflictList");
+  const conflicts = state.conflicts || [];
+
+  if (conflicts.length === 0) {
+    list.innerHTML = `
+      <div class="empty-state">
+        <strong>Конфликтов нет</strong>
+        <p>Все брони согласованы. Если устройство работало офлайн и его бронь столкнулась с занятыми датами, она появится здесь.</p>
+      </div>`;
+    return;
+  }
+
+  list.innerHTML = conflicts.map((conflict) => {
+    const dates = Array.isArray(conflict.conflict_details?.dates) ? conflict.conflict_details.dates : [];
+    const unit = state.properties.find((item) => item.id === conflict.unit_id);
+    return `
+      <article class="conflict-card" data-conflict="${escapeHtml(conflict.id)}">
+        <header>
+          <div>
+            <p class="eyebrow">${escapeHtml(conflict.conflict_code || "conflict")}</p>
+            <h3 data-i18n-ignore>${escapeHtml(conflict.guest_name || "Без имени")}</h3>
+            <small data-i18n-ignore>${escapeHtml(unit?.name || "Объект удалён")}</small>
+          </div>
+          <span class="pill danger">Требует решения</span>
+        </header>
+        <dl class="conflict-dates">
+          <div><dt>Заезд</dt><dd>${escapeHtml(conflict.check_in_date)}</dd></div>
+          <div><dt>Выезд</dt><dd>${escapeHtml(conflict.check_out_date)}</dd></div>
+        </dl>
+        <p class="muted">
+          ${dates.length
+            ? `Занятые даты: <span data-i18n-ignore>${escapeHtml(dates.join(", "))}</span>`
+            : "Даты пересекаются с уже существующей бронью."}
+        </p>
+        <footer class="conflict-actions">
+          <button class="button secondary compact" data-conflict-action="reschedule" data-id="${escapeHtml(conflict.id)}">
+            Перенести даты
+          </button>
+          <button class="button danger compact" data-conflict-action="cancel" data-id="${escapeHtml(conflict.id)}">
+            Отменить бронь
+          </button>
+        </footer>
+      </article>`;
+  }).join("");
+}
+
+/** Reload the conflict queue from the local database. */
+async function refreshConflicts() {
+  const reservations = await window.domBook.reservations.list();
+  if (!reservations.ok) {
+    toast(reservations.error || "Не удалось загрузить конфликты", "error");
+    return;
+  }
+  state.conflicts = (reservations.data || []).filter((item) => item.status === "conflict");
+  renderConflicts();
+  updateConflictBadge();
+}
+
+/** Show how many bookings need a decision. */
+function updateConflictBadge() {
+  const badge = $("#conflictBadge");
+  if (!badge) return;
+  const count = (state.conflicts || []).length;
+  badge.textContent = String(count);
+  badge.hidden = count === 0;
+}
+
+/**
+ * Resolve a conflict.
+ *
+ * Both actions release the conflicting booking's claim on the dates. "Reschedule" opens the
+ * ordinary reservation editor, so moving the guest is the same flow as editing any booking
+ * rather than a separate mechanism that could behave differently.
+ */
+async function resolveConflict(reservationId, action) {
+  const conflict = (state.conflicts || []).find((item) => item.id === reservationId);
+  if (!conflict) return;
+
+  if (action === "reschedule") {
+    // Hand off to the existing editor: the operator picks free dates there, which is the
+    // same validation every other booking goes through.
+    navigate("reservations");
+    openReservationDialog(conflict);
+    toast("Выберите свободные даты и сохраните бронь");
+    return;
+  }
+
+  // Cancelling frees the dates, which is what resolves the collision. The booking is kept
+  // with a cancelled status, so the record of what happened survives.
+  const response = await window.domBook.reservations.cancel(reservationId);
+  if (!response.ok) {
+    toast(response.error || "Не удалось отменить бронь", "error");
+    return;
+  }
+  toast("Бронь отменена, даты освобождены");
+  await refreshCore();
+  await refreshConflicts();
+}
+
+/**
+ * Render the booking-policy panel.
+ *
+ * The values shown are the CACHED ones when the server is unreachable, with a note saying
+ * so. A form that silently showed defaults while the account had a different window would
+ * invite the owner to "save" values that quietly changed their configuration.
+ */
+function renderPolicy() {
+  const policy = state.bookingPolicy;
+  if (!policy) return;
+
+  $("#policyAdvance").value = policy.maximumAdvanceDays ?? "";
+  $("#policyStay").value = policy.maximumStayMonths ?? "";
+  $("#policyTimeZone").value = policy.timeZone ?? "";
+
+  const badge = $("#policyBadge");
+  if (policy.stale) {
+    badge.textContent = "Сохранено локально";
+    badge.className = "health-badge warn";
+  } else if (policy.isDefault) {
+    badge.textContent = "По умолчанию";
+    badge.className = "health-badge";
+  } else {
+    badge.textContent = "Настроено";
+    badge.className = "health-badge";
+  }
+}
+
+/** Load the account's booking window, falling back to the cached copy when offline. */
+async function refreshBookingPolicy() {
+  const response = await window.domBook.bookingPolicy.get();
+  if (!response.ok) return;
+  state.bookingPolicy = response.data || null;
+  renderPolicy();
+}
+
+/** Save a policy change. */
+async function saveBookingPolicy(event) {
+  event.preventDefault();
+  const errorBox = $("#policyError");
+  errorBox.hidden = true;
+
+  const payload = {
+    maximumAdvanceDays: Number($("#policyAdvance").value),
+    maximumStayMonths: Number($("#policyStay").value),
+    timeZone: $("#policyTimeZone").value.trim(),
+  };
+
+  const response = await window.domBook.bookingPolicy.set(payload);
+  if (!response.ok) {
+    errorBox.textContent = response.error || "Не удалось сохранить политику";
+    errorBox.hidden = false;
+    return;
+  }
+  state.bookingPolicy = response.data || payload;
+  renderPolicy();
+  toast("Политика бронирования сохранена");
+}
+
+/**
+ * Render the licence panel.
+ *
+ * The panel states what the account has rather than nagging: a licensed customer sees the
+ * licence they bought, and a free customer sees what the free tier includes. Only when the
+ * account is actually over its allowance does the UI suggest buying — an upgrade prompt
+ * shown to someone who already paid is the fastest way to make them doubt the purchase.
+ */
+function renderEntitlements() {
+  const info = state.entitlements;
+  if (!info) return;
+
+  const badge = $("#licenseBadge");
+  if (info.paid) {
+    badge.textContent = "Лицензия активна";
+    badge.className = "health-badge";
+  } else {
+    badge.textContent = "Бесплатная версия";
+    badge.className = "health-badge warn";
+  }
+
+  const rows = [];
+  rows.push(`<div><dt>Тариф</dt><dd>${escapeHtml(info.planName || (info.paid ? "Платный" : "Бесплатный"))}</dd></div>`);
+
+  if (info.paid) {
+    // A perpetual licence has no date, and saying so is the point of the one-time purchase.
+    rows.push(`<div><dt>Срок</dt><dd>${info.expiresAt ? `до ${new Date(info.expiresAt).toLocaleDateString(interfaceLocale())}` : "бессрочно"}</dd></div>`);
+    if (info.expiresAt) {
+      rows.push(`<div><dt>Продление</dt><dd>требуется</dd></div>`);
+    }
+  }
+
+  const allowance = info.allowance || {};
+  if (allowance.unlimited) {
+    rows.push(`<div><dt>Объекты</dt><dd>без ограничений</dd></div>`);
+  } else {
+    rows.push(`<div><dt>Объекты</dt><dd>${allowance.active ?? 0} из ${allowance.allowance ?? 1}</dd></div>`);
+  }
+  if (info.stale) {
+    // Saying the value is cached is honest, and it explains why a licence bought on another
+    // device has not appeared yet.
+    rows.push(`<div><dt>Состояние</dt><dd>данные с последней синхронизации</dd></div>`);
+  }
+  $("#licenseInfo").innerHTML = rows.join("");
+
+  // Only a free account that has run out of room is invited to buy. Showing the upsell to
+  // someone who already paid is the fastest way to make them doubt the purchase.
+  const overLimit = !allowance.unlimited && allowance.over;
+  $("#licenseUpsell").hidden = !overLimit;
+  $("#buyLicense").disabled = false;
+}
+
+/**
+ * Explain how to obtain a licence.
+ *
+ * There is deliberately no checkout call here. The Go server has no payment endpoint yet:
+ * entitents are granted by an operator or by a future webhook, and the desktop cannot create
+ * one. Wiring the button to the legacy `/auth/checkout` route would open a page for a
+ * subscription the new server does not sell, and the customer would pay for something that
+ * never activates — the worst possible failure for a purchase flow.
+ *
+ * So the button is present, disabled, and honest about why. It becomes a real checkout once
+ * the webhook endpoint exists; until then, a visible explanation beats a dead button or a
+ * fake one.
+ */
+async function purchaseLicense() {
+  toast("Онлайн-оплата ещё не подключена. Напишите нам, чтобы получить лицензию.");
+}
+
+/** Load the account's licence, falling back to the cached copy. *//** Load the account's licence, falling back to the cached copy. */
+async function refreshEntitlements() {
+  const response = await window.domBook.entitlements.get();
+  if (!response.ok) return;
+  state.entitlements = response.data || null;
+  renderEntitlements();
+}
+
+/** Render the sync panel in settings. */
+function renderSyncStatus() {
+  const info = state.sync || { pending: 0, lastResult: null, cursor: 0 };
+  const badge = $("#syncBadge");
+  const rows = [];
+
+  if (info.pending > 0) {
+    badge.textContent = `${info.pending} к отправке`;
+    badge.className = "health-badge warn";
+  } else if (info.lastResult && info.lastResult.ok === false) {
+    badge.textContent = "Ошибка";
+    badge.className = "health-badge danger";
+  } else if (info.cursor > 0) {
+    badge.textContent = "Синхронизировано";
+    badge.className = "health-badge";
+  } else {
+    badge.textContent = "Не синхронизировано";
+    badge.className = "health-badge warn";
+  }
+
+  rows.push(`<div><dt>Локальные изменения</dt><dd>${info.pending > 0 ? `${info.pending} ждут отправки` : "все отправлены"}</dd></div>`);
+  rows.push(`<div><dt>Курсор</dt><dd>${info.cursor || 0}</dd></div>`);
+  if (info.lastResult?.at) {
+    // The time is shown because "when did this last work" is the first question a user
+    // asks about a sync that is not doing what they expect.
+    rows.push(`<div><dt>Последняя попытка</dt><dd>${new Date(info.lastResult.at).toLocaleString(interfaceLocale())}</dd></div>`);
+  }
+  if (info.lastResult?.ok === false && info.lastResult.error) {
+    rows.push(`<div><dt>Ошибка</dt><dd data-i18n-ignore>${escapeHtml(info.lastResult.error)}</dd></div>`);
+  }
+  const conflicts = (state.conflicts || []).length;
+  if (conflicts > 0) {
+    rows.push(`<div><dt>Конфликты</dt><dd>${conflicts} ждут решения</dd></div>`);
+  }
+  $("#syncInfo").innerHTML = rows.join("");
+}
+
+/** Ask the main process to sync now, then refresh what the UI shows. */
+async function syncNow() {
+  const response = await window.domBook.sync.now();
+  if (!response.ok) {
+    toast(response.error || "Синхронизация недоступна", "error");
+    return;
+  }
+  const result = response.data || {};
+  if (result.ok === false) {
+    toast(result.error || "Не удалось синхронизировать", "error");
+  } else if (result.skipped) {
+    toast("Синхронизация уже выполняется");
+  } else if (result.conflicts > 0) {
+    toast(`Синхронизировано. Конфликтов: ${result.conflicts}`, "error");
+  } else {
+    toast(`Синхронизировано: отправлено ${result.pushed || 0}, получено ${result.applied || 0}`);
+  }
+  await refreshSyncStatus();
+  await refreshCore();
+  await refreshConflicts();
+}
+
+/** Read the current sync state from the main process. */
+async function refreshSyncStatus() {
+  const response = await window.domBook.sync.status();
+  if (response.ok) state.sync = response.data || state.sync;
+  renderSyncStatus();
 }
 
 function renderSettings() {
@@ -1005,6 +1349,35 @@ async function createBackup() {
 
 function bindEvents() {
   $$(".nav-item[data-page]").forEach((button) => button.addEventListener("click", () => navigate(button.dataset.page)));
+
+  $("#policyForm")?.addEventListener("submit", (event) => {
+    saveBookingPolicy(event).catch((error) => toast(error.message, "error"));
+  });
+  $("#buyLicense")?.addEventListener("click", () => {
+    purchaseLicense().catch((error) => toast(error.message, "error"));
+  });
+  $("#syncNow")?.addEventListener("click", () => {
+    syncNow().catch((error) => toast(error.message, "error"));
+  });
+  $("#refreshConflicts")?.addEventListener("click", () => {
+    refreshConflicts().catch((error) => toast(error.message, "error"));
+  });
+
+  // The main process reports every sync attempt, so a failure becomes visible in the UI
+  // rather than only in a log. Without this the indicator would only update when the user
+  // pressed the button, and a background failure would go unnoticed.
+  window.domBook?.sync?.onChanged?.((syncState) => {
+    state.sync = {
+      pending: syncState.pending ?? state.sync.pending ?? 0,
+      lastResult: syncState,
+      cursor: state.sync.cursor ?? 0,
+    };
+    refreshSyncStatus().catch(() => {});
+    // A sync can deliver conflicts, and it can also carry a licence bought elsewhere or a
+    // refund, so both are refreshed rather than waiting for a restart.
+    refreshConflicts().catch(() => {});
+    refreshEntitlements().catch(() => {});
+  });
   document.addEventListener("click", (event) => {
     const target = event.target.closest("button");
     if (!target) return;
@@ -1086,6 +1459,25 @@ function bindEvents() {
         .then(() => toast("Дом отдыха восстановлен"))
         .catch((error) => toast(error.message, "error"));
     }
+    if (target.dataset.conflictAction) {
+      const action = target.dataset.conflictAction;
+      const reservationId = target.dataset.id;
+      const conflict = (state.conflicts || []).find((item) => item.id === reservationId);
+      if (!conflict) return;
+
+      if (action === "cancel") {
+        confirmAction({
+          title: "Отменить конфликтующую бронь?",
+          text: `Бронь для ${conflict.guest_name} будет отменена, а даты освободятся. Запись сохранится в истории.`,
+          button: "Отменить бронь",
+          action: () => resolveConflict(reservationId, "cancel"),
+        });
+      } else {
+        resolveConflict(reservationId, action);
+      }
+      return;
+    }
+
     if (target.dataset.cancelReservation) {
       const reservation = state.reservations.find((item) => item.id === target.dataset.cancelReservation);
       confirmAction({
@@ -1176,14 +1568,212 @@ function bindEvents() {
   });
 }
 
-async function init() {
-  bindEvents();
+function showLogin() {
+  $("#loginScreen").classList.remove("is-hidden");
+  showLoginStep("loginStepEmail");
+  $("#loginEmailError").hidden = true;
+  $("#loginCodeError").hidden = true;
+  $("#loginCodeHint").hidden = true;
+  $("#loginEmail").value = state.loginEmail || "";
+  setTimeout(() => $("#loginEmail").focus(), 60);
+}
+
+function hideLogin() {
+  const screen = $("#loginScreen");
+  screen.classList.add("is-leaving");
+  setTimeout(() => {
+    screen.classList.add("is-hidden");
+    screen.classList.remove("is-leaving");
+  }, 260);
+}
+
+function showLoginStep(id) {
+  ["loginStepEmail", "loginStepCode", "loginStepPlan"].forEach((stepId) => {
+    const step = $(`#${stepId}`);
+    const active = stepId === id;
+    step.hidden = !active;
+    step.classList.toggle("is-active", active);
+  });
+}
+
+function showPlanStep() {
+  $("#loginPlanError").hidden = true;
+  showLoginStep("loginStepPlan");
+  $("#loginPlanHeading").textContent = "Выберите тариф";
+  setTimeout(() => $("#loginStepPlan button.login-submit").focus(), 60);
+}
+
+function applySession(session) {
+  state.session = session;
+  const container = $("#cloudStatus");
+  if (session) {
+    const email = session.user?.email || session.accountName || "";
+    const planLabel = { free: "Бесплатный", pro: "Pro", business: "Business" }[session.plan] || session.plan || "";
+    $("#cloudAccount").innerHTML = `<strong>${escapeHtml(session.accountName || email)}</strong><span>${escapeHtml(planLabel)}</span>`;
+    container.hidden = false;
+  } else {
+    container.hidden = true;
+  }
+}
+
+function clearSessionUI() {
+  state.session = null;
+  $("#cloudStatus").hidden = true;
+  $("#cloudAccount").innerHTML = "";
+}
+
+async function enterApp() {
   try {
     await refreshCore();
     navigate("dashboard");
   } catch (error) {
     toast(`Не удалось загрузить базу: ${error.message}`, "error");
   }
+}
+
+async function requestLoginCode() {
+  const email = $("#loginEmail").value.trim();
+  $("#loginEmailError").hidden = true;
+  if (!email) {
+    showError($("#loginEmailError"), new Error("Укажите email"));
+    return;
+  }
+  const button = $("#loginEmailSubmit");
+  setBusy(button, true, "Отправка…");
+  try {
+    state.loginEmail = email;
+    let result = await unwrap(api.auth.send(email));
+    if (result?.loginable === false) {
+      try {
+        await unwrap(api.auth.setup(email));
+        result = await unwrap(api.auth.send(email));
+      } catch (setupError) {
+        if (setupError?.code !== "user_exists") throw setupError;
+      }
+    }
+    if (result?.loginable === false) {
+      throw new Error("Учётная запись для этого email не найдена. Обратитесь к владельцу аккаунта.");
+    }
+    $("#loginCodeEmail").textContent = email;
+    const codeHint = $("#loginCodeHint");
+    if (result?.code) {
+      codeHint.textContent = `Dev-режим: ваш код — ${result.code}`;
+      codeHint.hidden = false;
+    } else {
+      codeHint.hidden = true;
+    }
+    $("#loginCode").value = "";
+    $("#loginCodeError").hidden = true;
+    showLoginStep("loginStepCode");
+    setTimeout(() => $("#loginCode").focus(), 60);
+  } catch (error) {
+    showError($("#loginEmailError"), error);
+  } finally {
+    setBusy(button, false);
+  }
+}
+
+async function submitLoginCode() {
+  const code = $("#loginCode").value.trim();
+  $("#loginCodeError").hidden = true;
+  if (!/^\d{6}$/.test(code)) {
+    showError($("#loginCodeError"), new Error("Код состоит из 6 цифр"));
+    return;
+  }
+  const button = $("#loginCodeSubmit");
+  setBusy(button, true, "Вход…");
+  try {
+    const result = await unwrap(api.auth.verify(state.loginEmail, code));
+    applySession(result);
+    if (result?.plan && result.plan !== "free") await enterAppAfterLogin();
+    else showPlanStep();
+  } catch (error) {
+    showError($("#loginCodeError"), error);
+  } finally {
+    setBusy(button, false);
+  }
+}
+
+async function submitPlanSelection() {
+  const selected = document.querySelector('input[name="plan"]:checked')?.value;
+  const button = $("#loginPlanSubmit");
+  setBusy(button, true, "Сохранение…");
+  try {
+    if (selected === "business") {
+      await unwrap(api.auth.checkout("business"));
+      toast("Paddle checkout открыт в браузере. Business включится после подтверждения оплаты.");
+    }
+    await enterAppAfterLogin();
+  } catch (error) {
+    showError($("#loginPlanError"), error);
+  } finally {
+    setBusy(button, false);
+  }
+}
+
+async function enterAppAfterLogin() {
+  hideLogin();
+  await enterApp();
+}
+
+function bindAuthEvents() {
+  $("#loginEmailForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    requestLoginCode();
+  });
+  $("#loginCodeForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    submitLoginCode();
+  });
+  $("#loginResend").addEventListener("click", requestLoginCode);
+  $("#loginBack").addEventListener("click", showLogin);
+  $("#loginPlanBack").addEventListener("click", showLogin);
+  $("#loginPlanSubmit").addEventListener("click", submitPlanSelection);
+  $("#logoutButton").addEventListener("click", async () => {
+    try {
+      await api.auth.logout();
+    } catch (error) {
+      console.warn("Logout failed; clearing local session", error);
+    }
+    clearSessionUI();
+    $("#loginEmail").value = state.loginEmail || "";
+    showLogin();
+  });
+}
+
+async function boot() {
+  bindEvents();
+  bindAuthEvents();
+  try {
+    const systemInfo = await unwrap(api.system.info());
+    window.i18n?.setLanguage(systemInfo.language || "ru");
+  } catch {
+    // language falls back to Russian if the local database is not reachable yet
+  }
+  const hasAuthApi = Boolean(api.auth && api.auth.status);
+  if (!hasAuthApi) {
+    showLogin();
+    return;
+  }
+  try {
+    const status = await unwrap(api.auth.status());
+    state.authBaseUrl = status.baseUrl;
+    if (status?.authenticated && status.session) {
+      applySession(status.session);
+      hideLogin();
+      await enterApp();
+      return;
+    }
+  } catch (error) {
+    // Backend unreachable or no valid session: show only the login screen.
+    // The app data UI stays gated behind authentication.
+    console.warn("Auth restore failed", error);
+  }
+  showLogin();
+}
+
+async function init() {
+  await boot();
 }
 
 function createBrowserDemoApi() {

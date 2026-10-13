@@ -3,8 +3,16 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const initSqlJs = require("sql.js");
 const {
+  enqueue: enqueueOutbox,
+  pending,
+  pendingCount,
+  acknowledge,
+  recordFailure,
+} = require("./main/outbox.cjs");
+const {
   assertBookingDates,
   bookingLimits,
+  resolvePolicy,
   todayInTimeZone,
 } = require("./domain/booking/booking-policy.cjs");
 
@@ -288,6 +296,19 @@ class DomBookDatabase {
         this.db.run(`CREATE TABLE IF NOT EXISTS ${name} (${sql})`);
       }
       this.db.run(`
+        CREATE TABLE IF NOT EXISTS sync_outbox (
+          table_name TEXT NOT NULL,
+          row_id TEXT NOT NULL,
+          operation TEXT NOT NULL DEFAULT 'upsert' CHECK(operation IN ('upsert', 'delete')),
+          payload_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          revision INTEGER NOT NULL DEFAULT 1,
+          attempts INTEGER NOT NULL DEFAULT 0,
+          last_error TEXT NOT NULL DEFAULT '',
+          PRIMARY KEY (table_name, row_id)
+        );
+        CREATE INDEX IF NOT EXISTS sync_outbox_updated_idx ON sync_outbox(updated_at);
         CREATE TABLE IF NOT EXISTS schema_migrations (
           name TEXT PRIMARY KEY,
           applied_at TEXT NOT NULL
@@ -358,6 +379,7 @@ class DomBookDatabase {
         );
       }
     } finally {
+      this.ensureOutboxColumns();
       this.db.run("PRAGMA foreign_keys = ON");
     }
   }
@@ -538,6 +560,182 @@ class DomBookDatabase {
       `INSERT INTO ${table}(${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`,
       columns.map((column) => row[column]),
     );
+    this.enqueueSync(table, row.id);
+  }
+
+  /**
+   * Record a row's current state as needing to be pushed to the server.
+   *
+   * The payload is read back from the database rather than passed in, so it is always the
+   * row as actually stored — including the version and timestamp the write just produced.
+   * Passing the caller's input would risk queueing something the database then modified.
+   *
+   * Call this inside the same transaction as the write it describes. A queue that can
+   * disagree with the data either resends a change that was rolled back or loses one that
+   * committed, which is the failure the outbox exists to prevent.
+   *
+   * Failures are logged and swallowed: a sync bookkeeping problem must never abort the
+   * user's write, which has already succeeded locally and is their actual intent.
+   */
+  enqueueSync(table, rowId) {
+    if (!rowId || this.syncEnabled === false) return;
+    try {
+      const row = this.query(`SELECT * FROM ${table} WHERE id = ?`, [rowId])[0];
+      if (!row) return;
+      enqueueOutbox(this, table, rowId, row, nowIso);
+    } catch (error) {
+      console.error("Не удалось поставить запись в очередь синхронизации", error);
+    }
+  }
+
+  /**
+   * The account's booking window, as most recently reported by the server.
+   *
+   * Cached locally rather than fetched per booking: the application must work offline, and
+   * a validation rule that needed the network would make booking impossible without one.
+   * The shipped defaults apply until the server has been heard from.
+   */
+  bookingPolicy() {
+    const stored = this.scalar(
+      "SELECT setting_value FROM app_settings WHERE setting_key = 'booking_policy'",
+    );
+    if (!stored) return resolvePolicy(null);
+    try {
+      return resolvePolicy(JSON.parse(stored));
+    } catch {
+      // A corrupt cache must not brick booking: an unreadable policy degrades to the
+      // shipped default, which is a real window rather than a lockout.
+      return resolvePolicy(null);
+    }
+  }
+
+  /**
+   * Record the policy the server reported.
+   *
+   * Stored through the ordinary settings path so it syncs like any other setting and
+   * survives a restart.
+   */
+  setBookingPolicy(policy) {
+    const resolved = resolvePolicy(policy);
+    this.upsertSetting("booking_policy", JSON.stringify({
+      maximumAdvanceDays: resolved.maximumAdvanceDays,
+      maximumStayMonths: resolved.maximumStayMonths,
+      timeZone: resolved.timeZone,
+    }));
+    return resolved;
+  }
+
+  /**
+   * The account's entitlements, as most recently reported by the server.
+   *
+   * Cached locally for the same reason the booking policy is: the application must work
+   * offline, and a licence check that needed the network would make the app unusable on a
+   * train. The server stays authoritative — it re-checks on every write that matters — so
+   * this cache can only ever be too permissive for a short window, never permanently.
+   */
+  entitlements() {
+    const stored = this.scalar(
+      "SELECT setting_value FROM app_settings WHERE setting_key = 'entitlements'",
+    );
+    if (!stored) return null;
+    try {
+      const parsed = JSON.parse(stored);
+      // `unitLimit: null` means unlimited, so the distinction between "no cache" and
+      // "unlimited" has to survive JSON. Reading a missing field as unlimited would hand
+      // out the paid tier on a corrupt cache.
+      return {
+        paid: parsed.paid === true,
+        planName: typeof parsed.planName === "string" ? parsed.planName : "",
+        skus: Array.isArray(parsed.skus) ? parsed.skus : [],
+        expiresAt: parsed.expiresAt ?? null,
+        // A missing unitLimit with paid=false is treated as the free cap rather than as
+        // unlimited, so the failure mode is a refusal instead of a giveaway.
+        unitLimit: parsed.paid === true && parsed.unitLimit === null
+          ? null
+          : Number.isInteger(parsed.unitLimit) ? parsed.unitLimit : 1,
+        features: Array.isArray(parsed.features) ? parsed.features : [],
+        cachedAt: parsed.cachedAt ?? null,
+        stale: true,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /** Record the entitlements the server reported. */
+  setEntitlements(entitlements) {
+    this.upsertSetting("entitlements", JSON.stringify({ ...entitlements, cachedAt: nowIso() }));
+    return this.entitlements();
+  }
+
+  /**
+   * How many active units this account may hold, or null for unlimited.
+   *
+   * With no cached entitlement the free cap applies. That is the conservative direction: a
+   * device that has never synced must not assume it is licensed.
+   */
+  unitAllowance() {
+    const entitlements = this.entitlements();
+    if (!entitlements) return 1;
+    return entitlements.paid ? entitlements.unitLimit : 1;
+  }
+
+  /**
+   * Whether the account is over its unit allowance, for the upgrade prompt.
+   *
+   * ADVISORY ONLY — this deliberately does not refuse writes.
+   *
+   * The server enforces the limit, and it is the only place that can: it holds the licence,
+   * it sees every device, and it already has a database trigger closing the race. Refusing
+   * locally would break the two cases the product depends on. A licensed user whose cache
+   * has expired, or who is offline on a new device, would be locked out of their own data —
+   * and the demo dataset, which the application seeds on first run, would fail to load.
+   *
+   * So the client creates the unit and lets the server refuse it, and the refusal is shown
+   * rather than hidden. That is the honest failure: the user learns the limit at the moment
+   * it applies, with their data intact and nothing lost.
+   */
+  unitAllowanceStatus() {
+    const allowance = this.unitAllowance();
+    const active = this.listProperties({ includeArchived: true })
+      .filter((item) => item.status === "active" && !item.deleted_at).length;
+    if (allowance === null) {
+      return { unlimited: true, allowance: null, active, remaining: null, over: false };
+    }
+    return {
+      unlimited: false,
+      allowance,
+      active,
+      remaining: Math.max(0, allowance - active),
+      over: active > allowance,
+    };
+  }
+
+  /** How many local changes are waiting to reach the server. */
+  pendingSyncCount() {
+    return pendingCount(this);
+  }
+
+  /** Pending entries, for the sync engine to push. */
+  pendingSyncEntries(limit = 500) {
+    return pending(this, limit);
+  }
+
+  acknowledgeSync(entries) {
+    return acknowledge(this, entries);
+  }
+
+  recordSyncFailure(entry, message) {
+    return recordFailure(this, entry, message, nowIso);
+  }
+
+  // Bring an existing outbox up to date. A database created before the revision column
+  // existed would otherwise fail every enqueue with "no such column".
+  ensureOutboxColumns() {
+    for (const [column, definition] of [["revision", "INTEGER NOT NULL DEFAULT 1"]]) {
+      const exists = this.query("PRAGMA table_info(sync_outbox)").some((item) => item.name === column);
+      if (!exists) this.db.run(`ALTER TABLE sync_outbox ADD COLUMN ${column} ${definition}`);
+    }
   }
 
   ensureColumn(table, column, definition) {
@@ -690,6 +888,7 @@ class DomBookDatabase {
         [id, data.name, data.address, data.hasFoodService, data.breakfastPriceMinor, data.lunchPriceMinor,
           data.dinnerPriceMinor, data.status, data.notes, timestamp, timestamp, this.writerId],
       );
+      this.enqueueSync("places", id);
       if (options.audit !== false) this.audit("place", id, "created", data);
       return this.getPlace(id);
     };
@@ -714,6 +913,7 @@ class DomBookDatabase {
         [data.name, data.address, data.hasFoodService, data.breakfastPriceMinor, data.lunchPriceMinor,
           data.dinnerPriceMinor, data.status, data.notes, nowIso(), this.writerId, placeId],
       );
+      this.enqueueSync("places", placeId);
       this.audit("place", placeId, "updated", data);
       return this.getPlace(placeId);
     });
@@ -727,6 +927,7 @@ class DomBookDatabase {
         "UPDATE places SET status = 'archived', updated_at = ?, version = version + 1, last_writer = ? WHERE id = ?",
         [nowIso(), this.writerId, placeId],
       );
+      this.enqueueSync("places", placeId);
       this.audit("place", placeId, "archived");
       return this.getPlace(placeId);
     });
@@ -740,6 +941,7 @@ class DomBookDatabase {
         "UPDATE places SET status = 'active', updated_at = ?, version = version + 1, last_writer = ? WHERE id = ?",
         [nowIso(), this.writerId, placeId],
       );
+      this.enqueueSync("places", placeId);
       this.audit("place", placeId, "restored");
       return this.getPlace(placeId);
     });
@@ -793,6 +995,7 @@ class DomBookDatabase {
           timestamp, timestamp, this.writerId,
         ],
       );
+      this.enqueueSync("properties", id);
       if (options.audit !== false) this.audit("property", id, "created", data);
       return this.getProperty(id);
     };
@@ -821,6 +1024,7 @@ class DomBookDatabase {
           nowIso(), this.writerId, propertyId,
         ],
       );
+      this.enqueueSync("properties", propertyId);
       this.audit("property", propertyId, "updated", data);
       return this.getProperty(propertyId);
     });
@@ -834,6 +1038,7 @@ class DomBookDatabase {
         "UPDATE properties SET status = 'archived', updated_at = ?, version = version + 1, last_writer = ? WHERE id = ?",
         [nowIso(), this.writerId, propertyId],
       );
+      this.enqueueSync("properties", propertyId);
       this.audit("property", propertyId, "archived");
       return this.getProperty(propertyId);
     });
@@ -847,6 +1052,7 @@ class DomBookDatabase {
         "UPDATE properties SET status = 'active', updated_at = ?, version = version + 1, last_writer = ? WHERE id = ?",
         [nowIso(), this.writerId, propertyId],
       );
+      this.enqueueSync("properties", propertyId);
       this.audit("property", propertyId, "restored");
       return this.getProperty(propertyId);
     });
@@ -1043,6 +1249,7 @@ class DomBookDatabase {
       );
       this.insertNights(id, data);
       this.replaceReservationMeals(id, data.meals);
+      this.enqueueSync("reservations", id);
       this.audit("reservation", id, "created", data);
       return this.getReservation(id);
     });
@@ -1073,6 +1280,7 @@ class DomBookDatabase {
       );
       this.insertNights(reservationId, data);
       this.replaceReservationMeals(reservationId, data.meals);
+      this.enqueueSync("reservations", reservationId);
       this.audit("reservation", reservationId, "updated", data);
       return this.getReservation(reservationId);
     });
@@ -1087,6 +1295,7 @@ class DomBookDatabase {
         "UPDATE reservations SET status = 'cancelled', updated_at = ?, version = version + 1, last_writer = ? WHERE id = ?",
         [nowIso(), this.writerId, reservationId],
       );
+      this.enqueueSync("reservations", reservationId);
       this.audit("reservation", reservationId, "cancelled");
       return this.getReservation(reservationId);
     });
@@ -1245,7 +1454,8 @@ class DomBookDatabase {
       databasePath: this.filePath,
       backupDir: this.backupDir,
       databaseSize: fs.existsSync(this.filePath) ? fs.statSync(this.filePath).size : 0,
-      bookingPolicy: bookingLimits(null, this.todayProvider()),
+      // Reported from the cached server policy so the UI shows the account's real window.
+      bookingPolicy: bookingLimits(null, this.todayProvider(), this.bookingPolicy()),
       language: this.getLanguage(),
     };
   }
@@ -1269,6 +1479,9 @@ class DomBookDatabase {
          last_writer = excluded.last_writer`,
       [crypto.randomUUID(), key, value, timestamp, timestamp, this.writerId],
     );
+    // Settings are keyed by setting_key rather than id, so the row is looked up by key.
+    const stored = this.query("SELECT id FROM app_settings WHERE setting_key = ?", [key])[0];
+    if (stored) this.enqueueSync("app_settings", stored.id);
   }
 
   setLanguage(language) {
@@ -1291,6 +1504,7 @@ class DomBookDatabase {
 }
 
 module.exports = {
+  nowIso,
   DomBookDatabase,
   eachNight,
 };

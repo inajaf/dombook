@@ -15,11 +15,74 @@
 <body>
   <a class="skip-link" href="#main-content">Перейти к содержимому</a>
 
+  <section class="login-screen" id="loginScreen" aria-labelledby="loginHeading">
+    <div class="login-card" role="presentation">
+      <div class="login-brand">
+        <img class="brand-mark" src="icons/icon-192.png" alt="" aria-hidden="true">
+        <div><strong>DomBook</strong><span>cloud</span></div>
+      </div>
+      <div class="login-body">
+        <div class="login-step is-active" id="loginStepEmail">
+          <h2 id="loginHeading">Вход в DomBook</h2>
+          <p class="login-note">Войдите, чтобы синхронизировать брони с облаком.</p>
+          <form id="loginEmailForm" novalidate>
+            <label class="field"><span>Email</span>
+              <input id="loginEmail" type="email" maxlength="200" autocomplete="email" inputmode="email" required placeholder="you@example.com">
+            </label>
+            <div class="form-error" id="loginEmailError" role="alert" hidden></div>
+            <button class="button primary login-submit" type="submit" id="loginEmailSubmit">Получить код</button>
+          </form>
+        </div>
+
+        <div class="login-step" id="loginStepCode" hidden>
+          <button class="text-button login-back" type="button" id="loginBack">← Назад</button>
+          <h2>Введите код</h2>
+          <p class="login-note">Мы отправили шестизначный код на <strong id="loginCodeEmail"></strong>.</p>
+          <div class="code-hint" id="loginCodeHint" hidden></div>
+          <form id="loginCodeForm" novalidate>
+            <label class="field"><span>Код из письма</span>
+              <input id="loginCode" type="text" maxlength="6" inputmode="numeric" autocomplete="one-time-code" required placeholder="000000">
+            </label>
+            <div class="form-error" id="loginCodeError" role="alert" hidden></div>
+            <button class="button primary login-submit" type="submit" id="loginCodeSubmit">Войти</button>
+            <button class="button ghost login-resend" type="button" id="loginResend">Отправить код ещё раз</button>
+          </form>
+        </div>
+
+        <div class="login-step" id="loginStepPlan" hidden>
+          <button class="text-button login-back" type="button" id="loginPlanBack">← Назад</button>
+          <h2 id="loginPlanHeading">Выберите тариф</h2>
+          <p class="login-note">Ваш аккаунт создан. Выберите план — его можно изменить позже.</p>
+          <div class="plan-picker">
+            <label class="plan-option">
+              <input type="radio" name="plan" value="free" checked>
+              <span class="plan-option-body">
+                <strong>Бесплатно</strong>
+                <span class="plan-option-sub">1 локация и 1 объект</span>
+              </span>
+            </label>
+            <label class="plan-option">
+              <input type="radio" name="plan" value="business">
+              <span class="plan-option-body">
+                <strong>Business</strong>
+                  <span class="plan-option-sub">$19/месяц · без ограничений</span>
+              </span>
+            </label>
+          </div>
+          <div class="form-error" id="loginPlanError" role="alert" hidden></div>
+          <button class="button primary login-submit" type="button" id="loginPlanSubmit">Продолжить</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <svg class="svg-sprite" aria-hidden="true">
     <symbol id="i-grid" viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></symbol>
     <symbol id="i-calendar" viewBox="0 0 24 24"><path d="M7 3v3m10-3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v14H4V6a1 1 0 0 1 1-1Z"/></symbol>
     <symbol id="i-house" viewBox="0 0 24 24"><path d="m3 11 9-7 9 7v9h-6v-6H9v6H3z"/></symbol>
     <symbol id="i-book" viewBox="0 0 24 24"><path d="M6 3h12a2 2 0 0 1 2 2v16H7a3 3 0 0 1-3-3V5a2 2 0 0 1 2-2Zm1 14h13M8 7h8M8 11h6"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4 2.5 20h19L12 4Zm0 6v5m0 3v.5"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5"/></symbol>
     <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm8 3 2 2-2 3-3-.5-1 1.5.5 3-3 1.5-2-2-2 2-3-1.5.5-3L5 16.5 2 17l-2-3 2-2-2-2 2-3 3 .5L6.5 6 6 3l3-1.5 2 2 2-2L16 3l-.5 3L17 7.5l3-.5 2 3Z"/></symbol>
     <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
     <symbol id="i-edit" viewBox="0 0 24 24"><path d="m4 16-1 5 5-1L19 9l-4-4Z M13 7l4 4"/></symbol>
@@ -32,7 +95,7 @@
     <symbol id="i-arrow" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
   </svg>
 
-  <div class="app-shell">
+  <div class="app-shell" id="appShell">
     <aside class="sidebar" aria-label="Основная навигация">
       <div class="brand">
         <img class="brand-mark" src="icons/icon-192.png" alt="" aria-hidden="true">
@@ -57,11 +120,19 @@
 
       <div class="sidebar-spacer"></div>
       <nav class="nav-list nav-secondary">
+        <button class="nav-item" data-page="conflicts">
+          <svg><use href="#i-alert"/></svg><span>Конфликты</span>
+          <span class="nav-badge" id="conflictBadge" hidden>0</span>
+        </button>
         <button class="nav-item" data-page="settings">
           <svg><use href="#i-settings"/></svg><span>Настройки</span>
         </button>
       </nav>
       <div class="local-status"><span class="status-dot"></span><span>Локальная база</span></div>
+      <div class="cloud-status" id="cloudStatus" hidden>
+        <div class="cloud-account" id="cloudAccount"></div>
+        <button class="logout-button" type="button" id="logoutButton">Выйти</button>
+      </div>
     </aside>
 
     <section class="workspace">
@@ -132,8 +203,8 @@
             </div>
             <div class="empty-state" id="reservationEmpty" hidden>
               <div class="empty-icon"><svg><use href="#i-book"/></svg></div>
-              <h3>Бронирований пока нет</h3><p>Создайте первую бронь — система проверит даты и рассчитает остаток.</p>
-              <button class="button primary" data-quick="reservation"><svg><use href="#i-plus"/></svg>Создать бронь</button>
+              <h3 id="reservationEmptyTitle">Бронирований пока нет</h3><p id="reservationEmptyText">Создайте первую бронь — система проверит даты и рассчитает остаток.</p>
+              <button class="button primary" id="reservationEmptyAction" data-quick="reservation"><svg><use href="#i-plus"/></svg>Создать бронь</button>
             </div>
           </div>
         </section>
@@ -152,6 +223,21 @@
             <h3>Добавьте первый объект</h3><p>Это может быть отдельный дом или коттедж внутри дома отдыха.</p>
             <button class="button primary" data-quick="property"><svg><use href="#i-plus"/></svg>Добавить объект</button>
           </div>
+        </section>
+
+        <section class="page" id="page-conflicts" aria-labelledby="conflicts-heading">
+          <div class="section-head">
+            <div>
+              <p class="section-note">Брони, сделанные офлайн и столкнувшиеся с занятыми датами</p>
+              <h2 id="conflicts-heading">Конфликты синхронизации</h2>
+            </div>
+            <button class="button secondary compact" id="refreshConflicts">Проверить</button>
+          </div>
+          <p class="muted" id="conflictsIntro">
+            Такие брони не потеряны: они сохранены и ждут решения. Выберите, что с ними делать —
+            перенести гостя на другие даты или отменить бронь.
+          </p>
+          <div class="conflict-list" id="conflictList"></div>
         </section>
 
         <section class="page" id="page-settings" aria-labelledby="settings-heading">
@@ -176,6 +262,61 @@
               <header class="panel-header"><div><p class="eyebrow">SQLite</p><h2>Локальное хранилище</h2></div><span class="health-badge">Работает</span></header>
               <dl class="info-list" id="systemInfo"></dl>
               <button class="button secondary" id="openDatabaseFolder"><svg><use href="#i-database"/></svg>Открыть папку базы</button>
+            </article>
+            <article class="panel" id="licensePanel">
+              <header class="panel-header">
+                <div><p class="eyebrow">Лицензия</p><h2>Что куплено</h2></div>
+                <span class="health-badge warn" id="licenseBadge">Бесплатная версия</span>
+              </header>
+              <dl class="info-list" id="licenseInfo"></dl>
+              <p class="muted" id="licenseUpsell" hidden>
+                Бесплатная версия рассчитана на один объект размещения. Пожизненная лицензия
+                покупается один раз и снимает ограничение навсегда.
+              </p>
+              <button class="button primary" id="buyLicense">
+                <svg><use href="#i-book"/></svg>Как получить лицензию
+              </button>
+            </article>
+            <article class="panel" id="policyPanel">
+              <header class="panel-header">
+                <div><p class="eyebrow">Правила</p><h2>Политика бронирования</h2></div>
+                <span class="health-badge" id="policyBadge">По умолчанию</span>
+              </header>
+              <p class="muted">
+                Окно действует для всего аккаунта и на всех устройствах. Изменения применяются
+                при следующей синхронизации.
+              </p>
+              <form id="policyForm" class="policy-form">
+                <label class="field" for="policyAdvance">
+                  <span>Бронировать вперёд, дней</span>
+                  <input id="policyAdvance" name="maximumAdvanceDays" type="number" min="1" max="365" step="1">
+                  <small>Сколько дней вперёд можно оформить заезд. Максимум 365.</small>
+                </label>
+                <label class="field" for="policyStay">
+                  <span>Максимальная длительность, месяцев</span>
+                  <input id="policyStay" name="maximumStayMonths" type="number" min="1" max="36" step="1">
+                  <small>Дольше этого проживание оформить нельзя. Максимум 36.</small>
+                </label>
+                <label class="field" for="policyTimeZone">
+                  <span>Часовой пояс</span>
+                  <input id="policyTimeZone" name="timeZone" type="text" autocomplete="off">
+                  <small>Определяет, какой день считается «сегодня». Например Asia/Baku.</small>
+                </label>
+                <p class="form-error" id="policyError" hidden></p>
+                <button class="button primary" type="submit" id="policySubmit">Сохранить политику</button>
+              </form>
+            </article>
+            <article class="panel" id="syncPanel">
+              <header class="panel-header">
+                <div><p class="eyebrow">Cloud</p><h2>Синхронизация</h2></div>
+                <span class="health-badge warn" id="syncBadge">Не синхронизировано</span>
+              </header>
+              <p class="muted">
+                Данные хранятся локально и работают без интернета. Синхронизация отправляет
+                изменения на сервер, чтобы их видели другие устройства.
+              </p>
+              <dl class="info-list" id="syncInfo"></dl>
+              <button class="button secondary" id="syncNow"><svg><use href="#i-refresh"/></svg>Синхронизировать</button>
             </article>
             <article class="panel">
               <header class="panel-header"><div><p class="eyebrow">Backup</p><h2>Резервные копии</h2></div><button class="button primary compact" id="createBackup">Создать копию</button></header>

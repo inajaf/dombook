@@ -1,0 +1,80 @@
+{
+  "$comment": "Calendar date math shared by booking policy and stay pricing. Month-end clamping is the subtle part: JS uses Date.UTC rollover, Go must use time.Date normalization to match.",
+  "cases": [
+    {
+      "op": "addDaysIso",
+      "date": "2026-08-31",
+      "days": 1,
+      "expect": "2026-09-01"
+    },
+    {
+      "op": "addDaysIso",
+      "date": "2026-01-31",
+      "days": 30,
+      "expect": "2026-03-02"
+    },
+    {
+      "op": "addDaysIso",
+      "date": "2026-12-31",
+      "days": 1,
+      "expect": "2027-01-01"
+    },
+    {
+      "op": "addDaysIso",
+      "date": "2028-02-28",
+      "days": 1,
+      "expect": "2028-02-29",
+      "$comment": "leap year"
+    },
+    {
+      "op": "addDaysIso",
+      "date": "2026-03-01",
+      "days": -1,
+      "expect": "2026-02-28"
+    },
+    {
+      "op": "addCalendarMonths",
+      "date": "2026-01-31",
+      "months": 1,
+      "expect": "2026-02-28",
+      "$comment": "clamped: February has no 31st"
+    },
+    {
+      "op": "addCalendarMonths",
+      "date": "2026-08-11",
+      "months": 3,
+      "expect": "2026-11-11"
+    },
+    {
+      "op": "addCalendarMonths",
+      "date": "2026-12-31",
+      "months": 1,
+      "expect": "2027-01-31",
+      "$comment": "year rollover with clamping"
+    },
+    {
+      "op": "addCalendarMonths",
+      "date": "2028-01-31",
+      "months": 1,
+      "expect": "2028-02-29",
+      "$comment": "clamped to a leap February"
+    },
+    {
+      "op": "addCalendarMonths",
+      "date": "2026-03-31",
+      "months": 1,
+      "expect": "2026-04-30"
+    },
+    {
+      "op": "bookingLimits",
+      "date": "2026-08-11",
+      "expect": {
+        "maximumCheckInDate": "2026-09-01",
+        "maximumCheckOutDate": "2026-11-11",
+        "maximumAdvanceDays": 21,
+        "maximumStayMonths": 3,
+        "timeZone": "Asia/Baku"
+      }
+    }
+  ]
+}
