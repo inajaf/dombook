@@ -30,7 +30,11 @@ const (
 var DefaultPolicy = Policy{
 	MaximumAdvanceDays: 21,
 	MaximumStayMonths:  3,
-	TimeZone:           "Asia/Baku",
+	// A two-year tenancy is ordinary for a residential let, and the bound exists to
+	// catch a mistyped date, not to express a business preference. It must stay below
+	// MaxNightCount's reach, which it does with room to spare.
+	MaximumTenancyMonths: 24,
+	TimeZone:             "Asia/Baku",
 }
 
 // Policy is one account's booking window rules. It is stored per account
@@ -41,6 +45,13 @@ type Policy struct {
 	MaximumAdvanceDays int
 	// MaximumStayMonths bounds the length of a stay in calendar months.
 	MaximumStayMonths int
+	// MaximumTenancyMonths bounds the length of a tenancy in calendar months.
+	//
+	// Separate from MaximumStayMonths because the two are different businesses: a
+	// guest house may cap a stay at three months while letting the same flat on a
+	// two-year lease. One field could not express both, and the shared value would
+	// either forbid long lets or leave nightly stays unbounded.
+	MaximumTenancyMonths int
 	// TimeZone decides which calendar day "today" is.
 	TimeZone string
 }
@@ -54,6 +65,9 @@ func (p Policy) WithDefaults() Policy {
 	}
 	if p.MaximumStayMonths <= 0 {
 		p.MaximumStayMonths = DefaultPolicy.MaximumStayMonths
+	}
+	if p.MaximumTenancyMonths <= 0 {
+		p.MaximumTenancyMonths = DefaultPolicy.MaximumTenancyMonths
 	}
 	if p.TimeZone == "" {
 		p.TimeZone = DefaultPolicy.TimeZone
@@ -69,6 +83,9 @@ func (p Policy) Validate() error {
 	}
 	if p.MaximumStayMonths <= 0 {
 		return errors.New("maximumStayMonths must be positive")
+	}
+	if p.MaximumTenancyMonths <= 0 {
+		return errors.New("maximumTenancyMonths must be positive")
 	}
 	if p.TimeZone == "" {
 		return errors.New("timeZone is required")
@@ -100,12 +117,17 @@ func AsViolation(err error) (*Violation, bool) {
 // Limits is the resolved booking window for a given check-in date. Clients
 // display these so a user sees the boundary before submitting.
 type Limits struct {
-	Today               Date
-	MaximumCheckInDate  Date
-	MaximumCheckOutDate Date
-	MaximumAdvanceDays  int
-	MaximumStayMonths   int
-	TimeZone            string
+	Today              Date
+	MaximumCheckInDate Date
+	// MaximumCheckOutDate bounds a stay; MaximumTenancyEndDate bounds a tenancy.
+	// Both are anchored on the same check-in, because which one applies depends on
+	// the booking's kind rather than on a different start date.
+	MaximumCheckOutDate   Date
+	MaximumTenancyEndDate Date
+	MaximumAdvanceDays    int
+	MaximumStayMonths     int
+	MaximumTenancyMonths  int
+	TimeZone              string
 }
 
 // TodayInTimeZone returns the current calendar date in the policy timezone.
@@ -124,12 +146,14 @@ func TodayInTimeZone(now time.Time, timeZone string) (Date, error) {
 // LimitsFor resolves the booking window anchored on checkInDate.
 func (p Policy) LimitsFor(checkInDate Date, today Date) Limits {
 	return Limits{
-		Today:               today,
-		MaximumCheckInDate:  today.AddDays(p.MaximumAdvanceDays),
-		MaximumCheckOutDate: checkInDate.AddCalendarMonths(p.MaximumStayMonths),
-		MaximumAdvanceDays:  p.MaximumAdvanceDays,
-		MaximumStayMonths:   p.MaximumStayMonths,
-		TimeZone:            p.TimeZone,
+		Today:                 today,
+		MaximumCheckInDate:    today.AddDays(p.MaximumAdvanceDays),
+		MaximumCheckOutDate:   checkInDate.AddCalendarMonths(p.MaximumStayMonths),
+		MaximumTenancyEndDate: checkInDate.AddCalendarMonths(p.MaximumTenancyMonths),
+		MaximumAdvanceDays:    p.MaximumAdvanceDays,
+		MaximumStayMonths:     p.MaximumStayMonths,
+		MaximumTenancyMonths:  p.MaximumTenancyMonths,
+		TimeZone:              p.TimeZone,
 	}
 }
 
@@ -158,6 +182,24 @@ func (p Policy) AssertBookingDates(
 	today Date,
 	existing *ExistingBooking,
 ) error {
+	return p.AssertBookingDatesFor(KindStay, checkInDate, checkOutDate, today, existing)
+}
+
+// AssertBookingDatesFor validates a booking of a given kind.
+//
+// A TENANCY is deliberately exempt from the advance window. That rule exists to stop
+// a guest booking a cottage two years out; a residential lease is signed weeks or
+// months ahead by design, so applying it would refuse ordinary business. Only the
+// length is bounded, by MaximumTenancyMonths rather than MaximumStayMonths.
+//
+// The "skip when unchanged" rule is unchanged, and matters more here: a tenancy
+// signed last year must stay editable without its dates being re-judged.
+func (p Policy) AssertBookingDatesFor(
+	kind BookingKind,
+	checkInDate, checkOutDate Date,
+	today Date,
+	existing *ExistingBooking,
+) error {
 	checkInChanged := existing == nil || existing.CheckIn != checkInDate
 	checkOutChanged := existing == nil || existing.CheckOut != checkOutDate
 	if !checkInChanged && !checkOutChanged {
@@ -172,6 +214,21 @@ func (p Policy) AssertBookingDates(
 			Message: "Дата заезда не может быть в прошлом",
 		}
 	}
+
+	if kind == KindRental {
+		maximum := checkInDate.AddCalendarMonths(p.MaximumTenancyMonths)
+		if checkOutDate.After(maximum) {
+			return &Violation{
+				Code: CodeRentalTooLong,
+				Message: fmt.Sprintf(
+					"Аренда не может быть дольше %d календарных месяцев — окончание не позже %s",
+					p.MaximumTenancyMonths, maximum,
+				),
+			}
+		}
+		return nil
+	}
+
 	if checkInChanged && checkInDate.After(limits.MaximumCheckInDate) {
 		return &Violation{
 			Code: CodeCheckInTooFar,

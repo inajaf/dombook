@@ -195,11 +195,13 @@ func TestDateMathAgainstFixtures(t *testing.T) {
 
 			case "bookingLimits":
 				var want struct {
-					MaximumCheckInDate  string `json:"maximumCheckInDate"`
-					MaximumCheckOutDate string `json:"maximumCheckOutDate"`
-					MaximumAdvanceDays  int    `json:"maximumAdvanceDays"`
-					MaximumStayMonths   int    `json:"maximumStayMonths"`
-					TimeZone            string `json:"timeZone"`
+					MaximumCheckInDate    string `json:"maximumCheckInDate"`
+					MaximumCheckOutDate   string `json:"maximumCheckOutDate"`
+					MaximumTenancyEndDate string `json:"maximumTenancyEndDate"`
+					MaximumAdvanceDays    int    `json:"maximumAdvanceDays"`
+					MaximumStayMonths     int    `json:"maximumStayMonths"`
+					MaximumTenancyMonths  int    `json:"maximumTenancyMonths"`
+					TimeZone              string `json:"timeZone"`
 				}
 				if err := json.Unmarshal(testCase.Expect, &want); err != nil {
 					t.Fatalf("expect is not a limits object: %v", err)
@@ -210,6 +212,12 @@ func TestDateMathAgainstFixtures(t *testing.T) {
 				}
 				if got.MaximumCheckOutDate.String() != want.MaximumCheckOutDate {
 					t.Errorf("MaximumCheckOutDate = %s, want %s", got.MaximumCheckOutDate, want.MaximumCheckOutDate)
+				}
+				if got.MaximumTenancyEndDate.String() != want.MaximumTenancyEndDate {
+					t.Errorf("MaximumTenancyEndDate = %s, want %s", got.MaximumTenancyEndDate, want.MaximumTenancyEndDate)
+				}
+				if got.MaximumTenancyMonths != want.MaximumTenancyMonths {
+					t.Errorf("MaximumTenancyMonths = %d, want %d", got.MaximumTenancyMonths, want.MaximumTenancyMonths)
 				}
 				if got.MaximumAdvanceDays != want.MaximumAdvanceDays {
 					t.Errorf("MaximumAdvanceDays = %d, want %d", got.MaximumAdvanceDays, want.MaximumAdvanceDays)

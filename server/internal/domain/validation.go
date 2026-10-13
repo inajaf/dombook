@@ -28,6 +28,13 @@ const (
 	CodePrepaidTooLarge   = "prepaid_exceeds_total"
 	CodeDepositMissing    = "deposit_amount_required"
 	CodeUnknownStatus     = "unknown_status"
+
+	// Rental-specific codes. Stable, like the rest: clients branch on these and
+	// sync reports them as conflict reasons.
+	CodeInvalidBookingKind    = "invalid_booking_kind"
+	CodeRentalTooShort        = "rental_too_short"
+	CodeRentalMealsNotAllowed = "rental_meals_not_allowed"
+	CodeRentalTooLong         = "rental_too_long"
 )
 
 // FieldError is a rejected input field. Field names the offending key so a client
@@ -54,16 +61,24 @@ func AsFieldError(err error) (*FieldError, bool) {
 // enforces the same maxima, and a mismatch would let the client accept input the
 // server then rejects.
 const (
-	MaxPlaceNameLength    = 140
-	MaxUnitNameLength     = 120
-	MaxGuestNameLength    = 160
-	MaxAddressLength      = 240
-	MaxLocationLength     = 200
-	MaxEmailLength        = 200
-	MaxNotesLength        = 2000
-	MaxCurrencyLength     = 3
-	MaxPhoneLength        = 32
-	MaxNightCount         = 730
+	MaxPlaceNameLength = 140
+	MaxUnitNameLength  = 120
+	MaxGuestNameLength = 160
+	MaxAddressLength   = 240
+	MaxLocationLength  = 200
+	MaxEmailLength     = 200
+	MaxNotesLength     = 2000
+	MaxCurrencyLength  = 3
+	MaxPhoneLength     = 32
+	// MaxNightCount bounds how many nights one booking may occupy, and therefore how
+	// many reservation_nights rows it materialises.
+	//
+	// It must stay above the longest term the booking policy permits, or a policy-valid
+	// tenancy would be refused for a reason the policy never mentions. The default
+	// MaximumTenancyMonths is 24, and the longest possible 24 calendar months span 731
+	// days — two 31-day months plus 29 February — so a 730 cap would have rejected
+	// exactly the longest legal lease. 1096 covers three years with the slack to spare.
+	MaxNightCount         = 1096
 	MaxMealItems          = 2190
 	MaxCurrencyMinorUnits = 1_000_000_000
 	MaxCapacity           = 100
@@ -273,6 +288,56 @@ func ParseReservationStatus(value any) ReservationStatus {
 		}
 	}
 	return StatusHold
+}
+
+// BookingKind distinguishes a nightly stay from a long-term tenancy.
+//
+// A tenancy is NOT a separate entity: it is a reservation with a long date range.
+// That is what lets the single exclusion constraint on reservations enforce
+// availability across both modes — a tenancy blocks short stays and is blocked by
+// them, with no second availability check that could drift out of step.
+//
+// The kind is stored rather than derived from the length. An owner may agree a
+// monthly rate on a three-month let, and deriving the kind would then flip that
+// tenancy into a stay the moment its term was edited below the threshold.
+type BookingKind string
+
+const (
+	// KindStay is a nightly booking. The default, and what every existing row is.
+	KindStay BookingKind = "stay"
+	// KindRental is a tenancy priced by the month.
+	KindRental BookingKind = "rental"
+)
+
+// ValidBookingKinds are the kinds a client may set directly.
+var ValidBookingKinds = []BookingKind{KindStay, KindRental}
+
+// ParseBookingKind validates a client-supplied kind, defaulting to a stay.
+//
+// Defaulting rather than erroring on an unknown value keeps an older client that
+// does not send the field working, which is the same reason the column default is
+// 'stay'. An explicit nonsense value is caught by validation instead.
+func ParseBookingKind(value any) BookingKind {
+	candidate := BookingKind(strings.TrimSpace(toString(value)))
+	for _, allowed := range ValidBookingKinds {
+		if candidate == allowed {
+			return candidate
+		}
+	}
+	return KindStay
+}
+
+// IsKnownBookingKind reports whether a value names a kind this build understands.
+//
+// Separate from ParseBookingKind because the two answer different questions: this
+// one rejects a typo, the other supplies a default for a missing field.
+func IsKnownBookingKind(kind BookingKind) bool {
+	for _, allowed := range ValidBookingKinds {
+		if kind == allowed {
+			return true
+		}
+	}
+	return false
 }
 
 // DepositStatus tracks the security deposit.

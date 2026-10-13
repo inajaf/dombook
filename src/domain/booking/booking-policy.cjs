@@ -9,6 +9,10 @@
 const BOOKING_POLICY = Object.freeze({
   maximumAdvanceDays: 21,
   maximumStayMonths: 3,
+  // Bounds a tenancy in calendar months. Separate from maximumStayMonths because the
+  // two are different businesses: a guest house may cap a stay at three months while
+  // letting the same flat on a two-year lease.
+  maximumTenancyMonths: 24,
   timeZone: "Asia/Baku",
 });
 
@@ -28,6 +32,7 @@ function resolvePolicy(override) {
   return Object.freeze({
     maximumAdvanceDays: positive(override.maximumAdvanceDays, BOOKING_POLICY.maximumAdvanceDays),
     maximumStayMonths: positive(override.maximumStayMonths, BOOKING_POLICY.maximumStayMonths),
+    maximumTenancyMonths: positive(override.maximumTenancyMonths, BOOKING_POLICY.maximumTenancyMonths),
     timeZone: zone,
   });
 }
@@ -116,16 +121,24 @@ function bookingLimits(checkInDate, today = todayInTimeZone(), policy = BOOKING_
     maximumCheckOutDate: checkInDate
       ? addCalendarMonths(checkInDate, effective.maximumStayMonths)
       : null,
+    maximumTenancyEndDate: checkInDate
+      ? addCalendarMonths(checkInDate, effective.maximumTenancyMonths)
+      : null,
     ...effective,
   };
 }
 
 /**
- * Validate a stay against the account's booking window.
+ * Validate a booking against the account's booking window.
  *
  * `policy` comes from the server when it is reachable. The client applies the same rule the
  * server will apply on push, so the user is told "too far ahead" while booking rather than
  * discovering it when the change syncs.
+ *
+ * `kind` is "stay" (default) or "rental". A TENANCY is exempt from the advance window: that
+ * rule stops a guest booking a cottage two years out, whereas a residential lease is signed
+ * weeks or months ahead by design, so applying it would refuse ordinary business. Only the
+ * length is bounded, by maximumTenancyMonths rather than maximumStayMonths.
  *
  * The check order and the unchanged-dates skip are part of the contract with the Go
  * validator; both are pinned by fixtures/booking-policy-cases.json.
@@ -136,6 +149,7 @@ function assertBookingDates({
   today = todayInTimeZone(),
   existingReservation = null,
   policy = BOOKING_POLICY,
+  kind = "stay",
 }) {
   const effective = resolvePolicy(policy);
   const isNew = !existingReservation;
@@ -147,6 +161,16 @@ function assertBookingDates({
   if (checkInChanged && checkInDate < limits.today) {
     throw new Error("Дата заезда не может быть в прошлом");
   }
+
+  if (kind === "rental") {
+    if (checkOutDate > limits.maximumTenancyEndDate) {
+      throw new Error(
+        `Аренда не может быть дольше ${effective.maximumTenancyMonths} календарных месяцев — окончание не позже ${limits.maximumTenancyEndDate}`,
+      );
+    }
+    return;
+  }
+
   if (checkInChanged && checkInDate > limits.maximumCheckInDate) {
     throw new Error(
       `Заезд можно оформить максимум на ${effective.maximumAdvanceDays} день вперёд — до ${limits.maximumCheckInDate}`,

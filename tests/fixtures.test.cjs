@@ -103,8 +103,10 @@ test("фикстуры: арифметика дат совпадает в JS и 
           today: item.date,
           maximumCheckInDate: item.expect.maximumCheckInDate,
           maximumCheckOutDate: item.expect.maximumCheckOutDate,
+          maximumTenancyEndDate: item.expect.maximumTenancyEndDate,
           maximumAdvanceDays: item.expect.maximumAdvanceDays,
           maximumStayMonths: item.expect.maximumStayMonths,
+          maximumTenancyMonths: item.expect.maximumTenancyMonths,
           timeZone: item.expect.timeZone,
         }, `bookingLimits(${item.date})`);
         break;

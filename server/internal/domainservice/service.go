@@ -114,6 +114,9 @@ func policyFromAccount(account *store.Account) domain.Policy {
 	if account.BookingPolicy.MaximumStayMonths != nil {
 		policy.MaximumStayMonths = *account.BookingPolicy.MaximumStayMonths
 	}
+	if account.BookingPolicy.MaximumTenancyMonths != nil {
+		policy.MaximumTenancyMonths = *account.BookingPolicy.MaximumTenancyMonths
+	}
 	if account.BookingPolicy.TimeZone != nil && *account.BookingPolicy.TimeZone != "" {
 		policy.TimeZone = *account.BookingPolicy.TimeZone
 	}
@@ -728,11 +731,15 @@ func (s *Service) CurrentVersion(ctx context.Context, tenantID string) (int64, e
 // server about which dates are bookable — the exact divergence the shared fixtures exist
 // to prevent.
 type BookingPolicyView struct {
-	MaximumAdvanceDays int    `json:"maximumAdvanceDays"`
-	MaximumStayMonths  int    `json:"maximumStayMonths"`
-	TimeZone           string `json:"timeZone"`
-	Today              string `json:"today"`
-	MaximumCheckInDate string `json:"maximumCheckInDate"`
+	MaximumAdvanceDays int `json:"maximumAdvanceDays"`
+	MaximumStayMonths  int `json:"maximumStayMonths"`
+	// MaximumTenancyMonths bounds a long-term let. Exposed separately because the
+	// desktop validates against this value while offline, and a client that saw only
+	// the stay bound would refuse legitimate leases.
+	MaximumTenancyMonths int    `json:"maximumTenancyMonths"`
+	TimeZone             string `json:"timeZone"`
+	Today                string `json:"today"`
+	MaximumCheckInDate   string `json:"maximumCheckInDate"`
 	// IsDefault reports whether the account is on the shipped policy, so the UI can say so
 	// instead of implying the owner chose these values.
 	IsDefault bool `json:"isDefault"`
@@ -760,21 +767,23 @@ func (s *Service) BookingPolicy(ctx context.Context, tenantID string) (*BookingP
 
 	limits := policy.LimitsFor(today, today)
 	return &BookingPolicyView{
-		MaximumAdvanceDays: policy.MaximumAdvanceDays,
-		MaximumStayMonths:  policy.MaximumStayMonths,
-		TimeZone:           policy.TimeZone,
-		Today:              today.String(),
-		MaximumCheckInDate: limits.MaximumCheckInDate.String(),
-		IsDefault:          policy == domain.DefaultPolicy,
+		MaximumAdvanceDays:   policy.MaximumAdvanceDays,
+		MaximumStayMonths:    policy.MaximumStayMonths,
+		MaximumTenancyMonths: policy.MaximumTenancyMonths,
+		TimeZone:             policy.TimeZone,
+		Today:                today.String(),
+		MaximumCheckInDate:   limits.MaximumCheckInDate.String(),
+		IsDefault:            policy == domain.DefaultPolicy,
 	}, nil
 }
 
 // BookingPolicyUpdate is a request to change the booking window. Omitted fields keep their
 // current values, so a client can change one limit without resending the rest.
 type BookingPolicyUpdate struct {
-	MaximumAdvanceDays *int    `json:"maximumAdvanceDays"`
-	MaximumStayMonths  *int    `json:"maximumStayMonths"`
-	TimeZone           *string `json:"timeZone"`
+	MaximumAdvanceDays   *int    `json:"maximumAdvanceDays"`
+	MaximumStayMonths    *int    `json:"maximumStayMonths"`
+	MaximumTenancyMonths *int    `json:"maximumTenancyMonths"`
+	TimeZone             *string `json:"timeZone"`
 }
 
 // Upper bounds on the policy. Without them an owner could set an advance window of a
@@ -783,6 +792,10 @@ type BookingPolicyUpdate struct {
 const (
 	maxAdvanceDaysLimit = 365
 	maxStayMonthsLimit  = 36
+	// A tenancy may be far longer than a stay. The bound is above the 24-month
+	// default so an owner can extend it, and well below MaxNightCount's reach so the
+	// two limits cannot disagree about whether a term is legal.
+	maxTenancyMonthsLimit = 60
 )
 
 // SetBookingPolicy validates and stores a new booking window.
@@ -800,6 +813,9 @@ func (s *Service) SetBookingPolicy(ctx context.Context, tenantID string, update 
 	if update.MaximumStayMonths != nil {
 		next.MaximumStayMonths = *update.MaximumStayMonths
 	}
+	if update.MaximumTenancyMonths != nil {
+		next.MaximumTenancyMonths = *update.MaximumTenancyMonths
+	}
 	if update.TimeZone != nil {
 		next.TimeZone = *update.TimeZone
 	}
@@ -816,17 +832,23 @@ func (s *Service) SetBookingPolicy(ctx context.Context, tenantID string, update 
 			fmt.Sprintf("Горизонт бронирования: максимум %d дней", maxAdvanceDaysLimit),
 			map[string]any{"field": "maximumAdvanceDays", "limit": maxAdvanceDaysLimit})
 	}
+	if next.MaximumTenancyMonths > maxTenancyMonthsLimit {
+		return nil, httpapi.BadRequest("validation_error",
+			fmt.Sprintf("Максимальный срок аренды: %d месяцев", maxTenancyMonthsLimit),
+			map[string]any{"field": "maximumTenancyMonths", "limit": maxTenancyMonthsLimit})
+	}
 	if next.MaximumStayMonths > maxStayMonthsLimit {
 		return nil, httpapi.BadRequest("validation_error",
 			fmt.Sprintf("Максимальная длительность: максимум %d месяцев", maxStayMonthsLimit),
 			map[string]any{"field": "maximumStayMonths", "limit": maxStayMonthsLimit})
 	}
 
-	advance, months, zone := next.MaximumAdvanceDays, next.MaximumStayMonths, next.TimeZone
+	advance, months, tenancy, zone := next.MaximumAdvanceDays, next.MaximumStayMonths, next.MaximumTenancyMonths, next.TimeZone
 	if _, err := s.store.UpdateBookingPolicy(ctx, tenantID, store.BookingPolicyConfig{
-		MaximumAdvanceDays: &advance,
-		MaximumStayMonths:  &months,
-		TimeZone:           &zone,
+		MaximumAdvanceDays:   &advance,
+		MaximumStayMonths:    &months,
+		MaximumTenancyMonths: &tenancy,
+		TimeZone:             &zone,
 	}); err != nil {
 		return nil, translate(err)
 	}

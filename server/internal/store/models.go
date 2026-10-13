@@ -73,9 +73,11 @@ func (r UserRole) CanManageBilling() bool {
 // That distinction matters: a partial update that omits maximumAdvanceDays must
 // not silently set it to 0, which would forbid every booking.
 type BookingPolicyConfig struct {
-	MaximumAdvanceDays *int    `json:"maximumAdvanceDays,omitempty"`
-	MaximumStayMonths  *int    `json:"maximumStayMonths,omitempty"`
-	TimeZone           *string `json:"timeZone,omitempty"`
+	MaximumAdvanceDays *int `json:"maximumAdvanceDays,omitempty"`
+	MaximumStayMonths  *int `json:"maximumStayMonths,omitempty"`
+	// MaximumTenancyMonths bounds a long-term let, separately from a stay.
+	MaximumTenancyMonths *int    `json:"maximumTenancyMonths,omitempty"`
+	TimeZone             *string `json:"timeZone,omitempty"`
 }
 
 // Account is one tenant: a guest-house business.

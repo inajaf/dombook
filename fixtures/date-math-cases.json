@@ -73,7 +73,9 @@
         "maximumCheckOutDate": "2026-11-11",
         "maximumAdvanceDays": 21,
         "maximumStayMonths": 3,
-        "timeZone": "Asia/Baku"
+        "timeZone": "Asia/Baku",
+        "maximumTenancyEndDate": "2028-08-11",
+        "maximumTenancyMonths": 24
       }
     }
   ]

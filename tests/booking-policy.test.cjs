@@ -14,8 +14,10 @@ test("окно новой брони заканчивается ровно че�
     today: "2026-07-29",
     maximumCheckInDate: "2026-08-19",
     maximumCheckOutDate: "2026-11-19",
+    maximumTenancyEndDate: "2028-08-19",
     maximumAdvanceDays: 21,
     maximumStayMonths: 3,
+    maximumTenancyMonths: 24,
     timeZone: "Asia/Baku",
   });
   assert.doesNotThrow(() => assertBookingDates({
