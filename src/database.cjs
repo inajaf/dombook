@@ -16,6 +16,19 @@ const {
   todayInTimeZone,
 } = require("./domain/booking/booking-policy.cjs");
 
+/**
+ * Settings that belong to one installation and must never replicate.
+ *
+ * `app_settings` is a synced table, so a key written here reaches every device on the account.
+ * These three must not: a licence cache, a device identity, and a read cursor are all
+ * per-device facts, and sharing them produces wrong answers rather than merely noisy ones.
+ */
+const DEVICE_PRIVATE_SETTINGS = new Set([
+  "entitlements",
+  "device_id",
+  "sync_cursor",
+]);
+
 const ALLOWED_RESERVATION_STATUSES = new Set([
   "hold",
   "confirmed",
@@ -1497,6 +1510,23 @@ class DomBookDatabase {
          last_writer = excluded.last_writer`,
       [crypto.randomUUID(), key, value, timestamp, timestamp, this.writerId],
     );
+    // Per-device settings are stored but never queued for sending.
+    //
+    // `app_settings` is a replicated table, so anything written here travels to every device
+    // that shares the account. Three of these keys must not:
+    //
+    //   entitlements — each device fetches its own licence from the server. Syncing it makes
+    //     one device's cache overwrite another's, so a licensed device can inherit a stale
+    //     "not paid" cache and be treated as unlicensed.
+    //   device_id    — identifies THIS installation. Replicating it makes every device claim
+    //     the same writer, which destroys the only record of which device made a change.
+    //   sync_cursor  — a per-device read position. A device that inherited another's cursor
+    //     would skip every change made before it.
+    //
+    // They are written through `db.run` rather than this method by the sync engine itself, but
+    // the guard lives here so a future caller cannot reintroduce the problem.
+    if (DEVICE_PRIVATE_SETTINGS.has(key)) return;
+
     // Settings are keyed by setting_key rather than id, so the row is looked up by key.
     const stored = this.query("SELECT id FROM app_settings WHERE setting_key = ?", [key])[0];
     if (stored) this.enqueueSync("app_settings", stored.id);

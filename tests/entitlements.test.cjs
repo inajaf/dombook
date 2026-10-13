@@ -213,3 +213,75 @@ test("a cached licence survives a restart, so an offline licensed device stays l
   assert.equal(second.entitlements()?.paid, true, "the licence must survive a restart");
   assert.equal(second.unitAllowance(), null, "and it must still lift the cap");
 });
+
+
+// --- per-device settings must not replicate ----------------------------------
+//
+// `app_settings` is a synced table, so a key written through the normal path travels to every
+// device on the account. A licence cache, a device identity, and a read cursor are per-device
+// facts: sharing them produces wrong answers, not just noise.
+
+/** The outbox rows for a given setting key. */
+function queuedSettings(db, key) {
+  return db.query(
+    `SELECT o.row_id, o.table_name FROM sync_outbox o
+       JOIN app_settings s ON s.id = o.row_id
+      WHERE o.table_name = 'app_settings' AND s.setting_key = ?`,
+    [key],
+  );
+}
+
+test("the licence cache is never queued for sync", async (t) => {
+  const db = await freshDatabase(t);
+
+  db.setEntitlements({
+    paid: true, planName: "Пожизненная лицензия", skus: ["app_perpetual"],
+    unitLimit: null, expiresAt: null, features: ["paid_tier"],
+  });
+
+  // It IS stored locally — that is the whole point of the cache.
+  assert.equal(db.entitlements()?.paid, true);
+
+  // But it must not be sent. Syncing it would let one device's cache overwrite another's, so a
+  // licensed device could inherit a stale "not paid" value and be treated as unlicensed.
+  assert.equal(queuedSettings(db, "entitlements").length, 0,
+    "the licence cache must stay on the device that fetched it");
+});
+
+test("the device id is never queued for sync", async (t) => {
+  const db = await freshDatabase(t);
+
+  // Every install has its own id. Replicating it would make all devices claim the same writer,
+  // destroying the only record of which device made a change.
+  db.upsertSetting("device_id", "some-other-device");
+  assert.equal(queuedSettings(db, "device_id").length, 0);
+});
+
+test("a real account setting IS queued, so the guard is not a blanket refusal", async (t) => {
+  const db = await freshDatabase(t);
+
+  // The denylist has to be a denylist. If this method stopped queueing anything, the three
+  // tests above would pass while sync silently stopped carrying settings at all.
+  db.upsertSetting("booking_policy", JSON.stringify({ maximumAdvanceDays: 30 }));
+  assert.equal(queuedSettings(db, "booking_policy").length, 1,
+    "an account-level setting must still replicate");
+});
+
+test("a full sync leaves no per-device setting stuck in the queue", async (t) => {
+  const db = await freshDatabase(t);
+
+  // Reproduces the observed failure: fetching the licence during startup re-queued it, so a
+  // sync could never drain the outbox — pending stayed at 1 forever.
+  db.setEntitlements({ paid: false, planName: "Бесплатный", skus: [], unitLimit: 1, expiresAt: null, features: [] });
+  db.upsertSetting("interface_language", "ru");
+  db.upsertSetting("booking_policy", JSON.stringify({ maximumAdvanceDays: 21 }));
+
+  const queuedKeys = db.query(
+    `SELECT s.setting_key FROM sync_outbox o JOIN app_settings s ON s.id = o.row_id
+      WHERE o.table_name = 'app_settings'`,
+  ).map((r) => r.setting_key);
+
+  assert.ok(!queuedKeys.includes("entitlements"), "the licence cache must not be queued");
+  assert.ok(queuedKeys.includes("interface_language") || queuedKeys.includes("booking_policy"),
+    "genuine settings should still be queued");
+});
