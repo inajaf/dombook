@@ -25,12 +25,32 @@ import (
 // DSN returns the base (owner) connection string, skipping the test when unset.
 func DSN(t *testing.T) string {
 	t.Helper()
-	dsn := os.Getenv("DOMBOOK_TEST_DSN")
+	// RENTKEEPER_TEST_DSN is the current name, DOMBOOK_TEST_DSN the one an existing CI job or
+	// developer shell still exports. Both are honoured: silently skipping because the name
+	// changed would leave tenant isolation untested while the suite reported success.
+	dsn := os.Getenv("RENTKEEPER_TEST_DSN")
 	if dsn == "" {
-		t.Skip("DOMBOOK_TEST_DSN is not set; skipping PostgreSQL integration tests")
+		dsn = os.Getenv("DOMBOOK_TEST_DSN")
+	}
+	if dsn == "" {
+		t.Skip("RENTKEEPER_TEST_DSN is not set; skipping PostgreSQL integration tests")
 	}
 	return dsn
 }
+
+// The two roles the suite connects as, and the passwords it gives them.
+//
+// Named constants rather than string literals at each use site: the isolation tests are only
+// meaningful if the DSN really authenticates as the UNPRIVILEGED role, so the name appears in
+// the DSN rewrite, the ALTER ROLE that provisions it, and the assertion that it cannot bypass
+// RLS. Three copies of a literal is how one of them drifts and the suite starts testing as a
+// role that sees everything.
+const (
+	appRoleName       = "rentkeeper_app"
+	appRolePassword   = "app"
+	adminRoleName     = "rentkeeper_admin"
+	adminRolePassword = "adminpw"
+)
 
 // AdminDSN rewrites the base DSN to authenticate as the operator role, which BYPASSES RLS.
 //
@@ -42,9 +62,9 @@ func AdminDSN(t *testing.T) string {
 	at := strings.Index(dsn, "@")
 	scheme := strings.Index(dsn, "://")
 	if at < 0 || scheme < 0 {
-		t.Fatalf("DOMBOOK_TEST_DSN is not in a recognized form: %q", dsn)
+		t.Fatalf("RENTKEEPER_TEST_DSN is not in a recognized form: %q", dsn)
 	}
-	return dsn[:scheme+3] + "dombook_admin:adminpw" + dsn[at:]
+	return dsn[:scheme+3] + adminRoleName + ":" + adminRolePassword + dsn[at:]
 }
 
 // AppDSN rewrites the base DSN to authenticate as the unprivileged application
@@ -55,9 +75,9 @@ func AppDSN(t *testing.T) string {
 	at := strings.Index(dsn, "@")
 	scheme := strings.Index(dsn, "://")
 	if at < 0 || scheme < 0 {
-		t.Fatalf("DOMBOOK_TEST_DSN is not in a recognized form: %q", dsn)
+		t.Fatalf("RENTKEEPER_TEST_DSN is not in a recognized form: %q", dsn)
 	}
-	return dsn[:scheme+3] + "dombook_app:app" + dsn[at:]
+	return dsn[:scheme+3] + appRoleName + ":" + appRolePassword + dsn[at:]
 }
 
 // SkipMigrate reports whether the caller asked to leave the schema untouched.
@@ -111,9 +131,9 @@ func Prepare(t *testing.T) {
 }
 
 // testDBLockKey is an arbitrary but fixed advisory-lock key identifying "the
-// DomBook test schema". Any constant works as long as every test package uses the
+// RentKeeper test schema". Any constant works as long as every test package uses the
 // same one.
-const testDBLockKey int64 = 0x646F6D626F6F6B // "dombook"
+const testDBLockKey int64 = 0x646F6D626F6F6B // "dombook": the hex is historic and MUST NOT change
 
 // claimAndPrepare records which test binary owns the database, then provisions it.
 //
@@ -344,23 +364,23 @@ func ensureAppRole(ctx context.Context, dsn string) error {
 	// this makes `go test` work out of the box. The admin role matters because cross-tenant
 	// tests (the conflict queue) must connect as a role that BYPASSES RLS — running them as
 	// the application role would silently see nothing and look like a bug in the query.
-	if _, err := pool.Exec(ctx, "ALTER ROLE dombook_app WITH PASSWORD 'app'"); err != nil {
-		return fmt.Errorf("set dombook_app password: %w", err)
+	if _, err := pool.Exec(ctx, "ALTER ROLE "+appRoleName+" WITH PASSWORD '"+appRolePassword+"'"); err != nil {
+		return fmt.Errorf("set %s password: %w", appRoleName, err)
 	}
-	if _, err := pool.Exec(ctx, "ALTER ROLE dombook_admin WITH PASSWORD 'adminpw'"); err != nil {
-		return fmt.Errorf("set dombook_admin password: %w", err)
+	if _, err := pool.Exec(ctx, "ALTER ROLE "+adminRoleName+" WITH PASSWORD '"+adminRolePassword+"'"); err != nil {
+		return fmt.Errorf("set %s password: %w", adminRoleName, err)
 	}
 
-	// Assert the precondition the isolation tests rest on. If dombook_app ever
+	// Assert the precondition the isolation tests rest on. If the application role ever
 	// gained BYPASSRLS, every assertion about tenant isolation would silently stop
 	// testing anything — the queries would simply return other tenants' rows.
 	var bypasses bool
 	if err := pool.QueryRow(ctx,
-		"SELECT rolbypassrls OR rolsuper FROM pg_roles WHERE rolname = 'dombook_app'").Scan(&bypasses); err != nil {
-		return fmt.Errorf("inspect dombook_app: %w", err)
+		"SELECT rolbypassrls OR rolsuper FROM pg_roles WHERE rolname = $1", appRoleName).Scan(&bypasses); err != nil {
+		return fmt.Errorf("inspect %s: %w", appRoleName, err)
 	}
 	if bypasses {
-		return fmt.Errorf("dombook_app must not be SUPERUSER or BYPASSRLS: isolation tests would be vacuous")
+		return fmt.Errorf("%s must not be SUPERUSER or BYPASSRLS: isolation tests would be vacuous", appRoleName)
 	}
 	return nil
 }

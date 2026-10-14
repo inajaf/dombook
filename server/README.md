@@ -1,6 +1,6 @@
 # RentKeeper server
 
-Go + PostgreSQL backend for DomBook. Replaces the Cloudflare Workers/D1
+Go + PostgreSQL backend for RentKeeper. Replaces the Cloudflare Workers/D1
 legacy implementation, which has been removed (see `CUTOVER.md`)
 (see the cutover step in the project plan).
 
@@ -21,8 +21,8 @@ legacy implementation, which has been removed (see `CUTOVER.md`)
 scripts/db.sh up          # from the repository root
 ```
 
-That starts the `postgres` service from `docker-compose.yml` and creates `dombook_dev` and
-`dombook_test`. It is one command rather than a documented sequence because the sequence is
+That starts the `postgres` service from `docker-compose.yml` and creates `rentkeeper_dev` and
+`rentkeeper_test`. It is one command rather than a documented sequence because the sequence is
 what goes stale — the server needs the first database and the Go integration tests need the
 second, and a container made from the compose file alone only has the first. Before this
 script existed, each of those facts was written down separately in this file, in the root
@@ -35,29 +35,29 @@ server. Host and port are therefore read from the environment rather than assume
 `check-all.sh` and the e2e suites. To use a native PostgreSQL instead:
 
 ```bash
-export DOMBOOK_DB_HOST=127.0.0.1 DOMBOOK_DB_PORT=5432 DOMBOOK_DB_USER="$(whoami)" DOMBOOK_DB_PASSWORD=
+export RENTKEEPER_DB_HOST=127.0.0.1 RENTKEEPER_DB_PORT=5432 RENTKEEPER_DB_USER="$(whoami)" RENTKEEPER_DB_PASSWORD=
 ```
 
 Apply migrations (from `server/`):
 
 ```bash
-export DOMBOOK_DSN="postgres://dombook:dombook@127.0.0.1:55432/dombook_dev?sslmode=disable"
+export RENTKEEPER_DSN="postgres://rentkeeper:rentkeeper@127.0.0.1:55432/rentkeeper_dev?sslmode=disable"
 go run ./cmd/migrate up       # apply everything pending, then print status
 go run ./cmd/migrate status   # list migrations and whether they are applied
 ```
 
-Migrations must run as the **database owner** (`dombook` in the container), which is the role
+Migrations must run as the **database owner** (`rentkeeper` in the container), which is the role
 that owns the objects they create: migration 0003's `ALTER DEFAULT PRIVILEGES` binds to that
 role, so running them as a different one silently stops granting the application role access
 to tables added later.
 
-`migrate reset` reverts every migration and requires `DOMBOOK_ALLOW_RESET=1`, so
+`migrate reset` reverts every migration and requires `RENTKEEPER_ALLOW_RESET=1`, so
 dropping the schema cannot happen by accident.
 
 The same files work with the goose CLI:
 
 ```bash
-goose -dir internal/store/migrations postgres "$DOMBOOK_DSN" up
+goose -dir internal/store/migrations postgres "$RENTKEEPER_DSN" up
 ```
 
 ## Roles and the isolation model
@@ -67,15 +67,15 @@ convenience** — do not collapse them:
 
 | Role | Bypasses RLS | Used by |
 |---|---|---|
-| `dombook_app` | no | the API request path |
-| `dombook_admin` | yes | platform admin: account lists, cross-tenant conflict review |
+| `rentkeeper_app` | no | the API request path |
+| `rentkeeper_admin` | yes | platform admin: account lists, cross-tenant conflict review |
 
-The API connects as `dombook_app`, which is subject to the row-level security
+The API connects as `rentkeeper_app`, which is subject to the row-level security
 policies in `20260811000002_security.sql`. That is what makes tenant isolation
 an enforcement guarantee rather than a coding convention: a bug in a `WHERE`
 clause cannot leak another tenant's rows.
 
-Admin operations use a second connection as `dombook_admin`. Administration
+Admin operations use a second connection as `rentkeeper_admin`. Administration
 cannot be expressed under RLS (it spans tenants by definition), and the
 alternative — an "is admin" session flag that policies check — would put a
 potential bypass inside every policy. Keep the two credentials separate.
@@ -115,7 +115,7 @@ authorized by tenant-scoped policies, so each gets a narrowly-scoped
 2. Always `SET search_path = public, pg_temp`. Without it, a caller who can create
    objects earlier on the search path could shadow a referenced table and redirect
    a privileged write.
-3. Always `REVOKE ALL ... FROM PUBLIC` before granting to `dombook_app`.
+3. Always `REVOKE ALL ... FROM PUBLIC` before granting to `rentkeeper_app`.
    PostgreSQL grants `EXECUTE` to `PUBLIC` by default.
 4. `verification_codes` is deny-all by design: it has RLS enabled and **no
    policy**. Its only access path is the functions above. The migration assertion
@@ -194,14 +194,14 @@ reference `current_tenant_id()`, so policies are dropped before the function.
 ## Cutover from the legacy D1 backend
 
 See `CUTOVER.md`. In short: `go run ./cmd/migrate-d1 -source <d1.sqlite> [-dry-run]`, with
-`DOMBOOK_DSN` naming the destination. Then start the API with `DOMBOOK_SKIP_MIGRATE=1`, because
-it connects as `dombook_app` and cannot create objects.
+`RENTKEEPER_DSN` naming the destination. Then start the API with `RENTKEEPER_SKIP_MIGRATE=1`, because
+it connects as `rentkeeper_app` and cannot create objects.
 
 ## Tests
 
 ```bash
 scripts/db.sh up                                   # from the repository root, once
-export DOMBOOK_TEST_DSN="postgres://dombook:dombook@127.0.0.1:55432/dombook_test?sslmode=disable"
+export RENTKEEPER_TEST_DSN="postgres://rentkeeper:rentkeeper@127.0.0.1:55432/rentkeeper_test?sslmode=disable"
 go test -p 1 ./...
 ```
 
@@ -223,7 +223,7 @@ The test helper now records which binary owns the database and refuses a second 
 one with this exact instruction, so the misuse fails immediately and says what to do.
 A stale marker from a crashed run is detected by process liveness and reclaimed.
 
-Without `DOMBOOK_TEST_DSN` the PostgreSQL integration tests **skip** rather than
+Without `RENTKEEPER_TEST_DSN` the PostgreSQL integration tests **skip** rather than
 fail, so the suite still runs on a machine without a database. CI must set it, or
 tenant isolation goes untested.
 
@@ -231,12 +231,12 @@ To confirm a test actually detects a regression rather than passing for an unrel
 reason, mutate the schema and re-run with migrations skipped:
 
 ```bash
-psql -d dombook_test -c "ALTER TABLE units DISABLE ROW LEVEL SECURITY;"
-DOMBOOK_SKIP_MIGRATE=1 go test -p 1 ./internal/store/ -run TestTenantIsolation -count=1
-psql -d dombook_test -c "ALTER TABLE units ENABLE ROW LEVEL SECURITY; ALTER TABLE units FORCE ROW LEVEL SECURITY;"
+psql -d rentkeeper_test -c "ALTER TABLE units DISABLE ROW LEVEL SECURITY;"
+RENTKEEPER_SKIP_MIGRATE=1 go test -p 1 ./internal/store/ -run TestTenantIsolation -count=1
+psql -d rentkeeper_test -c "ALTER TABLE units ENABLE ROW LEVEL SECURITY; ALTER TABLE units FORCE ROW LEVEL SECURITY;"
 ```
 
-The integration tests connect as `dombook_app` — the unprivileged role. Running
+The integration tests connect as `rentkeeper_app` — the unprivileged role. Running
 them as a superuser would bypass RLS and make the isolation assertions pass for
 the wrong reason, so the harness rewrites the DSN and asserts the role does not
 have `BYPASSRLS`.
