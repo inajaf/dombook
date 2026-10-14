@@ -1,8 +1,12 @@
-# Local development environment.
+# The development database.
 #
-# `postgres` is the Go server's database. A local PostgreSQL installed via
-# Homebrew works just as well; this service exists so a new machine or CI can
-# reach the same schema without manual setup.
+# Start it with `scripts/db.sh up`, not `docker compose up` — the script also creates
+# dombook_test, which the Go integration tests need and this file alone does not provide.
+# Host, port and credentials live in scripts/db-env.sh, which every other script sources.
+#
+# A native PostgreSQL works just as well; override DOMBOOK_DB_HOST/PORT/USER to use it.
+# This service is the default because a container reproduces the same version and collation
+# everywhere, which a Homebrew install does not.
 #
 # The API is deliberately NOT a compose service: it is the Go server in ./server.
 # Build and run it with `go run ./cmd/api` (server/README.md lists the DSN and

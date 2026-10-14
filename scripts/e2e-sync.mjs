@@ -16,7 +16,7 @@
 // cannot sync by design, and testing that would hide whether sync works at all.
 
 import { execFileSync } from "node:child_process";
-import {addDays, connect, freshStart, reporter, resetAuthState, restartApp, wait} from "./e2e-lib.mjs";
+import {addDays, connect, freshStart, psqlArgs, psqlEnv, reporter, resetAuthState, restartApp, wait} from "./e2e-lib.mjs";
 
 let app = await connect();
 const { check, finish } = reporter("Sync");
@@ -97,10 +97,10 @@ check(remaining.pending === remaining.stuck, "the queue is clear afterwards",
 // A booking that reaches the server without its nights blocks nothing there, so the unit
 // reads as free on every other device. Checked against PostgreSQL directly: the renderer
 // cannot reach the API cross-origin, and the point is what the SERVER stored.
-const nights = Number(execFileSync("psql", [
-  "-d", process.env.DOMBOOK_E2E_DB || "dombook_e2e", "-t", "-A", "-c",
+const nights = Number(execFileSync("psql", psqlArgs([
+  "-t", "-A", "-c",
   "SELECT COUNT(*) FROM reservation_nights WHERE tenant_id = (SELECT id FROM accounts ORDER BY created_at DESC LIMIT 1)",
-], { env: { ...process.env, PATH: `/opt/homebrew/opt/postgresql@16/bin:${process.env.PATH}` } }).toString().trim());
+]), { env: psqlEnv() }).toString().trim());
 check(nights >= 3, "the booking's nights reached the server, not just the booking", `server nights=${nights}`);
 
 // --- A second sync with nothing to send must still be ok ------------------

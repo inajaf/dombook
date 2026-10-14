@@ -7,7 +7,7 @@
 // not be able to read or write the other's data, and an unsigned window must not reach either.
 
 import { createRequire } from "node:module";
-import {connect, freshStart, reporter, resetAuthState, wait} from "./e2e-lib.mjs";
+import {connect, freshStart, psqlArgs, psqlEnv, reporter, resetAuthState, wait} from "./e2e-lib.mjs";
 
 const API = process.env.DOMBOOK_E2E_URL || "http://127.0.0.1:8787";
 const { check, finish } = reporter("Security");
@@ -71,13 +71,13 @@ if (betaSetup.status === 201) {
   // account — so the second tenant is seeded directly, as an operator would. Only the ACCOUNT
   // and its owner user are created; everything else goes through the API.
   const { execFileSync } = createRequire(import.meta.url)("node:child_process");
-  execFileSync("psql", ["-d", process.env.DOMBOOK_E2E_DB || "dombook_e2e", "-q", "-v", "ON_ERROR_STOP=1", "-c", `
+  execFileSync("psql", psqlArgs(["-q", "-v", "ON_ERROR_STOP=1", "-c", `
     WITH a AS (
       INSERT INTO accounts(name, plan) VALUES ('beta', 'free') RETURNING id
     )
     INSERT INTO users(account_id, email, name, role)
     SELECT id, '${betaEmail}', 'beta owner', 'owner' FROM a;
-  `], { env: { ...process.env, PATH: `/opt/homebrew/opt/postgresql@16/bin:${process.env.PATH}` }, stdio: "pipe" });
+  `]), { env: psqlEnv(), stdio: "pipe" });
   beta = await signIn(betaEmail);
 }
 check(Boolean(beta.token), "a second, separate business exists", `setupStatus=${betaSetup.status}`);
