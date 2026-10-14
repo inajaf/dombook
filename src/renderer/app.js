@@ -382,7 +382,10 @@ function renderCalendar() {
     }).join("")}
   `;
   }).join("");
-  $("#calendarContainer").innerHTML = `<div class="calendar-scroll"><div class="calendar-grid"><div class="calendar-cell calendar-head calendar-house">Дом</div>${headers}${rows}</div></div>`;
+  // --calendar-days tells the grid how wide to be. Without it the grid squeezed its day
+  // columns below their minimum and clipped the last one, half a date header and no way to
+  // reach the rest.
+  $("#calendarContainer").innerHTML = `<div class="calendar-scroll"><div class="calendar-grid" style="--calendar-days:${data.dates.length}"><div class="calendar-cell calendar-head calendar-house">Дом</div>${headers}${rows}</div></div>`;
 }
 
 function filteredReservations() {

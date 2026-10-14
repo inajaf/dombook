@@ -213,6 +213,24 @@ to both unit suites:
   dialog until `refreshCore()` runs, exactly as the app does after a form submit. Skipping it
   leaves a required `<select>` with no matching option, and the submit silently does nothing.
 
+## Visual defects found by looking at the app
+
+Two layout faults that no assertion would have caught, both found by reading screenshots:
+
+- **`.empty-state { display: grid }` beat the `hidden` attribute.** A UA `[hidden]` rule has no
+  specificity over a class, so four elements stayed on screen while the renderer believed they
+  were hidden: "Бронирований пока нет" above a table that HAD a booking, "Добавьте первый
+  объект" above three existing properties, and two nav badges showing "0". Fixed with
+  `[hidden] { display: none !important; }`. The attribute is used all over the renderer, so
+  that one rule is what makes any of it work.
+- **The calendar grid squeezed instead of scrolling.** `minmax(64px, 1fr)` inside a narrower
+  container collapsed the day columns below their minimum and clipped the last one mid-header,
+  with no way to reach it. The grid now sizes from `--calendar-days`, which the renderer sets,
+  so it overflows into the scroll container instead. 15 header cells, all reachable.
+
+Vision is worth running over the main screens after UI work; both of these were invisible to
+92 passing checks.
+
 ## Long-term rentals
 
 A tenancy is a reservation with `booking_kind = 'rental'` and a long date range, so the one

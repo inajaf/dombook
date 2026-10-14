@@ -202,7 +202,19 @@ main { padding: clamp(24px, 3vw, 44px); }
 .legend-dot.free { background: var(--surface-3); border: 1px solid #ccd8d0; }
 .calendar-panel { overflow: hidden; }
 .calendar-scroll { overflow: auto; scrollbar-gutter: stable; }
-.calendar-grid { display: grid; min-width: 1170px; grid-template-columns: 220px repeat(14, minmax(64px, 1fr)); background: var(--surface); }
+/* The grid is as wide as its CONTENT, not as wide as its container.
+ *
+ * `minmax(64px, 1fr)` inside a narrower container squeezed the day columns below their
+ * minimum and the last one was clipped in half with no way to reach it — the date header was
+ * cut mid-number. Sizing from the day count makes the grid overflow instead, which the
+ * surrounding `.calendar-scroll` already handles with a scrollbar. `--calendar-days` is set by
+ * the renderer to the number of days on screen. */
+.calendar-grid {
+  display: grid;
+  min-width: calc(220px + var(--calendar-days, 14) * 64px);
+  grid-template-columns: 220px repeat(var(--calendar-days, 14), minmax(64px, 1fr));
+  background: var(--surface);
+}
 .calendar-cell { min-width: 0; min-height: 58px; padding: 8px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: center; }
 .calendar-head { position: sticky; top: 0; background: #f7faf8; z-index: 2; color: var(--muted); font-size: 10px; text-align: center; }
 .calendar-head strong { display: block; color: var(--ink); font-size: 14px; font-variant-numeric: tabular-nums; }
