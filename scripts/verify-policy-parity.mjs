@@ -9,9 +9,9 @@
 // is stale — or never consulted — the client refuses a booking the account is entitled to make,
 // with no error anywhere.
 //
-// Set DOMBOOK_VERIFY_URL to point at a non-default server.
+// Set RENTKEEPER_VERIFY_URL to point at a non-default server.
 
-const BASE = process.env.DOMBOOK_VERIFY_URL || "http://127.0.0.1:8787";
+const BASE = process.env.RENTKEEPER_VERIFY_URL || "http://127.0.0.1:8787";
 async function call(method, path, { token, body } = {}) {
   const headers = {};
   if (body !== undefined) headers["content-type"] = "application/json";

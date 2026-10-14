@@ -9,7 +9,7 @@ User guides: **[English](docs/USER_GUIDE.en.md)** · **[Русский](docs/USE
 
 ## Product tour
 
-![DomBook product tour: dashboard, calendar, properties, reservations, booking calculation and backups](docs/demo.gif)
+![RentKeeper product tour: dashboard, calendar, properties, reservations, booking calculation and backups](docs/demo.gif)
 
 The lightweight 10-second preview shows the current desktop interface, clickable
 calendar, resort and cottage hierarchy, reservation workflow, financial calculation,

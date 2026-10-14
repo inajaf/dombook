@@ -18,13 +18,13 @@ const PORT = process.env.CDP_PORT || "9555";
  * that silently read a DIFFERENT database than the server writes to would report every
  * assertion as a product bug.
  */
-export const e2eDb = process.env.DOMBOOK_E2E_DB || "dombook_e2e";
+export const e2eDb = process.env.RENTKEEPER_E2E_DB || process.env.DOMBOOK_E2E_DB || "rentkeeper_e2e";
 
 export function psqlArgs(extra = []) {
   return [
-    "-h", process.env.DOMBOOK_DB_HOST || "127.0.0.1",
-    "-p", process.env.DOMBOOK_DB_PORT || "55432",
-    "-U", process.env.DOMBOOK_DB_ADMIN_USER || "dombook",
+    "-h", process.env.RENTKEEPER_DB_HOST || process.env.DOMBOOK_DB_HOST || "127.0.0.1",
+    "-p", process.env.RENTKEEPER_DB_PORT || process.env.DOMBOOK_DB_PORT || "55432",
+    "-U", process.env.RENTKEEPER_DB_ADMIN_USER || process.env.DOMBOOK_DB_ADMIN_USER || "rentkeeper",
     "-d", e2eDb,
     ...extra,
   ];
@@ -35,7 +35,7 @@ export function psqlEnv() {
   return {
     ...process.env,
     PATH: `/opt/homebrew/opt/postgresql@16/bin:${process.env.PATH}`,
-    PGPASSWORD: process.env.DOMBOOK_DB_ADMIN_PASSWORD || "dombook",
+    PGPASSWORD: process.env.RENTKEEPER_DB_ADMIN_PASSWORD || process.env.DOMBOOK_DB_ADMIN_PASSWORD || "rentkeeper",
   };
 }
 
@@ -236,14 +236,14 @@ export function reporter(title) {
 export async function restartApp(previous = null) {
   const { spawn, execFileSync } = createRequire(import.meta.url)("node:child_process");
   const fsSync = createRequire(import.meta.url)("node:fs");
-  const root = process.env.DOMBOOK_ROOT || process.cwd();
-  const port = process.env.DOMBOOK_E2E_PORT || "8787";
+  const root = process.env.RENTKEEPER_ROOT || process.env.DOMBOOK_ROOT || process.cwd();
+  const port = process.env.RENTKEEPER_E2E_PORT || "8787";
 
   try { previous?.close(); } catch { /* already gone */ }
   killApp();
   await waitForPortFree(PORT);
 
-  const env = { ...process.env, DOMBOOK_API_URL: `http://127.0.0.1:${port}` };
+  const env = { ...process.env, RENTKEEPER_API_URL: `http://127.0.0.1:${port}` };
   delete env.ELECTRON_RUN_AS_NODE;
   const log = fsSync.openSync("/tmp/e2e-app.log", "w");
   spawn(`${root}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`,

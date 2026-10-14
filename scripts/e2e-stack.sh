@@ -23,15 +23,15 @@ fi
 # shellcheck source=scripts/db-env.sh
 source "${ROOT}/scripts/db-env.sh"
 
-DB="$DOMBOOK_E2E_DB"
-PORT="${DOMBOOK_E2E_PORT:-8787}"
+DB="$RENTKEEPER_E2E_DB"
+PORT="${RENTKEEPER_E2E_PORT:-8787}"
 CDP_PORT="${CDP_PORT:-9555}"
 
 # Its own database, so a run cannot destroy development data, but on the SAME server the rest
 # of the project uses. A separate instance here is how the suites drift onto a schema the
 # server does not have.
-PSQL=(psql -h "$DOMBOOK_DB_HOST" -p "$DOMBOOK_DB_PORT" -U "$DOMBOOK_DB_ADMIN_USER")
-export PGPASSWORD="$DOMBOOK_DB_ADMIN_PASSWORD"
+PSQL=(psql -h "$RENTKEEPER_DB_HOST" -p "$RENTKEEPER_DB_PORT" -U "$RENTKEEPER_DB_ADMIN_USER")
+export PGPASSWORD="$RENTKEEPER_DB_ADMIN_PASSWORD"
 
 stop_app() {
   # Match the binary path, not "MacOS/Electron ." — the main process is launched as
@@ -48,17 +48,17 @@ stop_app() {
   done
   echo "warning: port ${CDP_PORT} is still held" >&2
 }
-stop_api() { pkill -f "/tmp/dombook-api" 2>/dev/null || true; sleep 1; }
+stop_api() { pkill -f "/tmp/rentkeeper-api" 2>/dev/null || true; sleep 1; }
 start_api() {
   cd "$ROOT/server"
-  go build -o /tmp/dombook-api ./cmd/api
-  DOMBOOK_DSN="$(app_role_dsn "$DB")" \
-  DOMBOOK_SKIP_MIGRATE=1 \
-  DOMBOOK_ADMIN_DSN="postgres://dombook_admin:${DOMBOOK_ADMIN_PASSWORD}@${DOMBOOK_DB_HOST}:${DOMBOOK_DB_PORT}/${DB}?sslmode=disable" \
+  go build -o /tmp/rentkeeper-api ./cmd/api
+  RENTKEEPER_DSN="$(app_role_dsn "$DB")" \
+  RENTKEEPER_SKIP_MIGRATE=1 \
+  RENTKEEPER_ADMIN_DSN="$(admin_role_dsn "$DB")" \
   ADMIN_API_KEY="e2e-admin-key-long-enough-value" \
   JWT_SECRET="e2e-run-secret-value-16chars" \
-  DOMBOOK_ADDR="127.0.0.1:${PORT}" AUTH_EXPOSE_CODE=true \
-  /tmp/dombook-api > /tmp/e2e-api.log 2>&1 &
+  RENTKEEPER_ADDR="127.0.0.1:${PORT}" AUTH_EXPOSE_CODE=true \
+  /tmp/rentkeeper-api > /tmp/e2e-api.log 2>&1 &
   for _ in $(seq 1 20); do
     curl -sf "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1 && return 0
     sleep 0.5
@@ -70,7 +70,7 @@ start_app() {
   # The app path is passed EXPLICITLY. Electron resolves "." against the working directory,
   # not against a project path, so launching from elsewhere silently starts whatever package
   # happens to sit in the cwd — and the app then never exposes CDP on the expected port.
-  env -u ELECTRON_RUN_AS_NODE DOMBOOK_API_URL="http://127.0.0.1:${PORT}" \
+  env -u ELECTRON_RUN_AS_NODE RENTKEEPER_API_URL="http://127.0.0.1:${PORT}" \
     "${ROOT}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron" "$ROOT" \
     --remote-debugging-port="${CDP_PORT}" > /tmp/e2e-app.log 2>&1 &
   for _ in $(seq 1 30); do
@@ -85,31 +85,31 @@ case "${1:-up}" in
     stop_app; stop_api
     # Fail with instructions rather than letting a dozen suites report connection errors.
     if ! db_reachable; then
-      echo "no database at ${DOMBOOK_DB_HOST}:${DOMBOOK_DB_PORT} — run: scripts/db.sh up" >&2
+      echo "no database at ${RENTKEEPER_DB_HOST}:${RENTKEEPER_DB_PORT} — run: scripts/db.sh up" >&2
       exit 1
     fi
-    "${PSQL[@]}" -d "$DOMBOOK_DEV_DB" -q -c "DROP DATABASE IF EXISTS \"${DB}\"" 2>/dev/null || true
-    "${PSQL[@]}" -d "$DOMBOOK_DEV_DB" -q -c "CREATE DATABASE \"${DB}\""
+    "${PSQL[@]}" -d "$RENTKEEPER_DEV_DB" -q -c "DROP DATABASE IF EXISTS \"${DB}\"" 2>/dev/null || true
+    "${PSQL[@]}" -d "$RENTKEEPER_DEV_DB" -q -c "CREATE DATABASE \"${DB}\""
     cd "$ROOT/server"
     # Migrations run as the database owner, which is the role that owns the objects they
     # create. Keep ONE migration role per database: 0003's ALTER DEFAULT PRIVILEGES binds to
     # that role, and a different one would silently stop granting the app role access to
     # tables added later.
-    DOMBOOK_DSN="$(db_owner_dsn "$DB")" go run ./cmd/migrate up >/dev/null
+    RENTKEEPER_DSN="$(db_owner_dsn "$DB")" go run ./cmd/migrate up >/dev/null
     # Both roles already exist at this point: 0003_roles.sql creates them with their correct
     # attributes (NOBYPASSRLS for the app, BYPASSRLS for admin). Only the passwords are local
     # to this script — a migration deliberately never sets one, so no default credential can
     # ship to production. These are the credentials start_api connects with above.
-    "${PSQL[@]}" -d "$DB" -q -c "ALTER ROLE dombook_app WITH PASSWORD '${DOMBOOK_APP_PASSWORD}'; ALTER ROLE dombook_admin WITH PASSWORD '${DOMBOOK_ADMIN_PASSWORD}';"
+    "${PSQL[@]}" -d "$DB" -q -c "ALTER ROLE rentkeeper_app WITH PASSWORD '${RENTKEEPER_APP_PASSWORD}'; ALTER ROLE rentkeeper_admin WITH PASSWORD '${RENTKEEPER_ADMIN_PASSWORD}';"
     start_api
     start_app
-    echo "stack up: api http://127.0.0.1:${PORT}  cdp ${CDP_PORT}  db ${DB} at ${DOMBOOK_DB_HOST}:${DOMBOOK_DB_PORT}"
+    echo "stack up: api http://127.0.0.1:${PORT}  cdp ${CDP_PORT}  db ${DB} at ${RENTKEEPER_DB_HOST}:${RENTKEEPER_DB_PORT}"
     ;;
   api) stop_api; start_api; echo "api restarted" ;;
   app) stop_app; start_app; echo "app restarted" ;;
   down)
     stop_app; stop_api
-    "${PSQL[@]}" -d "$DOMBOOK_DEV_DB" -q -c "DROP DATABASE IF EXISTS \"${DB}\"" 2>/dev/null || true
+    "${PSQL[@]}" -d "$RENTKEEPER_DEV_DB" -q -c "DROP DATABASE IF EXISTS \"${DB}\"" 2>/dev/null || true
     echo "stack down"
     ;;
   *) echo "usage: $0 {up|api|app|down}" >&2; exit 2 ;;

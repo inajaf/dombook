@@ -1678,7 +1678,10 @@ class RentKeeperDatabase {
   createBackup() {
     this.persist();
     const stamp = nowIso().replace(/[:.]/g, "-");
-    const backupPath = path.join(this.backupDir, `dombook-${stamp}.sqlite`);
+    // The backup is named after the product the user knows. It is a file THEY see and
+    // may copy elsewhere, unlike the database filename beside it, which is kept as
+    // dombook.sqlite because renaming it would orphan every existing install (AGENTS.md).
+    const backupPath = path.join(this.backupDir, `rentkeeper-${stamp}.sqlite`);
     fs.copyFileSync(this.filePath, backupPath);
     const checksum = crypto.createHash("sha256").update(fs.readFileSync(backupPath)).digest("hex");
     this.audit("backup", null, "created", { file: path.basename(backupPath), checksum });

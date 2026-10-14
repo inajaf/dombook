@@ -6,7 +6,7 @@
 // Covers the whole path a real colleague takes: invite, become loginable, sign in, join the
 // account, share its data, and be refused administrative actions. Also covers revocation
 // closing the door again. The send throttle is respected rather than disabled.
-const BASE = process.env.DOMBOOK_VERIFY_URL || "http://127.0.0.1:8787";
+const BASE = process.env.RENTKEEPER_VERIFY_URL || "http://127.0.0.1:8787";
 async function call(method, path, { token, body } = {}) {
   const headers = {};
   if (body !== undefined) headers["content-type"] = "application/json";
