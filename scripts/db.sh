@@ -21,10 +21,11 @@ cd "$ROOT"
 # shellcheck source=scripts/db-env.sh
 source "${ROOT}/scripts/db-env.sh"
 
-# Administration statements run against dombook_dev: they are about the cluster (roles,
-# databases), not about the contents of any one database.
+# Administration statements run against `postgres`, the maintenance database every cluster
+# has. NOT against the dev database: `reset` DROPs that database, and PostgreSQL refuses to
+# drop the one the session is connected to — "cannot drop the currently open database".
 query() {
-  psql_owner -d "$DOMBOOK_DEV_DB" -qtAX -c "$1"
+  psql_owner -d postgres -qtAX -c "$1"
 }
 
 # Wait for the server to accept connections rather than sleeping for a guessed interval.
@@ -35,7 +36,7 @@ wait_for_db() {
     fi
     sleep 1
   done
-  echo "PostgreSQL at ${DOMBOOK_DB_HOST}:${DOMBOOK_DB_PORT} did not become ready" >&2
+  echo "PostgreSQL at ${RENTKEEPER_DB_HOST}:${RENTKEEPER_DB_PORT} did not become ready" >&2
   echo "check it with: docker compose logs postgres" >&2
   return 1
 }
@@ -69,13 +70,13 @@ case "${1:-up}" in
   up)
     docker compose up -d postgres
     wait_for_db
-    echo "databases on ${DOMBOOK_DB_HOST}:${DOMBOOK_DB_PORT}:"
-    ensure_database "$DOMBOOK_DEV_DB"
-    ensure_database "$DOMBOOK_TEST_DB"
+    echo "databases on ${RENTKEEPER_DB_HOST}:${RENTKEEPER_DB_PORT}:"
+    ensure_database "$RENTKEEPER_DEV_DB"
+    ensure_database "$RENTKEEPER_TEST_DB"
     # The two application roles are created by migration 0003. Roles are cluster-level, so
     # running the migrations against one database is enough for both.
     echo "next: (cd server && go run ./cmd/migrate up) with"
-    echo "  DOMBOOK_DSN=$(db_owner_dsn "$DOMBOOK_DEV_DB")"
+    echo "  RENTKEEPER_DSN=$(db_owner_dsn "$RENTKEEPER_DEV_DB")"
     ;;
   down)
     docker compose down
@@ -84,15 +85,15 @@ case "${1:-up}" in
   reset)
     wait_for_db
     echo "recreating:"
-    recreate_database "$DOMBOOK_DEV_DB"
-    recreate_database "$DOMBOOK_TEST_DB"
+    recreate_database "$RENTKEEPER_DEV_DB"
+    recreate_database "$RENTKEEPER_TEST_DB"
     echo "run the migrations next: (cd server && go run ./cmd/migrate up)"
     ;;
   status)
     docker compose ps postgres || true
     if db_reachable; then
-      echo "reachable at ${DOMBOOK_DB_HOST}:${DOMBOOK_DB_PORT}"
-      for db in "$DOMBOOK_DEV_DB" "$DOMBOOK_TEST_DB"; do
+      echo "reachable at ${RENTKEEPER_DB_HOST}:${RENTKEEPER_DB_PORT}"
+      for db in "$RENTKEEPER_DEV_DB" "$RENTKEEPER_TEST_DB"; do
         if database_exists "$db"; then
           echo "  ${db}: present"
         else
@@ -100,7 +101,7 @@ case "${1:-up}" in
         fi
       done
     else
-      echo "not reachable at ${DOMBOOK_DB_HOST}:${DOMBOOK_DB_PORT} (run: scripts/db.sh up)" >&2
+      echo "not reachable at ${RENTKEEPER_DB_HOST}:${RENTKEEPER_DB_PORT} (run: scripts/db.sh up)" >&2
       exit 1
     fi
     ;;
