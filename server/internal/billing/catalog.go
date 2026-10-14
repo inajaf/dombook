@@ -6,15 +6,20 @@
 // would spread the commercial rules across two languages and make a price change a
 // migration.
 //
-// The product model is a ONE-TIME PURCHASE, not a subscription. A landlord buys the app once
-// and keeps it; the recurring costs (hosting a small database, an occasional sync) are low
-// enough to absorb. The only genuinely variable cost is WhatsApp messaging, so that is the
-// one thing sold as an add-on.
+// The product model is a TIME-LIMITED LICENCE, not a one-time purchase. The paid tier is
+// sold as a 90-day term (SKUAppQuarterly) and renewed. The perpetual purchase it replaced is
+// no longer sold, but stays valid for the customers who bought it.
+//
+// The database independently gates the free-tier quota through account_is_paid(), which
+// carries its OWN hard-coded SKU allowlist. Adding a SKU here without adding it there is the
+// failure to watch for: the service would accept a paying customer and a database trigger
+// would then refuse their write. See migrations/20260811000009_quarterly_licence.sql.
 package billing
 
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 )
 
@@ -22,7 +27,20 @@ import (
 type SKU string
 
 const (
-	// SKUAppPerpetual is the one-time purchase: the paid tier, forever.
+	// SKUAppQuarterly is the paid tier for three months (90 days). This is the product.
+	//
+	// Three months rather than a year because it is the term a seasonal landlord can commit
+	// to up front: long enough to cover a season, short enough that renewing is a decision
+	// rather than a surprise.
+	SKUAppQuarterly SKU = "app_quarterly"
+
+	// SKUAppPerpetual is the withdrawn one-time purchase.
+	//
+	// NO LONGER SOLD, AND NOT REMOVABLE. Every grant already issued stays valid forever,
+	// because that is what was promised when it was sold. It must stay in this catalog or
+	// those grants stop evaluating — Evaluate ignores a SKU it cannot look up, so deleting
+	// this entry would silently demote paying customers to the free tier. For the same
+	// reason it must stay in the account_is_paid() allowlist in SQL.
 	//
 	// Perpetual is expressed as "no expiry" rather than a date far in the future, so the
 	// record says what was actually sold and no arithmetic has to decide whether the year
@@ -31,9 +49,9 @@ const (
 
 	// SKUAppAnnual is a year of the paid tier.
 	//
-	// Offered because a landlord with a seasonal business may prefer a smaller annual
-	// payment over a larger one-off. Cheap to renew, and it costs nothing structurally:
-	// a perpetual grant and a dated one differ only by expires_at.
+	// Offered because a landlord with a seasonal business may prefer to pay once a year
+	// rather than renew every quarter. Cheap to renew, and it costs nothing structurally:
+	// a dated grant and a perpetual one differ only by expires_at.
 	SKUAppAnnual SKU = "app_annual"
 
 	// SKUAddonWhatsApp is the messaging add-on. This is the one SKU whose cost scales with
@@ -76,6 +94,13 @@ type Definition struct {
 	Duration time.Duration
 	// Grants lists what the SKU unlocks.
 	Grants []Feature
+	// Sellable reports whether this SKU can still be sold.
+	//
+	// A SKU that stops being sold is RETIRED, never deleted: grants already issued refer to
+	// it, and Evaluate ignores a SKU whose definition is gone — so deleting an entry would
+	// silently demote paying customers to the free tier. Retiring keeps them working while
+	// removing the SKU from any list of what a customer can buy.
+	Sellable bool
 }
 
 // Feature is a capability an entitlement can unlock.
@@ -90,21 +115,35 @@ const (
 
 // Catalog is every SKU this build can grant.
 var Catalog = map[SKU]Definition{
+	SKUAppQuarterly: {
+		SKU:         SKUAppQuarterly,
+		Name:        "Лицензия на 3 месяца",
+		Description: "Оплата за три месяца. Продлевается вручную; по окончании срока аккаунт переходит на бесплатный тариф.",
+		Source:      SourceOneTime,
+		Duration:    90 * 24 * time.Hour,
+		Grants:      []Feature{FeaturePaidTier},
+		Sellable:    true,
+	},
 	SKUAppPerpetual: {
+		// Withdrawn from sale but still granted from history: see the SKU's own comment.
+		// It must remain in the catalog so existing grants keep evaluating, and it must stay
+		// out of any list of what is currently for sale.
 		SKU:         SKUAppPerpetual,
-		Name:        "Пожизненная лицензия",
-		Description: "Разовая покупка. Приложение и синхронизация работают бессрочно, без подписки.",
+		Name:        "Пожизненная лицензия (больше не продаётся)",
+		Description: "Разовая покупка, снята с продажи. Действует бессрочно у тех, кто её купил.",
 		Source:      SourceOneTime,
 		Duration:    0, // perpetual
 		Grants:      []Feature{FeaturePaidTier},
+		Sellable:    false,
 	},
 	SKUAppAnnual: {
 		SKU:         SKUAppAnnual,
 		Name:        "Годовая лицензия",
-		Description: "Оплата за год. Дешевле разовой покупки, продлевается вручную.",
+		Description: "Оплата за год. Дешевле, чем четыре квартальных платежа, продлевается вручную.",
 		Source:      SourceOneTime,
 		Duration:    365 * 24 * time.Hour,
 		Grants:      []Feature{FeaturePaidTier},
+		Sellable:    true,
 	},
 	SKUAddonWhatsApp: {
 		SKU:         SKUAddonWhatsApp,
@@ -113,6 +152,7 @@ var Catalog = map[SKU]Definition{
 		Source:      SourcePaddleAddon,
 		Duration:    365 * 24 * time.Hour,
 		Grants:      []Feature{FeatureWhatsApp},
+		Sellable:    true,
 	},
 	SKUTrialFull: {
 		SKU:         SKUTrialFull,
@@ -121,6 +161,7 @@ var Catalog = map[SKU]Definition{
 		Source:      SourceTrial,
 		Duration:    14 * 24 * time.Hour,
 		Grants:      []Feature{FeaturePaidTier},
+		Sellable:    false,
 	},
 }
 
@@ -143,6 +184,26 @@ func (d Definition) ExpiryFor(at time.Time) *time.Time {
 	}
 	expiry := at.Add(d.Duration)
 	return &expiry
+}
+
+// Sellable returns the SKUs a customer can still buy, in a stable order.
+//
+// Anything offering products for sale — a pricing page, an operator's grant screen — must
+// read this rather than ranging over Catalog, or it will offer a withdrawn licence.
+func Sellable() []Definition {
+	skus := make([]SKU, 0, len(Catalog))
+	for sku := range Catalog {
+		skus = append(skus, sku)
+	}
+	slices.Sort(skus)
+
+	available := make([]Definition, 0, len(skus))
+	for _, sku := range skus {
+		if definition := Catalog[sku]; definition.Sellable {
+			available = append(available, definition)
+		}
+	}
+	return available
 }
 
 // Grant is a live entitlement, in the form the rules need.

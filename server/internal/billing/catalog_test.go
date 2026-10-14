@@ -22,9 +22,75 @@ func at(t *testing.T, value string) time.Time {
 	return parsed
 }
 
+func TestQuarterlyLicenceLastsNinetyDays(t *testing.T) {
+	// The paid tier is sold in three-month terms. The exact length matters commercially and
+	// is the kind of number that drifts silently, so it is pinned here rather than left to
+	// whatever the catalog happens to say.
+	definition, err := Lookup(SKUAppQuarterly)
+	if err != nil {
+		t.Fatalf("Lookup: %v", err)
+	}
+	if definition.Duration != 90*24*time.Hour {
+		t.Errorf("Duration = %v, want 90 days", definition.Duration)
+	}
+
+	granted := at(t, "2026-01-01T00:00:00Z")
+	expiry := definition.ExpiryFor(granted)
+	if expiry == nil {
+		t.Fatal("a three-month licence must have an expiry")
+	}
+	if want := at(t, "2026-04-01T00:00:00Z"); !expiry.Equal(want) {
+		t.Errorf("expiry = %v, want %v", expiry, want)
+	}
+
+	// Granting it opens the paid tier, and the term running out closes it again.
+	if state := Evaluate([]Grant{{SKU: SKUAppQuarterly, GrantedAt: granted, ExpiresAt: expiry}}, granted); !state.IsPaid() {
+		t.Error("a fresh three-month licence must grant the paid tier")
+	}
+	if state := Evaluate([]Grant{{SKU: SKUAppQuarterly, GrantedAt: granted, ExpiresAt: expiry}}, expiry.Add(time.Hour)); state.IsPaid() {
+		t.Error("the paid tier must lapse once the term ends")
+	}
+}
+
+func TestWithdrawnLicenceIsNoLongerSold(t *testing.T) {
+	// The perpetual purchase was replaced by the three-month term. It must stop being
+	// OFFERED without being deleted from the catalog: grants already issued refer to it, and
+	// Evaluate ignores a SKU it cannot look up, so removing the entry would silently demote
+	// paying customers to the free tier.
+	perpetual, err := Lookup(SKUAppPerpetual)
+	if err != nil {
+		t.Fatalf("the withdrawn SKU must stay in the catalog for existing grants: %v", err)
+	}
+	if perpetual.Sellable {
+		t.Error("the perpetual licence must not be sellable any more")
+	}
+
+	offered := map[SKU]bool{}
+	for _, definition := range Sellable() {
+		offered[definition.SKU] = true
+	}
+	if offered[SKUAppPerpetual] {
+		t.Error("Sellable() still offers the withdrawn perpetual licence")
+	}
+	if !offered[SKUAppQuarterly] {
+		t.Error("Sellable() must offer the three-month licence")
+	}
+	if !offered[SKUAppAnnual] {
+		t.Error("Sellable() must keep offering the annual licence")
+	}
+
+	// A grant issued before the change keeps working.
+	state := Evaluate([]Grant{{SKU: SKUAppPerpetual, GrantedAt: at(t, "2020-01-01T00:00:00Z")}},
+		at(t, "2030-01-01T00:00:00Z"))
+	if !state.IsPaid() {
+		t.Error("an already-issued perpetual licence must stay valid")
+	}
+}
+
 func TestPerpetualGrantNeverExpires(t *testing.T) {
-	// The one-time purchase is the product's centrepiece, so "forever" has to mean forever
-	// rather than a date far enough away that nobody has checked it.
+	// Grandfathered, not sold: the one-time purchase is withdrawn from sale, but every grant
+	// already issued was promised to last forever, so "forever" has to mean forever rather
+	// than a date far enough away that nobody has checked it.
 	definition, err := Lookup(SKUAppPerpetual)
 	if err != nil {
 		t.Fatalf("Lookup: %v", err)
