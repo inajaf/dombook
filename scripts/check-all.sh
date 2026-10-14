@@ -47,9 +47,9 @@ run() {
 # error and the actual cause is buried under a hundred lines of them.
 echo "=== database ==="
 if db_reachable; then
-  echo "reachable at ${DOMBOOK_DB_HOST}:${DOMBOOK_DB_PORT}"
+  echo "reachable at ${RENTKEEPER_DB_HOST}:${RENTKEEPER_DB_PORT}"
 else
-  echo "no database at ${DOMBOOK_DB_HOST}:${DOMBOOK_DB_PORT}" >&2
+  echo "no database at ${RENTKEEPER_DB_HOST}:${RENTKEEPER_DB_PORT}" >&2
   echo "start it with: scripts/db.sh up" >&2
   exit 1
 fi
@@ -64,7 +64,7 @@ run "desktop smoke test" npm run test:smoke
 run "go build" bash -c 'cd server && go build ./...'
 run "go vet" bash -c 'cd server && go vet ./...'
 run "go test (serial, race)" env \
-  "DOMBOOK_TEST_DSN=postgres://${DOMBOOK_DB_ADMIN_USER}:${DOMBOOK_DB_ADMIN_PASSWORD}@${DOMBOOK_DB_HOST}:${DOMBOOK_DB_PORT}/${DOMBOOK_TEST_DB}?sslmode=disable" \
+  "RENTKEEPER_TEST_DSN=postgres://${RENTKEEPER_DB_ADMIN_USER}:${RENTKEEPER_DB_ADMIN_PASSWORD}@${RENTKEEPER_DB_HOST}:${RENTKEEPER_DB_PORT}/${RENTKEEPER_TEST_DB}?sslmode=disable" \
   bash -c 'cd server && go test -p 1 -race -count=1 ./...'
 
 # gofmt is a reporting command: it exits 0 even when it prints files, so the output is what

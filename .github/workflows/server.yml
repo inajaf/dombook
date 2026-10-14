@@ -1,7 +1,7 @@
 name: Server (Go)
 
 # The server suite is the only place tenant isolation is actually exercised, and
-# its integration tests SKIP when DOMBOOK_TEST_DSN is unset (see server/README.md).
+# its integration tests SKIP when RENTKEEPER_TEST_DSN is unset (see server/README.md).
 # Without this workflow nothing runs them automatically, so RLS could be dropped
 # from a table and every check would still be green.
 #

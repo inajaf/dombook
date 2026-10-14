@@ -1,24 +1,24 @@
-# DomBook user guide
+# RentKeeper user guide
 
-DomBook is a booking manager for owners of resorts, cottages and standalone rental houses. It is designed for one administrator and keeps the daily workflow simple: properties, calendar, guests, payments, deposits, meals and backups are available in one place.
+RentKeeper is a booking manager for owners of resorts, cottages and standalone rental houses. It is designed for one administrator and keeps the daily workflow simple: properties, calendar, guests, payments, deposits, meals and backups are available in one place.
 
-## 1. Install or open DomBook
+## 1. Install or open RentKeeper
 
 ### macOS
 
 1. Download the macOS `.dmg` or `.zip` from the GitHub Release.
-2. Move **DomBook** to Applications and open it.
+2. Move **RentKeeper** to Applications and open it.
 3. The public build is not Apple-notarized. If macOS blocks the first launch, right-click the app and choose **Open**, or allow it in **System Settings → Privacy & Security**.
 
 ### Windows
 
 1. Download the Windows installer or portable `.exe` from the GitHub Release.
 2. Run the installer, or open the portable edition without installation.
-3. The public build is not code-signed. Windows SmartScreen may show a warning; use **More info → Run anyway** only when the file came from the official DomBook release.
+3. The public build is not code-signed. Windows SmartScreen may show a warning; use **More info → Run anyway** only when the file came from the official RentKeeper release.
 
 ### Web edition
 
-1. Download and unzip `DomBook-…-web.zip`.
+1. Download and unzip `RentKeeper-…-web.zip`.
 2. Serve the extracted `web` folder through any static server. For example:
 
    ```bash
@@ -67,7 +67,7 @@ Open an active reservation and choose **Early checkout**. Select the actual chec
 - **Used nights only** recalculates accommodation and removes meals from released dates.
 - **Keep full amount** releases future calendar nights but keeps the original accommodation charge.
 
-If the prepayment becomes greater than the new total, DomBook displays the amount that must be refunded.
+If the prepayment becomes greater than the new total, RentKeeper displays the amount that must be refunded.
 
 ## 6. Calendar and reservation list
 

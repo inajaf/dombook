@@ -13,8 +13,8 @@ migration can be rehearsed, re-run, and abandoned without touching production.
 # cannot reach the original.
 cp backend/.wrangler/state/v3/d1/miniflare-D1DatabaseObject/<hash>.sqlite /tmp/d1.sqlite
 
-DOMBOOK_DSN=postgres://owner@127.0.0.1:5432/dombook_cutover go run ./cmd/migrate up
-DOMBOOK_DSN=postgres://owner@127.0.0.1:5432/dombook_cutover go run ./cmd/migrate-d1 \
+RENTKEEPER_DSN=postgres://owner@127.0.0.1:5432/dombook_cutover go run ./cmd/migrate up
+RENTKEEPER_DSN=postgres://owner@127.0.0.1:5432/dombook_cutover go run ./cmd/migrate-d1 \
   -source /tmp/d1.sqlite -dry-run
 ```
 
@@ -24,7 +24,7 @@ or type problem before the real run rather than halfway through it.
 ## 2. Import
 
 ```sh
-DOMBOOK_DSN=postgres://owner@127.0.0.1:5432/dombook_cutover go run ./cmd/migrate-d1 \
+RENTKEEPER_DSN=postgres://owner@127.0.0.1:5432/dombook_cutover go run ./cmd/migrate-d1 \
   -source /tmp/d1.sqlite
 ```
 
@@ -38,14 +38,14 @@ no way to tell which came from where. `-allow-non-empty` exists for a deliberate
 ## 3. Run the API as the application role
 
 ```sh
-DOMBOOK_DSN=postgres://dombook_app:…@127.0.0.1:5432/dombook_cutover \
+RENTKEEPER_DSN=postgres://rentkeeper_app:…@127.0.0.1:5432/dombook_cutover \
 DOMBOOK_SKIP_MIGRATE=1 \
-DOMBOOK_ADMIN_DSN=postgres://dombook_admin:…@127.0.0.1:5432/dombook_cutover \
+DOMBOOK_ADMIN_DSN=postgres://rentkeeper_admin:…@127.0.0.1:5432/dombook_cutover \
 ADMIN_API_KEY=… JWT_SECRET=… \
 go run ./cmd/api
 ```
 
-`DOMBOOK_SKIP_MIGRATE=1` is **required in production**. The API connects as `dombook_app`,
+`DOMBOOK_SKIP_MIGRATE=1` is **required in production**. The API connects as `rentkeeper_app`,
 which is deliberately denied the ability to create objects, so the startup migration pass
 fails with `permission denied for schema public`. The tempting fix is to run the API as a
 privileged role — which would hand the request path the ability to bypass RLS. Migrations are

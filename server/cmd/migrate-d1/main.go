@@ -64,9 +64,13 @@ func main() {
 		os.Exit(2)
 	}
 
-	dsn := os.Getenv("DOMBOOK_DSN")
+	// Current name first, then the legacy one an existing deployment still exports.
+	dsn := os.Getenv("RENTKEEPER_DSN")
 	if dsn == "" {
-		log.Fatal("DOMBOOK_DSN is not set; it names the PostgreSQL destination")
+		dsn = os.Getenv("DOMBOOK_DSN")
+	}
+	if dsn == "" {
+		log.Fatal("RENTKEEPER_DSN is not set; it names the PostgreSQL destination")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)

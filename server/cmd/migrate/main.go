@@ -33,12 +33,17 @@ func run() error {
 	}
 
 	action := args[0]
-	dsn := os.Getenv("DOMBOOK_DSN")
+	// RENTKEEPER_DSN is the current name; DOMBOOK_DSN is what an existing deployment has in
+	// its systemd unit or compose file, and must keep working. See config.envFallback.
+	dsn := os.Getenv("RENTKEEPER_DSN")
+	if dsn == "" {
+		dsn = os.Getenv("DOMBOOK_DSN")
+	}
 	if len(args) > 1 {
 		dsn = args[1]
 	}
 	if dsn == "" {
-		return fmt.Errorf("no database DSN: set DOMBOOK_DSN or pass it as the second argument")
+		return fmt.Errorf("no database DSN: set RENTKEEPER_DSN (or the legacy DOMBOOK_DSN), or pass it as the second argument")
 	}
 
 	ctx := context.Background()
@@ -56,8 +61,8 @@ func run() error {
 		// Dropping every table is destructive and must never be reachable in
 		// production by a stray command. Requiring the same variable the tests
 		// use keeps it a deliberate, local act.
-		if os.Getenv("DOMBOOK_ALLOW_RESET") != "1" {
-			return fmt.Errorf("reset drops all data; set DOMBOOK_ALLOW_RESET=1 to confirm")
+		if os.Getenv("RENTKEEPER_ALLOW_RESET") != "1" && os.Getenv("DOMBOOK_ALLOW_RESET") != "1" {
+			return fmt.Errorf("reset drops all data; set RENTKEEPER_ALLOW_RESET=1 to confirm")
 		}
 		if err := store.ResetTo(ctx, dsn, ""); err != nil {
 			return err

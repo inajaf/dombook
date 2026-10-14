@@ -50,14 +50,14 @@
     },
     "mac": {
       "category": "public.app-category.business",
-      "icon": "build/dombook.icns",
+      "icon": "build/rentkeeper.icns",
       "target": [
         "dmg",
         "zip"
       ]
     },
     "win": {
-      "icon": "build/dombook-icon.png",
+      "icon": "build/rentkeeper-icon.png",
       "target": [
         "nsis",
         "portable"
@@ -71,7 +71,7 @@
     },
     "linux": {
       "category": "Office",
-      "icon": "build/dombook-icon.png",
+      "icon": "build/rentkeeper-icon.png",
       "target": [
         "AppImage",
         "deb"

@@ -290,7 +290,7 @@ function registerIpc() {
 
   function createWindow() {
     const rendererPath = path.join(__dirname, "renderer", "index.html");
-    const iconPath = path.join(__dirname, "assets", "dombook-icon.png");
+    const iconPath = path.join(__dirname, "assets", "rentkeeper-icon.png");
     mainWindow = new BrowserWindow({
       width: 1380,
       height: 900,
@@ -431,7 +431,7 @@ function registerIpc() {
 
   app.whenReady().then(async () => {
   try {
-    const iconPath = path.join(__dirname, "assets", "dombook-icon-transparent.png");
+    const iconPath = path.join(__dirname, "assets", "rentkeeper-icon-transparent.png");
     if (process.platform === "darwin") app.dock.setIcon(iconPath);
     const userData = app.getPath("userData");
     database = await new RentKeeperDatabase({
@@ -439,7 +439,10 @@ function registerIpc() {
       backupDir: path.join(userData, "backups"),
       seed: true,
     }).init();
-    const baseUrl = process.env.DOMBOOK_API_URL || "http://127.0.0.1:8787";
+    // RENTKEEPER_API_URL is the current name; DOMBOOK_API_URL is kept working for an
+    // existing launcher or e2e script that still exports it.
+    const baseUrl = process.env.RENTKEEPER_API_URL || process.env.DOMBOOK_API_URL
+      || "http://127.0.0.1:8787";
     const store = createAuthStore(path.join(userData, "auth-session.bin"));
     authApi = createAuthApi({ baseUrl, storage: store });
 

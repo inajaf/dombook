@@ -1,4 +1,4 @@
-// Command api runs the DomBook HTTP server.
+// Command api runs the RentKeeper HTTP server.
 //
 // It is the composition root: the only place that reads environment
 // configuration, opens the database, builds the services, and starts the listener.
@@ -200,7 +200,12 @@ func routeByPrefix(customer, adminHandler http.Handler) http.Handler {
 
 // logLevel reads the level from the environment, defaulting to info.
 func logLevel() slog.Level {
-	switch os.Getenv("DOMBOOK_LOG_LEVEL") {
+	// RENTKEEPER_LOG_LEVEL first, then the legacy name an existing deployment exports.
+	level := os.Getenv("RENTKEEPER_LOG_LEVEL")
+	if level == "" {
+		level = os.Getenv("DOMBOOK_LOG_LEVEL")
+	}
+	switch level {
 	case "debug":
 		return slog.LevelDebug
 	case "warn":

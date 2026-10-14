@@ -1,10 +1,10 @@
 # The development database.
 #
 # Start it with `scripts/db.sh up`, not `docker compose up` — the script also creates
-# dombook_test, which the Go integration tests need and this file alone does not provide.
+# rentkeeper_test, which the Go integration tests need and this file alone does not provide.
 # Host, port and credentials live in scripts/db-env.sh, which every other script sources.
 #
-# A native PostgreSQL works just as well; override DOMBOOK_DB_HOST/PORT/USER to use it.
+# A native PostgreSQL works just as well; override RENTKEEPER_DB_HOST/PORT/USER to use it.
 # This service is the default because a container reproduces the same version and collation
 # everywhere, which a Homebrew install does not.
 #
@@ -16,11 +16,11 @@
 services:
   postgres:
     image: postgres:16
-    container_name: dombook-postgres
+    container_name: rentkeeper-postgres
     environment:
-      POSTGRES_USER: dombook
-      POSTGRES_PASSWORD: dombook
-      POSTGRES_DB: dombook_dev
+      POSTGRES_USER: rentkeeper
+      POSTGRES_PASSWORD: rentkeeper
+      POSTGRES_DB: rentkeeper_dev
       # Deterministic collation: citext uniqueness and ORDER BY must not change
       # meaning between the developer's macOS cluster and the CI container.
       POSTGRES_INITDB_ARGS: "--locale=C.UTF-8 --encoding=UTF8"
@@ -30,7 +30,7 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U dombook -d dombook_dev"]
+      test: ["CMD-SHELL", "pg_isready -U rentkeeper -d rentkeeper_dev"]
       interval: 5s
       timeout: 5s
       retries: 12
