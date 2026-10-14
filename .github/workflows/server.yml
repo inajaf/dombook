@@ -3,8 +3,12 @@ name: Server (Go)
 # The server suite is the only place tenant isolation is actually exercised, and
 # its integration tests SKIP when DOMBOOK_TEST_DSN is unset (see server/README.md).
 # Without this workflow nothing runs them automatically, so RLS could be dropped
-# from a table and every check would still be green. The postgres service below
-# exists to keep them running rather than skipping.
+# from a table and every check would still be green.
+#
+# This job runs scripts/check-all.sh rather than repeating the commands. The script is what a
+# developer and an agent run locally, and the database it targets comes from the same compose
+# file and the same scripts/db.sh — so CI cannot drift onto a different PostgreSQL version or
+# a different port than a laptop uses.
 
 on:
   push:
@@ -15,43 +19,26 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: dombook_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d dombook_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 12
-
-    env:
-      # `go test -p 1` is required, not an optimization: every integration test
-      # package shares this one database and each one resets the schema. See
-      # server/README.md.
-      DOMBOOK_TEST_DSN: postgres://postgres:postgres@127.0.0.1:5432/dombook_test?sslmode=disable
-
-    defaults:
-      run:
-        working-directory: server
-
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
       - uses: actions/setup-go@v5
         with:
           go-version-file: server/go.mod
           cache-dependency-path: server/go.sum
 
-      - name: Build
-        run: go build ./...
+      - run: npm ci
 
-      - name: Vet
-        run: go vet ./...
+      # The container publishes 55432 on the host, which is where the scripts look.
+      - name: Start the database
+        run: scripts/db.sh up
 
-      - name: Test
-        run: go test -p 1 -race -count=1 -timeout 15m ./...
+      # `-p 1` (inside the script) is required, not an optimisation: every integration test
+      # package shares one database and each resets the schema. See server/README.md.
+      - name: All checks
+        run: scripts/check-all.sh
