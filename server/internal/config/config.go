@@ -65,7 +65,8 @@ type Config struct {
 	// the admin surface is disabled entirely.
 	AdminDatabaseDSN string
 
-	// AppName brands outgoing messages.
+	// AppName brands outgoing messages. It must match the name the desktop and web
+	// clients show, or a user is told a product they do not have is writing to them.
 	AppName string
 
 	// LoginRateLimit is the number of login codes allowed per email per window.
@@ -91,7 +92,7 @@ func NewFromEnv() (*Config, error) {
 		JWTSecret:         os.Getenv("JWT_SECRET"),
 		SetupToken:        os.Getenv("SETUP_TOKEN"),
 		AdminAPIKey:       os.Getenv("ADMIN_API_KEY"),
-		AppName:           envOr("APP_NAME", "ДомБук"),
+		AppName:           envOr("APP_NAME", "RentKeeper"),
 		AuthExposeCode:    envBool("AUTH_EXPOSE_CODE", false),
 		AccessTokenTTL:    time.Duration(envInt("AUTH_ACCESS_TTL_SECONDS", 900)) * time.Second,
 		RefreshTokenTTL:   time.Duration(envInt("AUTH_REFRESH_TTL_SECONDS", 30*24*3600)) * time.Second,

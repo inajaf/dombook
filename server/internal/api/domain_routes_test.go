@@ -50,7 +50,7 @@ func newDomainServer(t *testing.T) (*httptest.Server, string) {
 	t.Cleanup(database.Close)
 
 	authService := auth.New(database, auth.Options{
-		AppName:    "ДомБук Test",
+		AppName:    "RentKeeper Test",
 		JWTSecret:  testJWTSecret,
 		AccessTTL:  time.Hour,
 		RefreshTTL: 24 * time.Hour,

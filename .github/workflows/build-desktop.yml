@@ -41,7 +41,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/upload-artifact@v4
         with:
-          name: ДомБук-${{ matrix.artifact }}
+          name: RentKeeper-${{ matrix.artifact }}
           path: |
             release/*.dmg
             release/*.zip
@@ -71,14 +71,14 @@ jobs:
       - run: npm ci
       - run: npm run build:web
       - name: Create web archive
-        run: cd release && zip -r "DomBook-${{ github.ref_name }}-web.zip" web
+        run: cd release && zip -r "RentKeeper-${{ github.ref_name }}-web.zip" web
       - uses: actions/upload-artifact@v4
         with:
-          name: DomBook-Web
-          path: release/DomBook-*-web.zip
+          name: RentKeeper-Web
+          path: release/RentKeeper-*-web.zip
           if-no-files-found: error
       - name: Upload web archive to GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: release/DomBook-*-web.zip
+          files: release/RentKeeper-*-web.zip

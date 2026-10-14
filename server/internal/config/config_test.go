@@ -77,8 +77,11 @@ func TestDefaultsAreSane(t *testing.T) {
 	if cfg.OTPTTL != 10*time.Minute {
 		t.Errorf("otp TTL = %s, want 10m", cfg.OTPTTL)
 	}
-	if cfg.AppName != "ДомБук" {
-		t.Errorf("app name = %q", cfg.AppName)
+	// The product was renamed from DomBook. The default is asserted rather than left
+	// implicit because a stale default brands every outgoing message with a name the
+	// user cannot find anywhere in the app they installed.
+	if cfg.AppName != "RentKeeper" {
+		t.Errorf("app name = %q, want RentKeeper", cfg.AppName)
 	}
 	if cfg.LoginRateLimit <= 0 || cfg.MaxVerifyAttempts <= 0 || cfg.MinSendInterval <= 0 {
 		t.Errorf("rate limits must have positive defaults: %+v", cfg)
