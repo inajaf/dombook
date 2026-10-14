@@ -1,4 +1,4 @@
-// Package crypto holds DomBook's token and hashing primitives: HMAC-SHA256
+// Package crypto holds RentKeeper's token and hashing primitives: HMAC-SHA256
 // session JWTs, one-time login codes, opaque tokens for refresh and invites, and
 // constant-time comparison.
 //

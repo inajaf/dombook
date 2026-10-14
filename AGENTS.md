@@ -64,7 +64,7 @@ saying `ДомБук` after the rename. When touching any of them, grep for the 
 
 `build-desktop.yml` builds installers on a `v*` tag and runs `npm test` plus the smoke test on each
 platform. `server.yml` runs build, vet and `go test -p 1 -race` against a `postgres:16` service.
-That job exists because the integration tests **skip** without `DOMBOOK_TEST_DSN`, and they are the
+That job exists because the integration tests **skip** without `RENTKEEPER_TEST_DSN`, and they are the
 only thing that exercises tenant isolation — an unset DSN would leave RLS untested while every
 check stayed green.
 
@@ -138,7 +138,7 @@ is never given the account's real configuration is the failure mode to watch for
   cursor across.
 - **Sessions and one-time codes are deliberately NOT migrated** — credentials for the old
   deployment. Everyone signs in again.
-- **`DOMBOOK_SKIP_MIGRATE=1` is required in production.** The API runs as `dombook_app`, which
+- **`RENTKEEPER_SKIP_MIGRATE=1` is required in production.** The API runs as `rentkeeper_app`, which
   cannot create objects, so the startup migration pass fails with `permission denied for schema
   public`. `cmd/migrate` applies them as the owner instead. Do not "fix" this by running the API
   as a privileged role — that gives the request path a way around RLS.
@@ -221,7 +221,7 @@ fails if a data channel is allowlisted or an allowlisted channel is misspelled.
 ## Cloud auth (desktop login)
 
 Desktop auth lives in `src/main/auth.cjs` and persists the JWT encrypted through
-`src/main/auth-session.cjs`. `DOMBOOK_API_URL` selects the server (default
+`src/main/auth-session.cjs`. `RENTKEEPER_API_URL` selects the server (default
 `http://127.0.0.1:8787`, which is now the Go server — start it with `go run ./cmd/api`). IPC is
 exposed as `window.domBook.auth`. Login is required: a signed-out window shows only the OTP
 login screen.
@@ -241,10 +241,23 @@ It covers both nightly bookings and monthly tenancies, which is why the name is 
 stay-specific.
 
 The rename is complete in everything a user sees — window title, both brand marks, the login
-heading in all three locales, menus, tray label, installer artefacts, `appId`, and the
-userData directory. `tests/` and `server/internal/domain/testdata/` still say `dombook` in
-paths and DSN names deliberately: those are internal identifiers, and changing them would
-break existing installs and CI for no user benefit.
+heading in all three locales, menus, tray label, installer artefacts, `appId`, the userData
+directory, the Docker container and databases, the database roles, and every environment
+variable.
+
+**Four identifiers keep the old name ON PURPOSE, because a rename would break something that
+already exists.** They are not oversights, and "fixing" them is a regression:
+
+| Kept | Why renaming it breaks something |
+|---|---|
+| `dombook-desktop` | The Electron userData directory. Electron derives it from the app name, so every existing user's database, backups and encrypted session live under it. `migrateLegacyUserData()` moves it only when the new directory is absent. |
+| `dombook.sqlite` | The database filename inside that directory. Settings shows the real name, whatever it is. |
+| `github.com/inajaf/dombook/server` | The Go module path, i.e. the repository URL. Renaming it rewrites an import in every server file and breaks anything that imports it. |
+| `dombook_app` / `dombook_admin` | Database roles. Roles are cluster-level: migration 0010 adds the new names and deliberately does NOT drop these, because dropping them would revoke access for databases the migration never runs against. An operator removes them after switching DSNs. |
+
+The old `DOMBOOK_*` environment variables and the legacy `AUTH_EXPOSE_CODE` spellings also keep
+working as fallbacks — see `config.envFallback`. They are documented as legacy, not as the name
+to use.
 
 - **`migrateLegacyUserData()` in `src/main.cjs` is load-bearing.** Electron derives the
   userData path from the app name, so the rename moved where the app looks for its database,
@@ -371,18 +384,18 @@ decides them.
 
 - **The container is on 55432, not 5432**, because a Homebrew PostgreSQL is often already
   bound there. Never hardcode either: source `scripts/db-env.sh`, or `require` nothing and
-  read `DOMBOOK_DB_HOST`/`DOMBOOK_DB_PORT`. A script that assumes a port is how a suite ends
+  read `RENTKEEPER_DB_HOST`/`RENTKEEPER_DB_PORT`. A script that assumes a port is how a suite ends
   up testing a different database than the server writes to — which presents as a product bug.
-- Go tests need `DOMBOOK_TEST_DSN`, otherwise the PostgreSQL integration tests **skip instead
+- Go tests need `RENTKEEPER_TEST_DSN`, otherwise the PostgreSQL integration tests **skip instead
   of failing**. CI must set it or tenant isolation goes untested; `scripts/check-all.sh` sets it.
 - **Run the Go tests as `go test -p 1 ./...`.** Integration tests share one test database, so
   parallel package processes fight over the schema. The helper detects this and fails with
   instructions, but the serial form is the correct command.
-- Migrations run as the **database owner** (`dombook` in the container). Migration 0003's
+- Migrations run as the **database owner** (`rentkeeper` in the container). Migration 0003's
   `ALTER DEFAULT PRIVILEGES` binds to the role that runs them, so a different one silently
   stops granting the application role access to new tables.
 - To prove a test really catches a regression: mutate the schema, then
-  `DOMBOOK_SKIP_MIGRATE=1 go test -p 1 ...` so the migrations do not silently repair it. Full
+  `RENTKEEPER_SKIP_MIGRATE=1 go test -p 1 ...` so the migrations do not silently repair it. Full
   recipe in `server/README.md`.
 - Desktop: `npm start`, but **clear `ELECTRON_RUN_AS_NODE` first** (`env -u ELECTRON_RUN_AS_NODE npm start`). VS Code and other Electron-based terminals export `ELECTRON_RUN_AS_NODE=1`, which makes `require("electron")` return its path string instead of the API, so `src/main.cjs` dies at `app.setName(...)` with `Cannot read properties of undefined`.
 - `/auth/setup` bootstraps the first owner account only while zero users exist; afterwards it needs `SETUP_TOKEN`. A local DB with a test user therefore cannot be re-bootstrapped — clear the `users` table to re-open setup.
@@ -432,8 +445,20 @@ done without asking, because asking for each step is slower than the work itself
 
 ## Tenant isolation (Go server)
 
-Isolation is enforced in PostgreSQL, not in Go: every request transaction sets `app.tenant_id` and RLS policies filter on `current_tenant_id()`. The API connects as the unprivileged `dombook_app` role; ad**min**istration uses `dombook_admin` (BYPASSRLS). Never merge the two.
+Isolation is enforced in PostgreSQL, not in Go: every request transaction sets `app.tenant_id` and RLS policies filter on `current_tenant_id()`. The API connects as the unprivileged `rentkeeper_app` role; ad**min**istration uses `rentkeeper_admin` (BYPASSRLS). Never merge the two.
 
+- **The roles are named after the product** (`rentkeeper_app` / `rentkeeper_admin`, created by
+  migration 0010). `dombook_app` / `dombook_admin` are NOT dropped and must not be: roles are
+  CLUSTER-level, so a migration that dropped them would revoke access for every database on the
+  server, including ones it never runs against, and would break a deployment whose DSN still
+  names them. An operator switches the DSNs and then removes them once nothing authenticates as
+  them. Two roles can hold the same privileges; only one of them is ever the answer to “who may
+  read tenant data”, and that is `rentkeeper_app`.
+- **A renamed role needs its FUNCTION grants, not just its table grants.** 0010 granted schema and
+  table privileges and the suite immediately failed with `permission denied for function
+  bootstrap_account`: the SECURITY DEFINER functions each hold their own EXECUTE grant, made
+  per-function on purpose. Grant them explicitly; `GRANT EXECUTE ON ALL FUNCTIONS` would undo the
+  rule that a privileged function is reachable only where someone allowed it.
 - An unset tenant yields **zero rows**, not everything. That is deliberate: missing data is loud, a leak is silent.
 - Operations that run before a tenant exists (signup, login, session resolution by jti, invite lookup) cannot be authorized by tenant policies. Each gets a narrow `SECURITY DEFINER` function in `server/internal/store/migrations/20260811000004_*.sql` / `0005_*.sql`. The full list and the four rules for adding one are in `server/README.md`.
 - `verification_codes` has RLS enabled and **no policy** (deny-all); its only access path is those functions. Do not "fix" it by adding a policy.
@@ -456,7 +481,7 @@ Isolation is enforced in PostgreSQL, not in Go: every request transaction sets `
 
 ## Cloud auth (Phase 1 desktop login)
 
-Desktop talks to the SaaS backend over plain Node `fetch` (no network lib) via `src/main/auth.cjs` (`createAuthApi`) with a `safeStorage`-encrypted JWT persisted by `src/main/auth-session.cjs` to `<userData>/auth-session.bin`. API base URL defaults to `http://127.0.0.1:8787` (override with `DOMBOOK_API_URL`). IPC channels are `auth:status|send|setup|verify|setPlan|logout` wired in `src/main.cjs` and exposed to the renderer as `window.domBook.auth` (see `src/preload.cjs`). Login is **required**: there is no offline escape hatch — the renderer gates all app data behind a restored session; a signed-out window shows only the login screen. After a successful OTP verify the renderer shows a plan picker (free/business); selecting business calls `auth:setPlan` → `PATCH /account/plan`, which ships with the phase-2 subscriptions backend (the running local API returns 404 — the desktop still wires the call and surfaces a friendly message, keeping free). In dev the backend sets `AUTH_EXPOSE_CODE=true` so `/auth/send` echoes the OTP in the response; the login UI surfaces that code, production relies on email delivery. Backend contract is authoritative in `docs/saas-spec.md` §4.1/§5.1.
+Desktop talks to the SaaS backend over plain Node `fetch` (no network lib) via `src/main/auth.cjs` (`createAuthApi`) with a `safeStorage`-encrypted JWT persisted by `src/main/auth-session.cjs` to `<userData>/auth-session.bin`. API base URL defaults to `http://127.0.0.1:8787` (override with `RENTKEEPER_API_URL`). IPC channels are `auth:status|send|setup|verify|setPlan|logout` wired in `src/main.cjs` and exposed to the renderer as `window.domBook.auth` (see `src/preload.cjs`). Login is **required**: there is no offline escape hatch — the renderer gates all app data behind a restored session; a signed-out window shows only the login screen. After a successful OTP verify the renderer shows a plan picker (free/business); selecting business calls `auth:setPlan` → `PATCH /account/plan`, which ships with the phase-2 subscriptions backend (the running local API returns 404 — the desktop still wires the call and surfaces a friendly message, keeping free). In dev the backend sets `AUTH_EXPOSE_CODE=true` so `/auth/send` echoes the OTP in the response; the login UI surfaces that code, production relies on email delivery. Backend contract is authoritative in `docs/saas-spec.md` §4.1/§5.1.
 
 ## Maintaining this file
 
