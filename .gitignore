@@ -7,5 +7,11 @@ coverage/
 data/
 backups/
 
+# Local environment and secrets. Nothing here may be committed; the server takes its
+# DSN, JWT_SECRET and ADMIN_API_KEY from the environment (see server/README.md).
+.env
+.env.*
+!.env.example
+
 # Generated analysis output (graphify). Machine-specific absolute paths; not source.
 graphify-out/
