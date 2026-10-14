@@ -454,7 +454,7 @@ func newHarness(t *testing.T, exposeCode bool, setupToken string) *harness {
 		LockWindow:  15 * time.Minute,
 	})
 	h.service = New(h.store, Options{
-		AppName:    "ДомБук",
+		AppName:    "RentKeeper",
 		JWTSecret:  "test-secret-value-16chars",
 		AccessTTL:  15 * time.Minute,
 		RefreshTTL: 30 * 24 * time.Hour,

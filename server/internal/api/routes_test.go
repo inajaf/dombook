@@ -82,7 +82,7 @@ func newServerWithDatabase(t *testing.T) (*httptest.Server, *store.Store) {
 func authServiceForTest(t *testing.T, database *store.Store) *auth.Service {
 	t.Helper()
 	return auth.New(database, auth.Options{
-		AppName:    "ДомБук Test",
+		AppName:    "RentKeeper Test",
 		JWTSecret:  testJWTSecret,
 		AccessTTL:  15 * time.Minute,
 		RefreshTTL: 24 * time.Hour,

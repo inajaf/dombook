@@ -4,6 +4,69 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 - Add durable project-specific notes here as they are discovered through real work.
 
+## Layout and the commands that matter
+
+Two stacks live in one repository, and it is worth knowing which one a change belongs to:
+
+| Path | What it is |
+|---|---|
+| `src/main.cjs`, `src/main/` | Electron main process: IPC handlers, auth, sync client |
+| `src/database.cjs` | The desktop domain layer on sql.js (in-memory SQLite + file persistence) |
+| `src/renderer/` | Sandboxed renderer (`app.js`, `styles.css`, `i18n/`) — cannot `require` |
+| `src/domain/booking/` | Booking-policy math shared with the server through `fixtures/` |
+| `server/` | Go + PostgreSQL API. `server/README.md` is authoritative for it |
+| `scripts/e2e-*.mjs` | Suites that drive the real app over CDP; `verify-*.mjs` check API contracts |
+| `fixtures/` | Canonical domain cases both stacks must agree on (copied into Go testdata) |
+
+Commands, from the repository root unless noted:
+
+```bash
+npm test                     # desktop unit suite: node --test tests/*.test.cjs
+npm run test:smoke           # desktop smoke test against a temp profile
+env -u ELECTRON_RUN_AS_NODE npm start   # the app; unset that var first, see "Running locally"
+bash scripts/e2e-all.sh      # brings up the stack, then drives the real app over CDP
+
+cd server
+go build ./... && go vet ./...
+DOMBOOK_TEST_DSN="postgres://$(whoami)@127.0.0.1:5432/dombook_test?sslmode=disable" \
+  go test -p 1 -race ./...   # -p 1 is required; see server/README.md
+```
+
+There is **no linter or formatter configured** for the JavaScript (`gofmt` covers the Go). Match the
+surrounding style by hand rather than introducing a toolchain.
+
+Conventions that already hold across the codebase:
+
+- Comments explain **why**, normally naming the failure they prevent. A comment restating the code
+  is not the house style; one naming the bug it prevents is.
+- Domain rules are asserted with stable machine codes (`check_in_past`, `rental_too_short`), never
+  on localized prose.
+- Test names state the behaviour (`"cancelling releases the nights"`), so a failure reads as a
+  sentence about the product.
+
+### Branding is a matrix, not a string
+
+The product is **RentKeeper** (renamed from DomBook — see its own section below). One rename touched
+every layer, and each layer holds the name differently:
+
+| Layer | Authoritative value | Guarded by |
+|---|---|---|
+| Window, tray, installer, `appId`, userData dir | `package.json` `productName` + `app.setName()` | `scripts/e2e-branding.mjs` |
+| Login heading and locales | `src/renderer/index.html`, `src/renderer/i18n/*.js` | `scripts/e2e-branding.mjs` (three locales) |
+| Server's outgoing-message name | `APP_NAME`, defaulted in `server/internal/config/config.go` | `TestDefaultsAreSane` |
+| Release artefacts | `.github/workflows/build-desktop.yml` | upload step fails on a missing path |
+
+Change one row and the others go stale silently — which is exactly how the server default was left
+saying `ДомБук` after the rename. When touching any of them, grep for the other three.
+
+### CI
+
+`build-desktop.yml` builds installers on a `v*` tag and runs `npm test` plus the smoke test on each
+platform. `server.yml` runs build, vet and `go test -p 1 -race` against a `postgres:16` service.
+That job exists because the integration tests **skip** without `DOMBOOK_TEST_DSN`, and they are the
+only thing that exercises tenant isolation — an unset DSN would leave RLS untested while every
+check stayed green.
+
 ## Schema & ids
 
 Desktop domain tables (places, properties, reservations, reservation_nights, reservation_services, reservation_meals, app_settings, audit_log) use **UUID TEXT ids** plus sync columns `created_at`, `updated_at`, `deleted_at`, `version`, `last_writer`, matching the server's baseline (minus `tenant_id` — the desktop is single-tenant; the server calls a property a `unit`). `version` starts at 1 and every write bumps it. Legacy integer-id databases are migrated in-place by `migrateLegacyIntegerIds()` (`src/database.cjs`), registered as migration `sync_schema_v1`; the old `ensureColumn` mechanism is kept for backward compatibility. New rows need an explicit `crypto.randomUUID()` id; `last_insert_rowid()` is gone.
@@ -182,7 +245,7 @@ break existing installs and CI for no user benefit.
 
 ## End-to-end suites (real app, real database)
 
-`scripts/e2e-all.sh` brings up the stack and drives the actual Electron app over CDP — 92
+`scripts/e2e-all.sh` brings up the stack and drives the actual Electron app over CDP — 93
 checks across six suites. These exist because every serious bug in this project was invisible
 to both unit suites:
 
@@ -213,6 +276,43 @@ to both unit suites:
   dialog until `refreshCore()` runs, exactly as the app does after a form submit. Skipping it
   leaves a required `<select>` with no matching option, and the submit silently does nothing.
 
+### The cancel block: a cascade that hid its own cause
+
+`e2e-operations.mjs` failed once in a full `e2e-all.sh` run, with FOUR consecutive checks red
+from *"a second booking exists"* onward, and passed every other time. Two defects in that block
+made the failure unreadable, and both are fixed:
+
+- **The unit creation was never checked.** The block created `Отмена-<stamp>` and returned
+  `unit.data?.id` without looking at `unit.ok`, so a failed create produced `undefined`, the
+  booking below failed, and the three checks after it failed with it. One discarded error
+  presented as four product bugs. There is now a check on that create that prints its error,
+  the entitlement allowance, the place id and how many rows carry the new name.
+- **The dates were fixed offsets** (`today+10..today+12`), the last such block in the file and
+  the one pattern the section above warns about. The window now comes from live occupancy, the
+  same way the earlier check-in block finds its dates.
+
+Both refusal modes were then induced against the running app to confirm the diagnostics
+separate them:
+
+| Cause | Error the suite now surfaces |
+|---|---|
+| the unit is not there | `Дом: неверный идентификатор` |
+| the unit is there, the dates are refused | `Заезд можно оформить максимум на 21 день вперёд — до <date>` |
+
+**The original failure was never reproduced** — 5 isolated runs and 4 full `e2e-all.sh` runs, 9
+in total, all green. So this is a diagnosed hardening, not a confirmed fix: whatever produced
+the unit-creation failure is still unexplained. Do not re-broaden it into a hunt without that
+output in hand — it now names the cause on the spot instead of cascading, which is the point.
+
+**The entitlement cap was ruled out, and the counter-evidence is worth keeping.** The first
+hypothesis was that the free tier's 1-unit cap refused the create. It cannot have: there is no
+gate to refuse it. `unitAllowance`/`unitAllowanceStatus` only *report*, `createProperty` never
+reads them, and the renderer's only use is an upgrade banner (`overLimit`). The measurements say
+the same — an account holding **3 active units on an allowance of 1** (`over: true`) shows three
+units existing and not one write refused. That is the documented design (the server owns
+enforcement so a licensed user offline is never locked out), so a unit-cap refusal is not a
+candidate for any e2e failure in this project.
+
 ## Visual defects found by looking at the app
 
 Two layout faults that no assertion would have caught, both found by reading screenshots:
@@ -229,7 +329,7 @@ Two layout faults that no assertion would have caught, both found by reading scr
   so it overflows into the scroll container instead. 15 header cells, all reachable.
 
 Vision is worth running over the main screens after UI work; both of these were invisible to
-92 passing checks.
+92 passing checks. (The suite is 93 now; both of these were found at the 92-check revision.)
 
 ## Long-term rentals
 

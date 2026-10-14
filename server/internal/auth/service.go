@@ -56,7 +56,12 @@ type Store interface {
 
 // Options configures the service.
 type Options struct {
-	// AppName brands OTP messages.
+	// AppName is threaded through from config for message branding.
+	//
+	// NOTHING READS IT YET: the default messenger only logs the code, so the name
+	// reaches no user-facing text. Keep it set correctly anyway — it is the hook a
+	// real mail messenger will use, and a stale value here would silently brand every
+	// future outgoing message. See config.AppName for the default.
 	AppName string
 	// JWTSecret signs session tokens.
 	JWTSecret string
@@ -111,7 +116,8 @@ func New(repository Store, options Options, limiter *RateLimiter, messenger Mess
 		options.OTPLength = 6
 	}
 	if options.AppName == "" {
-		options.AppName = "ДомБук"
+		// Must match config's default and the clients' product name; see config.AppName.
+		options.AppName = "RentKeeper"
 	}
 	if messenger == nil {
 		messenger = &logMessenger{}
