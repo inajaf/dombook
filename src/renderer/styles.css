@@ -667,3 +667,20 @@ tbody tr:last-child td { border-bottom: 0; }
 .rental-terms dd { margin: 3px 0 0; font-weight: 700; }
 .rental-readings { margin: 0; font-size: 12px; }
 .rental-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+/* The `hidden` attribute must actually hide.
+ *
+ * The UA stylesheet gives [hidden] `display: none`, but ANY author rule that sets `display`
+ * on the same element beats it — a bare attribute selector has no specificity over a class.
+ * `.empty-state { display: grid }` and `.nav-badge { display: grid }` therefore kept four
+ * elements on screen while the renderer believed they were hidden:
+ *
+ *   - "Бронирований пока нет" shown above a table that had a booking in it
+ *   - "Добавьте первый объект" shown above three existing properties
+ *   - the "0" badges on Аренда and Конфликты, which should disappear at zero
+ *
+ * `!important` is deliberate and is the standard fix for this attribute: it has to win over
+ * whatever a later, more specific component rule decides. Removing it would silently bring
+ * the contradiction back.
+ */
+[hidden] { display: none !important; }

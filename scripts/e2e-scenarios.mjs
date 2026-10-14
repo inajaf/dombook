@@ -6,9 +6,9 @@
 // exercise the assembled product — renderer, IPC, main process, PostgreSQL, sync engine —
 // rather than any layer in isolation.
 
-import { connect, wait, reporter, addMonths, addDays } from "./e2e-lib.mjs";
+import {addDays, addMonths, connect, freshStart, reporter, resetAuthState, restartApp, wait} from "./e2e-lib.mjs";
 
-const app = await connect();
+let app = await connect();
 const { check, finish } = reporter("Scenarios");
 
 const email = `owner-${Date.now()}@example.test`;
@@ -24,6 +24,7 @@ const go = async (page) => {
 };
 
 // --- Scenario 1: a new owner signs up -------------------------------------
+app = await freshStart(app);
 await app.evaluate(`document.getElementById('loginEmailForm').elements.loginEmail.value = ${JSON.stringify(email)}; return 'ok';`);
 await submit("loginEmailForm");
 await wait(3000);

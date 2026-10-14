@@ -7,9 +7,9 @@
 // double-sold). Driving it through the UI is the only way to see whether the form, the
 // validation and the database agree.
 
-import { connect, wait, reporter, addDays } from "./e2e-lib.mjs";
+import {addDays, connect, freshStart, reporter, resetAuthState, restartApp, wait} from "./e2e-lib.mjs";
 
-const app = await connect();
+let app = await connect();
 const { check, finish } = reporter("Booking trip");
 
 const email = `guest-${Date.now()}@example.test`;
@@ -25,6 +25,7 @@ const go = async (page) => {
 };
 
 // Sign up.
+app = await freshStart(app);
 await app.evaluate(`document.getElementById('loginEmailForm').elements.loginEmail.value = ${JSON.stringify(email)}; return 'ok';`);
 await submit("loginEmailForm");
 await wait(3000);

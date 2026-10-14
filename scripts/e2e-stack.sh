@@ -18,9 +18,19 @@ PORT="${DOMBOOK_E2E_PORT:-8787}"
 CDP_PORT="${CDP_PORT:-9555}"
 
 stop_app() {
-  for pid in $(pgrep -f "MacOS/Electron \." 2>/dev/null || true); do kill -9 "$pid" 2>/dev/null || true; done
-  pkill -9 -f "MacOS/Electron Helper" 2>/dev/null || true
-  sleep 1
+  # Match the binary path, not "MacOS/Electron ." — the main process is launched as
+  # `.../MacOS/Electron <project> --remote-debugging-port=...`, so a pattern anchored on a
+  # trailing space misses it, the old process keeps the CDP port, and the new one dies with
+  # "bind() failed: Address already in use". The symptom is a suite that hangs at connect.
+  pkill -9 -f "electron/dist/Electron.app/Contents/MacOS/Electron" 2>/dev/null || true
+  for pid in $(pgrep -f "MacOS/Electron" 2>/dev/null || true); do kill -9 "$pid" 2>/dev/null || true; done
+  sleep 2
+  # Wait for the debug port to actually be free before starting another app.
+  for _ in $(seq 1 20); do
+    lsof -nP -iTCP:"${CDP_PORT}" -sTCP:LISTEN >/dev/null 2>&1 || return 0
+    sleep 0.5
+  done
+  echo "warning: port ${CDP_PORT} is still held" >&2
 }
 stop_api() { pkill -f "/tmp/dombook-api" 2>/dev/null || true; sleep 1; }
 start_api() {

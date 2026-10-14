@@ -8,6 +8,8 @@ const {
   pendingCount,
   acknowledge,
   recordFailure,
+  // Entries the server refused for good. Reported, never silently dropped.
+  failed,
 } = require("./main/outbox.cjs");
 const {
   assertBookingDates,
@@ -37,6 +39,10 @@ const ALLOWED_RESERVATION_STATUSES = new Set([
   "checked_out",
   "cancelled",
   "no_show",
+  // Server-assigned. It is accepted here so that editing an unrelated field on a conflicted
+  // booking — a phone number, a note — does not silently rewrite its status to "hold" and
+  // drop it out of the operator's queue.
+  "conflict",
 ]);
 
 const ALLOWED_DEPOSIT_STATUSES = new Set([
@@ -105,7 +111,16 @@ const SCHEMA_TABLES = {
     check_out_date TEXT NOT NULL,
     adults INTEGER NOT NULL DEFAULT 1 CHECK(adults > 0),
     children INTEGER NOT NULL DEFAULT 0 CHECK(children >= 0),
-    status TEXT NOT NULL CHECK(status IN ('hold','confirmed','checked_in','checked_out','cancelled','no_show')),
+    -- 'conflict' is set by the SERVER when an offline push collided with another device's
+    -- booking. The client cannot choose it (the server refuses to let a client mark its own
+    -- row conflicted) but it MUST be able to store it: the value arrives on every pull, and a
+    -- local CHECK that rejects it fails the whole sync, permanently, for every user.
+    status TEXT NOT NULL CHECK(status IN ('hold','confirmed','checked_in','checked_out','cancelled','no_show','conflict')),
+    -- Assigned by the sync engine, shown in the operator's conflict queue. Stored locally so
+    -- the queue can describe what actually happened.
+    conflict_code TEXT,
+    conflict_details TEXT,
+    resolved_at TEXT,
     booking_kind TEXT NOT NULL DEFAULT 'stay' CHECK(booking_kind IN ('stay','rental')),
     monthly_rate_minor INTEGER NOT NULL DEFAULT 0 CHECK(monthly_rate_minor >= 0),
     meter_readings TEXT NOT NULL DEFAULT '{}',
@@ -382,6 +397,14 @@ class RentKeeperDatabase {
       this.ensureColumn("reservations", "booking_kind", "TEXT NOT NULL DEFAULT 'stay'");
       this.ensureColumn("reservations", "monthly_rate_minor", "INTEGER NOT NULL DEFAULT 0 CHECK(monthly_rate_minor >= 0)");
       this.ensureColumn("reservations", "meter_readings", "TEXT NOT NULL DEFAULT '{}'");
+      // SQLite cannot alter a CHECK constraint, so a database created before the conflict
+      // status existed rejects the value with "CHECK constraint failed" — and every pull
+      // carries conflict rows, so its sync fails forever. The table has to be rebuilt.
+      // The conflict columns arrive on every pull, so a database without them fails its
+      // FIRST sync and every one after it.
+      this.ensureColumn("reservations", "conflict_code", "TEXT");
+      this.ensureColumn("reservations", "conflict_details", "TEXT");
+      this.ensureColumn("reservations", "resolved_at", "TEXT");
       this.db.run(`
         UPDATE reservations
         SET accommodation_minor = total_minor
@@ -396,6 +419,10 @@ class RentKeeperDatabase {
       `);
 
       this.migrateLegacyIntegerIds();
+      // After every other migration, never before: a legacy database still holds rows keyed by
+      // integer that migrateLegacyIntegerIds() rewrites, and rebuilding first copies rows whose
+      // timestamps have not been filled in yet — "NOT NULL constraint failed: created_at".
+      this.rebuildReservationsForConflictStatus();
       this.db.run(SCHEMA_INDEXES.join(";\n"));
 
       if (!this.scalar("SELECT 1 FROM schema_migrations WHERE name = 'daily_meals_v1'")) {
@@ -613,6 +640,67 @@ class RentKeeperDatabase {
     return true;
   }
 
+  /**
+   * Rebuild `reservations` so its status CHECK accepts 'conflict'.
+   *
+   * A rebuild rather than an ALTER because SQLite has no way to change a CHECK. Rows are
+   * copied verbatim, so no data is transformed; the ONLY change is the constraint. Runs once,
+   * gated by schema_migrations, and is a no-op on a database that already allows the value.
+   */
+  rebuildReservationsForConflictStatus() {
+    if (this.scalar("SELECT 1 FROM schema_migrations WHERE name = 'reservation_conflict_status_v1'")) return false;
+
+    const ddl = this.scalar("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'reservations'");
+    if (ddl && ddl.includes("'conflict'")) {
+      // Already correct (a fresh database). Record it so this is not re-checked every start.
+      this.run("INSERT INTO schema_migrations(name, applied_at) VALUES ('reservation_conflict_status_v1', ?)", [nowIso()]);
+      return false;
+    }
+
+    const timestamp = nowIso();
+    const rows = this.query("SELECT * FROM reservations");
+    const nightRows = this.query("SELECT * FROM reservation_nights");
+    const serviceRows = this.query("SELECT * FROM reservation_services");
+    const mealRows = this.query("SELECT * FROM reservation_meals");
+
+    this.transaction(() => {
+      this.db.run("DROP TABLE IF EXISTS reservations_new");
+      this.db.run(`CREATE TABLE reservations_new (${SCHEMA_TABLES.reservations})`);
+      rows.forEach((row) => this.insertRowRaw("reservations_new", row));
+      // Children reference reservations(id); they are moved across too, or the nights of every
+      // booking would be orphaned by the rebuild.
+      this.db.run("DROP TABLE IF EXISTS reservation_nights_new");
+      this.db.run(`CREATE TABLE reservation_nights_new (${SCHEMA_TABLES.reservation_nights})`);
+      nightRows.forEach((row) => this.insertRowRaw("reservation_nights_new", row));
+      this.db.run("DROP TABLE IF EXISTS reservation_services_new");
+      this.db.run(`CREATE TABLE reservation_services_new (${SCHEMA_TABLES.reservation_services})`);
+      serviceRows.forEach((row) => this.insertRowRaw("reservation_services_new", row));
+      this.db.run("DROP TABLE IF EXISTS reservation_meals_new");
+      this.db.run(`CREATE TABLE reservation_meals_new (${SCHEMA_TABLES.reservation_meals})`);
+      mealRows.forEach((row) => this.insertRowRaw("reservation_meals_new", row));
+
+      this.db.run("DROP TABLE reservation_nights");
+      this.db.run("DROP TABLE reservation_services");
+      this.db.run("DROP TABLE reservation_meals");
+      this.db.run("DROP TABLE reservations");
+      this.db.run("ALTER TABLE reservations_new RENAME TO reservations");
+      this.db.run("ALTER TABLE reservation_nights_new RENAME TO reservation_nights");
+      this.db.run("ALTER TABLE reservation_services_new RENAME TO reservation_services");
+      this.db.run("ALTER TABLE reservation_meals_new RENAME TO reservation_meals");
+      this.run("INSERT INTO schema_migrations(name, applied_at) VALUES ('reservation_conflict_status_v1', ?)", [timestamp]);
+    });
+    return true;
+  }
+
+  /** Insert a row without queueing it for sync. Used only by schema rebuilds. */
+  insertRowRaw(table, row) {
+    const columns = Object.keys(row);
+    this.db.run(
+      `INSERT INTO ${table}(${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`,
+      columns.map((column) => row[column]),
+    );
+  }
+
   insertRow(table, row) {
     const columns = Object.keys(row);
     this.db.run(
@@ -784,6 +872,17 @@ class RentKeeperDatabase {
     return pendingCount(this);
   }
 
+  /**
+   * Queued changes the server has refused for good.
+   *
+   * They stay in the outbox rather than being dropped — the user's data is theirs, and a
+   * silent discard is the worst outcome. But they will never drain, so the count is reported
+   * separately instead of leaving the "unsynced" badge stuck at a number nobody can explain.
+   */
+  failedSyncCount() {
+    return failed(this).length;
+  }
+
   /** Pending entries, for the sync engine to push. */
   pendingSyncEntries(limit = 500) {
     return pending(this, limit);
@@ -822,6 +921,17 @@ class RentKeeperDatabase {
     this.persist();
   }
 
+  /**
+   * The sample dataset shown on first run.
+   *
+   * It creates ONE place and ONE unit — not more. The free tier allows one active place and
+   * one active unit, and the server enforces that with a trigger, so a larger seed produced a
+   * demonstration the user could never sync: their very first push was refused by the plan
+   * limit. A sample that cannot leave the device is worse than no sample.
+   *
+   * One of each still shows how places, units, the calendar and the rentals screen fit
+   * together, and the user's own data is what the app is for anyway.
+   */
   seedDemoData() {
     const count = this.scalar("SELECT COUNT(*) FROM properties");
     if (count > 0) return;
@@ -830,12 +940,11 @@ class RentKeeperDatabase {
       { name: "Дом отдыха «Лесная долина»", address: "Габала", notes: "Демонстрационный комплекс" },
       { persist: false, audit: false },
     );
-    const houses = [
-      { name: "Коттедж «Сосны»", kind: "cottage", placeId: place.id, location: "", capacity: 6, basePriceMinor: 24000, depositMinor: 30000, notes: "Тихий коттедж рядом с лесом" },
-      { name: "Коттедж «У озера»", kind: "cottage", placeId: place.id, location: "", capacity: 8, basePriceMinor: 32000, depositMinor: 40000, notes: "Большая терраса и вид на воду" },
-      { name: "Отдельный дом в Шеки", kind: "house", placeId: null, location: "Шеки", capacity: 3, basePriceMinor: 17000, depositMinor: 20000, notes: "Самостоятельный дом для пары" },
-    ];
-    houses.forEach((house) => this.createProperty(house, { persist: false, audit: false }));
+    this.createProperty({
+      name: "Коттедж «Сосны»", kind: "cottage", placeId: place.id, location: "", capacity: 6,
+      basePriceMinor: 24000, monthlyRateMinor: 480000, depositMinor: 30000,
+      notes: "Тихий коттедж рядом с лесом",
+    }, { persist: false, audit: false });
   }
 
   query(sql, params = []) {

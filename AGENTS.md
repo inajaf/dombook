@@ -98,31 +98,42 @@ reimplement a rule that also lives in the shared domain module — that is the d
   explicitly, and make sure a default id comes from the list actually offered — a dialog that
   filters its options must not default to an entry it filtered out.
 
-## Syncing a lease (known gap)
+## Sync: what it takes for a change to reach the server
 
-A tenancy is a reservation, so it syncs through the same path — and that path has bitten three
-times while testing the rentals UI. Two are fixed and pinned; one is open.
+Sync had NEVER been observed to succeed before `scripts/e2e-sync.mjs` existed. Every fault
+below failed the push outright, and each was invisible to both unit suites:
 
-- **Nights must be queued, not just the booking.** `insertNights` inserted rows directly and
-  never called `enqueueSync`, so a lease reached the server with no nights and every other
-  device showed the unit as free for the whole term. Gated by `tests/rentals.test.cjs`.
+- **Nights must be queued, not just the booking.** `insertNights` wrote rows directly and never
+  called `enqueueSync`, so a booking reached the server with no nights and every other device
+  showed the unit as free for the whole term.
 - **`has_food_service` is an integer locally and a boolean on the server.** pgx cannot encode a
-  Go int as bool, so the push failed with "unable to encode 0 into binary format for bool" and
-  the outbox never drained. `toRemote` coerces the columns listed in `BOOLEAN_COLUMNS`; a SQL
-  cast does NOT help, because the failure is while encoding, before the cast.
-- **The push payload must be in dependency order.** It is built from a JS object, and relying
-  on insertion order is intermittent. `SYNC_ORDER` in `src/main/sync.cjs` mirrors the server's
-  `SyncTables`, and a test asserts `reservations` precedes `reservation_nights`.
-- **OPEN: `reservation_nights_reservation_id_fkey` still fails on a large first push.** A
-  seeded demo account (4 units, 2 bookings, 730 nights) pushing in one batch is refused with a
-  foreign key violation even with the ordering fix in place. Not diagnosed. Pushing in smaller
-  batches, or sending children only after their parent was acknowledged, are the obvious
-  directions.
-
-Note also that the desktop seeds a demo dataset on first run that **cannot fit a free account**
-(4 units against a cap of 1), so a brand-new free user's first sync fails on
-`dombook_plan_limit_units` / `dombook_plan_limit_places`. That is a product decision — seed
-less, or seed only for a licensed account — not a bug in the push path.
+  Go int as bool: the push failed with "unable to encode 0 into binary format for bool". A SQL
+  cast does NOT help — the failure is while ENCODING the parameter, before the cast.
+  `toRemote` coerces the columns in `BOOLEAN_COLUMNS`.
+- **The payload must be in dependency order.** It is built from a JS object, and relying on key
+  order is intermittent. `SYNC_ORDER` mirrors the server's `SyncTables`.
+- **A `jsonb` column arrives parsed.** `conflict_details` came back as an object where the local
+  column is TEXT, and sql.js cannot bind an object — "tried to bind a value of an unknown type
+  ([object Object])". `toLocalValue` normalises objects and booleans on the pull path.
+- **The local schema must accept what the server sends.** It had no `conflict_code`,
+  `conflict_details` or `resolved_at`, and its status CHECK excluded `'conflict'`. The first
+  pull threw "table reservations has no column named conflict_code", forever. SQLite cannot
+  alter a CHECK, so `rebuildReservationsForConflictStatus` rebuilds the table and its three
+  child tables, preserving every row and its version.
+- **A refused push must NOT be followed by the pull.** Applying server rows deletes their
+  outbox entries — correct when the push succeeded, catastrophic when it was refused: the
+  local edit is overwritten by the server's older copy AND its queue entry is deleted, so the
+  user's change is gone from both sides. The pull is now skipped while any row is unconfirmed.
+- **A permanently refused row must not block the rest.** The server marks a row retryable only
+  when retrying could help (a parent has not been pushed yet). Rows it will never accept — over
+  the plan allowance, or refused by the schema — are counted as `stuck` and left queued rather
+  than holding the account's other data hostage.
+- **Each row needs its own savepoint.** A refused INSERT aborts the whole PostgreSQL
+  transaction, so one bad row took the entire push with it: "current transaction is aborted".
+- **The demo seed must fit the free tier.** It created one place and THREE units against a cap
+  of one place and one unit, so a new free user's first push was refused by the entitlement
+  trigger. It now seeds one place and one unit — a sample that cannot leave the device is worse
+  than no sample.
 
 ## The IPC authentication gate (desktop)
 
@@ -171,25 +182,54 @@ break existing installs and CI for no user benefit.
 
 ## End-to-end suites (real app, real database)
 
-`scripts/e2e-all.sh` brings up the stack and drives the actual Electron app over CDP. These
-exist because every serious bug found in this project was invisible to both unit suites:
+`scripts/e2e-all.sh` brings up the stack and drives the actual Electron app over CDP — 92
+checks across six suites. These exist because every serious bug in this project was invisible
+to both unit suites:
 
-- **`e2e-scenarios.mjs`** — signup, the plan step, creating a guest house and a unit.
-- **`e2e-booking.mjs`** — a stay booked through the dialog, its nights on the calendar,
-  overlap refusal, back-to-back allowed, capacity enforced.
-- **`e2e-branding.mjs`** — the product name as rendered, in all three locales and both windows.
-- **`e2e-security.mjs`** — two separate tenants; neither can read, write or book into the
-  other's data, and the signed-out bridge refuses everything.
+- **`e2e-scenarios.mjs`** — signup, the plan step, a guest house and a unit.
+- **`e2e-booking.mjs`** — a stay through the dialog, its nights on the calendar, overlap
+  refused, back-to-back allowed, capacity enforced.
+- **`e2e-branding.mjs`** — the product name as rendered, in three locales and both windows.
+- **`e2e-operations.mjs`** — check-in, early checkout, cancel, delete, archive/restore, backup.
+- **`e2e-security.mjs`** — two tenants; neither can read, write or book into the other's data,
+  and the signed-out bridge refuses everything.
+- **`e2e-sync.mjs`** — a real push and pull, with the nights confirmed in PostgreSQL.
 
-Two lessons worth keeping:
+### Writing one: the traps, all of which cost real time here
 
-- **A suite that shares demo data with a previous run reports leftovers as failures.** A
-  correct back-to-back booking looked like a bug twice because the seeded demo unit still
-  held an earlier run's nights. Each suite now creates its own place and unit, timestamped.
-- **The renderer caches the unit list.** Creating a unit through the bridge does not make it
-  appear in a dialog; call `refreshCore()` after a bridge-level write, exactly as the app
-  does after a form submit. A test that skips this fills in a form whose `<select>` has no
-  matching option and silently does nothing.
+- **Use `freshStart(appHdl)`, never `resetAuthState()` alone.** The app holds its database in
+  memory and rewrites the file on exit, so deleting the profile under a running app leaves the
+  old data on disk moments later. `freshStart` stops the app, waits for the CDP port to free,
+  clears the server AND the profile, then starts a new app.
+- **The server keeps the previous run's data.** `resetAuthState` truncates `users, accounts, …`
+  `CASCADE`, which reaches the tenant tables through their account FK. Clearing only the auth
+  tables leaves the old bookings on the server; the fresh client pulls them back down and its
+  rows then collide — a booking refused as "already occupied" by a row the suite never created.
+- **Never reuse fixed date offsets.** The operations suite derived `today+2..today+5`, and a
+  leftover row from an earlier run made a correct booking look broken. It now picks the first
+  free window from live occupancy and re-reads the booking's real dates for every later step.
+- **Each suite creates its own place and unit, timestamped**, rather than sharing the demo seed.
+- **The renderer caches the unit list.** A unit created through the bridge is invisible to a
+  dialog until `refreshCore()` runs, exactly as the app does after a form submit. Skipping it
+  leaves a required `<select>` with no matching option, and the submit silently does nothing.
+
+## Long-term rentals
+
+A tenancy is a reservation with `booking_kind = 'rental'` and a long date range, so the one
+existing `reservations_unit_no_overlap` exclusion constraint covers nightly and monthly lets
+alike. That is the whole design: a second inventory or a second availability check would
+reintroduce a way for the two modes to disagree.
+
+- `booking_kind` is **stored, not derived** from length — an owner may agree a monthly rate on
+  a three-month let.
+- A tenancy is priced by whole **calendar months** (`wholeMonthsBetween`), never by nights x a
+  nightly rate. Multiplying a nightly rate by 365 gives a number that looks like a year's rent
+  and is not one.
+- A tenancy shorter than one month is refused (`rental_too_short`). Its month count is zero,
+  and zero months of rent is a free let rather than a small charge.
+- Tenancies are exempt from the advance window and bounded by `maximumTenancyMonths` instead.
+- `MaxNightCount` (1096) must stay above the longest permitted tenancy (24 months = up to 731
+  days); a test compares the two.
 
 ## Running locally
 

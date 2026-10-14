@@ -6,10 +6,13 @@
 // not what the source says — a missed translation key shows the raw Russian source string, so
 // asserting on the DOM catches it.
 
-import { connect, wait, reporter } from "./e2e-lib.mjs";
+import {connect, freshStart, reporter, resetAuthState, restartApp, wait} from "./e2e-lib.mjs";
 
-const app = await connect();
+let app = await connect();
 const { check, finish } = reporter("Branding");
+
+// A fresh owner account, because setup only bootstraps while no user exists.
+app = await freshStart(app);
 
 const NAME = "RentKeeper";
 

@@ -110,9 +110,28 @@ function toLocal(tableName, row) {
   const out = {};
   for (const [key, value] of Object.entries(row)) {
     if (key === "tenant_id") continue;
-    out[reverse[key] ?? key] = value;
+    out[reverse[key] ?? key] = toLocalValue(value);
   }
   return out;
+}
+
+/**
+ * Convert a value that arrived as JSON into something SQLite can bind.
+ *
+ * A `jsonb` column comes back already parsed, so `conflict_details` is an object where the
+ * local column is TEXT. sql.js cannot bind an object — it throws "tried to bind a value of an
+ * unknown type ([object Object])" — which failed the entire pull, and with it the sync, the
+ * moment a conflicting booking was downloaded. A boolean is the same problem in reverse: the
+ * local schema stores 0/1 integers.
+ */
+function toLocalValue(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "object") {
+    const { isArray } = Array;
+    return isArray(value) ? JSON.stringify(value) : JSON.stringify(value);
+  }
+  if (typeof value === "boolean") return value ? 1 : 0;
+  return value;
 }
 
 /**
@@ -203,6 +222,10 @@ function createSyncEngine({ db, transport, nowIso, deviceId, onStateChange }) {
     syncing = true;
     try {
       const result = { pushed: 0, applied: 0, conflicts: 0, rejected: 0, stale: 0, cursor: readWatermark() };
+      // Set when the server refuses a row that may succeed later; blocks the pull below.
+      let unconfirmed = 0;
+      // Rows the server will never accept. Reported, left queued, but they do not block.
+      let permanentFailures = 0;
 
       // --- push ---
       const entries = pending(db);
@@ -254,13 +277,32 @@ function createSyncEngine({ db, transport, nowIso, deviceId, onStateChange }) {
           );
           const remoteToLocal = Object.fromEntries(Object.entries(TABLE_MAP).map(([local, spec]) => [spec.remote, local]));
 
+          // Which rows the server refused for good, versus ones worth retrying. A permanent
+          // refusal (over the plan allowance, or a value the schema rejects) is recorded and
+          // left queued, but it must NOT hold up the pull: otherwise a single over-allowance
+          // unit stops the account syncing anything for the rest of its life.
+          const permanentRejections = new Set(
+            (response.results ?? [])
+              .filter((row) => row.outcome === "rejected" && !row.retryable)
+              .map((row) => ({ table: row.table, id: row.id })),
+          );
+          const rejectKey = (tableName, rowId) => {
+            const spec = TABLE_MAP[tableName];
+            return spec ? `${spec.remote}:${rowId}` : `${tableName}:${rowId}`;
+          };
+          const permanent = new Set([...permanentRejections].map((r) => rejectKey(r.table, r.id)));
+
           const toAcknowledge = [];
           for (const entry of sent) {
             const spec = TABLE_MAP[entry.table_name];
             const key = `${spec.remote}:${entry.row_id}`;
             if (accepted.has(key)) {
               toAcknowledge.push(entry);
+            } else if (permanent.has(key)) {
+              permanentFailures += 1;
+              recordFailure(db, entry, "сервер отклонил запись (нельзя исправить повтором)", nowIso);
             } else {
+              unconfirmed += 1;
               recordFailure(db, entry, "сервер не подтвердил запись", nowIso);
             }
           }
@@ -271,6 +313,27 @@ function createSyncEngine({ db, transport, nowIso, deviceId, onStateChange }) {
           result.stale = response.stale ?? 0;
           void remoteToLocal;
         }
+      }
+
+      // A push the server did not fully accept stops the sync here.
+      //
+      // The pull must not run after a partial rejection. Applying server rows deletes the
+      // outbox entry for each row it writes — correctly, since those rows are already on the
+      // server — but when the PUSH was refused, the server's copy is the OLD state. Pulling
+      // then overwrites the local edit AND deletes its queue entry, so the user's change is
+      // gone from both sides with nothing left to retry. The queue is the only record of
+      // intent; it survives a failure only if the pull is skipped.
+      if (unconfirmed > 0) {
+        result.rejected = unconfirmed;
+        lastResult = {
+          ok: false,
+          at: nowIso(),
+          ...result,
+          error: `${unconfirmed} change(s) were not accepted by the server; nothing was pulled, and the queue is intact`,
+          pending: pendingCount(db),
+        };
+        if (onStateChange) onStateChange(lastResult);
+        return lastResult;
       }
 
       // --- pull ---

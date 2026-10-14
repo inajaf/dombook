@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Sync v2 push and pull.
@@ -60,6 +63,12 @@ type RowResult struct {
 	ConflictDates []string `json:"conflictDates,omitempty"`
 	// Version is the server-assigned version when the row was applied.
 	Version int64 `json:"version,omitempty"`
+	// Retryable marks a rejected row that may succeed later — its parent has not been pushed
+	// yet, for instance. A row that is NOT retryable will never be accepted (it exceeds the
+	// account's allowance, or the schema refuses it), and the client must not let it block the
+	// rest of the queue: one over-allowance unit would otherwise stop the account syncing
+	// anything, forever.
+	Retryable bool `json:"retryable,omitempty"`
 }
 
 // PushResult is the outcome of a whole push.
@@ -104,6 +113,11 @@ func (s *Store) Push(ctx context.Context, tenantID, clientID string, changes map
 			return err
 		}
 
+		// Rows the server refused. A child whose parent was refused cannot be written — the
+		// foreign key would abort the transaction — so the child is refused as well, with a
+		// reason that names the real cause instead of a constraint name nobody can act on.
+		rejected := map[SyncTable]map[string]bool{}
+
 		// Deterministic ordering keeps the reported results reproducible for a given
 		// payload, which matters when an operator is comparing two client logs.
 		for _, table := range SyncTables {
@@ -111,7 +125,28 @@ func (s *Store) Push(ctx context.Context, tenantID, clientID string, changes map
 			if !present {
 				continue
 			}
-			for _, row := range rows {
+			for rowIndex, row := range rows {
+				// A row whose chain of ancestors was refused is refused too, checked before
+				// anything is written so the foreign key never fires.
+				//
+				// The walk is transitive on purpose: a unit is refused because its place was
+				// refused, and the unit's bookings must be refused as well. Checking only the
+				// immediate parent let a reservation through after its unit was skipped, and
+				// the foreign key then aborted the entire batch — the same failure this is
+				// meant to prevent, one level down.
+				if ancestor := refusedAncestor(table, row, rejected); ancestor != "" {
+					if rejected[table] == nil {
+						rejected[table] = map[string]bool{}
+					}
+					rejected[table][row.idOf()] = true
+					result.Results = append(result.Results, RowResult{
+						Table: table, ID: row.idOf(), Outcome: OutcomeRejected,
+						Reason: "parent_rejected:" + ancestor,
+					})
+					result.Rejected++
+					continue
+				}
+
 				// Nights belonging to a conflicted booking are skipped, not written: they
 				// are the rows that collided.
 				if table == TableReservationNights {
@@ -125,8 +160,63 @@ func (s *Store) Push(ctx context.Context, tenantID, clientID string, changes map
 					}
 				}
 
+				// Each row runs inside its own savepoint.
+				//
+				// A refused INSERT aborts the whole PostgreSQL transaction — every later
+				// statement fails with "current transaction is aborted" — so without a
+				// savepoint one bad row takes the entire push with it. That is exactly what
+				// happened when a free account exceeded its place allowance by one: the
+				// trigger refused the second place and the account could not sync ANYTHING,
+				// including bookings for the unit it was entitled to.
+				savepoint := fmt.Sprintf("sync_row_%s_%d", table, rowIndex)
+				if _, err := tx.Exec(ctx, "SAVEPOINT "+savepoint); err != nil {
+					return err
+				}
+
 				outcome, err := s.pushRow(ctx, tx, tenantID, clientID, table, row, conflicted, conflictDates)
 				if err != nil {
+					if _, rollbackErr := tx.Exec(ctx, "ROLLBACK TO SAVEPOINT "+savepoint); rollbackErr != nil {
+						return rollbackErr
+					}
+					// Left in deliberately: a refused row is the single most useful line for
+					// diagnosing a client's failed sync, and it names the row so an operator
+					// can find it.
+					slog.Warn("sync row refused", "table", table, "id", row.idOf(),
+						"reason", err.Error())
+					// A row refused by POLICY is that row's problem, not the batch's. It is
+					// reported as rejected and the rest are applied, which is the per-row
+					// contract the client already expects.
+					switch {
+					case isPermanentRejection(err):
+						if rejected[table] == nil {
+							rejected[table] = map[string]bool{}
+						}
+						rejected[table][row.idOf()] = true
+						result.Results = append(result.Results, RowResult{
+							Table: table, ID: row.idOf(), Outcome: OutcomeRejected,
+							Reason: planLimitReason(err),
+						})
+						result.Rejected++
+						continue
+					case isForeignKeyViolation(err):
+						// A dependency this batch did not carry at all: the parent lives on
+						// another device or has not been pushed yet. The row stays queued on
+						// the client and is retried once the parent arrives, which is far
+						// better than refusing the whole push.
+						if rejected[table] == nil {
+							rejected[table] = map[string]bool{}
+						}
+						rejected[table][row.idOf()] = true
+						result.Results = append(result.Results, RowResult{
+							Table: table, ID: row.idOf(), Outcome: OutcomeRejected,
+							Reason: "missing_parent", Retryable: true,
+						})
+						result.Rejected++
+						continue
+					}
+					return err
+				}
+				if _, err := tx.Exec(ctx, "RELEASE SAVEPOINT "+savepoint); err != nil {
 					return err
 				}
 				switch outcome.Outcome {
@@ -914,4 +1004,110 @@ func joinStrings(values []string, separator string) string {
 		out += separator + value
 	}
 	return out
+}
+
+// parentReference reports the table and column a row depends on.
+func parentReference(table SyncTable) (SyncTable, string) {
+	switch table {
+	case TableUnits:
+		return TablePlaces, "place_id"
+	case TableReservations:
+		return TableUnits, "unit_id"
+	case TableReservationNights, TableReservationServices, TableReservationMeals:
+		return TableReservations, "reservation_id"
+	default:
+		return "", ""
+	}
+}
+
+// refusedAncestor walks the whole dependency chain and reports the first table that refused
+// this row's ancestor, or "" when none did.
+func refusedAncestor(table SyncTable, row SyncRow, rejected map[SyncTable]map[string]bool) string {
+	seen := map[SyncTable]bool{}
+	for current := table; ; {
+		parent, column := parentReference(current)
+		if parent == "" || seen[parent] {
+			return ""
+		}
+		seen[parent] = true
+		id := asString(row[column])
+		if id == "" {
+			return ""
+		}
+		if rejected[parent][id] {
+			return string(parent)
+		}
+		// Walk on using the parent's id as the child id for the next level.
+		current = parent
+		row = SyncRow{"id": id}
+	}
+}
+
+// isPermanentRejection reports a refusal that will never succeed on retry.
+//
+// The distinction matters to the client: a permanently refused row must not block the pull
+// forever, or one over-allowance unit makes the account unable to sync ANYTHING for the rest
+// of its life. Rows that fail on a missing parent stay retryable instead, because their parent
+// may simply not have been pushed yet.
+func isPermanentRejection(err error) bool {
+	return isPlanLimitViolation(err) || isConstraintViolation(err)
+}
+
+// isConstraintViolation reports any other check_violation — a value the schema refuses.
+func isConstraintViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23514"
+	}
+	return strings.Contains(err.Error(), "SQLSTATE 23514")
+}
+
+// isForeignKeyViolation reports a missing parent, as opposed to a malformed row.
+func isForeignKeyViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23503"
+	}
+	return strings.Contains(err.Error(), "SQLSTATE 23503")
+}
+
+// planLimitCodes are the messages the entitlement triggers raise when a write would exceed
+// the account's allowance. They are check_violation, the same SQLSTATE as an ordinary CHECK,
+// so the message is what distinguishes them.
+var planLimitCodes = []string{
+	"dombook_plan_limit_units",
+	"dombook_plan_limit_places",
+}
+
+// isPlanLimitViolation reports whether an error came from an entitlement trigger.
+func isPlanLimitViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := err.Error()
+	for _, code := range planLimitCodes {
+		if strings.Contains(message, code) {
+			return true
+		}
+	}
+	return false
+}
+
+// planLimitReason turns a trigger message into something a person can act on.
+func planLimitReason(err error) string {
+	message := err.Error()
+	switch {
+	case strings.Contains(message, "dombook_plan_limit_units"):
+		return "unit_limit"
+	case strings.Contains(message, "dombook_plan_limit_places"):
+		return "place_limit"
+	default:
+		return "plan_limit"
+	}
 }

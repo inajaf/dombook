@@ -7,7 +7,7 @@
 // not be able to read or write the other's data, and an unsigned window must not reach either.
 
 import { createRequire } from "node:module";
-import { connect, wait, reporter } from "./e2e-lib.mjs";
+import {connect, freshStart, reporter, resetAuthState, wait} from "./e2e-lib.mjs";
 
 const API = process.env.DOMBOOK_E2E_URL || "http://127.0.0.1:8787";
 const { check, finish } = reporter("Security");
@@ -33,20 +33,6 @@ async function signIn(email) {
 }
 
 /**
- * Clear the auth tables so /auth/setup bootstraps again.
- *
- * Setup only works while no user exists, so a suite that creates accounts is not repeatable
- * without this: the second run gets 403 and reports it as an isolation failure. Only auth
- * state is cleared; the tenants themselves are recreated below.
- */
-function resetAuthState() {
-  const { execFileSync } = createRequire(import.meta.url)("node:child_process");
-  execFileSync("psql", ["-d", process.env.DOMBOOK_E2E_DB || "dombook_e2e", "-q", "-v", "ON_ERROR_STOP=1", "-c",
-    "TRUNCATE users, accounts, verification_codes, sessions RESTART IDENTITY CASCADE;"
-  ], { env: { ...process.env, PATH: `/opt/homebrew/opt/postgresql@16/bin:${process.env.PATH}` }, stdio: "pipe" });
-}
-
-/**
  * The first account bootstraps; the second joins by invitation.
  *
  * /auth/setup only works while no user exists, so creating a second business means inviting
@@ -68,7 +54,10 @@ async function signUpFirst(label) {
 // beta to alpha, which is the opposite of the isolation being tested. So the second account
 // is bootstrapped directly against the database, which is the only supported way to create a
 // second tenant while setup is closed.
-resetAuthState();
+//
+// The auth tables are cleared first so setup bootstraps; the desktop app is restarted at the
+// END, because the bridge checks below need a running app and this half does not touch it.
+await resetAuthState();
 const alpha = await signUpFirst("alpha");
 check(Boolean(alpha.token), "the first business bootstraps");
 
@@ -155,7 +144,8 @@ const badToken = await api("GET", "/units", { token: "not.a.real.token" });
 check(badToken.status === 401, "a malformed token is refused", `status=${badToken.status}`);
 
 // --- The desktop bridge while signed out ----------------------------------
-const app = await connect();
+// Started fresh here: the reset above removed the profile the previous app was using.
+const app = await freshStart(null);
 const bridge = await app.evaluate(`
   return {
     places: await window.domBook.places.list(),

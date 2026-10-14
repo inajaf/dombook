@@ -229,11 +229,19 @@ function registerIpc() {
       if (!syncEngine) return { ok: false, error: "Синхронизация не настроена" };
       return syncEngine.sync();
     });
-    handle("sync:status", async () => ({
-      pending: database?.pendingSyncCount?.() ?? 0,
-      lastResult: syncEngine?.lastResult?.() ?? null,
-      cursor: syncEngine?.readWatermark?.() ?? 0,
-    }));
+    handle("sync:status", async () => {
+      const pending = database?.pendingSyncCount?.() ?? 0;
+      // Entries the server refused for good. They stay queued so nothing is lost, but they
+      // will never drain, and a user watching "N unsynced" forever would reasonably think the
+      // app was broken. Reported separately so the UI can say what is actually wrong.
+      const stuck = database?.failedSyncCount?.() ?? 0;
+      return {
+        pending,
+        stuck,
+        lastResult: syncEngine?.lastResult?.() ?? null,
+        cursor: syncEngine?.readWatermark?.() ?? 0,
+      };
+    });
 
     handle("dashboard:get", () => database.dashboard());
     handle("calendar:get", (payload) => database.calendar(payload?.days ?? 14));
