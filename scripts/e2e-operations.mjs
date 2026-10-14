@@ -147,24 +147,67 @@ check(released === 0, "the nights after an early departure are released", `still
 //
 // Its own unit. The suite already booked +2..+5 and checked out early at +3 on the first
 // unit; reusing it meant a repeated run collided with its own previous booking.
+//
+// Nothing in this app refuses a unit by itself: there is NO client-side entitlement cap
+// (the server owns enforcement, so a licensed user offline is never locked out). An earlier
+// version of this block therefore created a unit and never checked the result, then passed
+// `unit.data?.id` into the booking below. When the create failed for any reason the booking
+// failed with "propertyId is required", and FOUR consecutive checks went red — reading like
+// six product bugs while the real error had been discarded one line earlier.
 const cancelUnit = await app.evaluate(`
   const stamp = Date.now();
   const place = (await window.domBook.places.list()).data.find((p) => p.name.startsWith('Опер-'));
   const unit = await window.domBook.properties.create({ placeId: place.id, name: 'Отмена-' + stamp, capacity: 4,
     basePriceMinor: 10000, monthlyRateMinor: 0, depositMinor: 0, currency: 'AZN', kind: 'house', status: 'active' });
   await refreshCore();
-  return unit.data?.id;
+  const allowance = (await window.domBook.entitlements.get()).data?.allowance;
+  const names = (await window.domBook.properties.list()).data.map((p) => p.name);
+  return { id: unit.data?.id ?? null, error: unit.error ?? null, placeId: place?.id ?? null,
+    allowance, activeNames: names.filter((n) => n === 'Отмена-' + stamp).length };
 `);
+check(Boolean(cancelUnit.id), "a unit exists to cancel against",
+  `err=${cancelUnit.error ?? "none"} allowance=${JSON.stringify(cancelUnit.allowance)}
+   place=${cancelUnit.placeId} matchingRows=${cancelUnit.activeNames}`);
+
+// The booking window comes from live occupancy, not from a fixed offset. Every other block in
+// this file was moved off fixed offsets after a leftover row made a correct booking look
+// broken; this block was the last one still using "+10..+12", which is also the only way it
+// could be refused on dates while the unit itself was fine.
+const cancelWindow = await app.evaluate(`
+  const today = (await window.domBook.system.info()).data.bookingPolicy.today;
+  const add = (iso, n) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+  const occupancy = (await window.domBook.calendar.get(60)).data?.occupancy || [];
+  for (let offset = 1; offset <= 18; offset += 1) {
+    const from = add(today, offset), to = add(today, offset + 2);
+    const taken = occupancy.some((o) => o.property_id === ${JSON.stringify(cancelUnit.id)}
+      && o.night_date >= from && o.night_date < to);
+    if (!taken) return { from, to, offset };
+  }
+  return { from: add(today, 1), to: add(today, 3), offset: 1 };
+`);
+
 const toCancel = await app.evaluate(`
-  const b = await window.domBook.reservations.create({ propertyId: ${JSON.stringify(cancelUnit)},
-    guestName: 'Отменяемый', checkInDate: ${JSON.stringify(addDays(base.today, 10))},
-    checkOutDate: ${JSON.stringify(addDays(base.today, 12))}, status: 'confirmed',
+  const b = await window.domBook.reservations.create({ propertyId: ${JSON.stringify(cancelUnit.id)},
+    guestName: 'Отменяемый', checkInDate: ${JSON.stringify(cancelWindow.from)},
+    checkOutDate: ${JSON.stringify(cancelWindow.to)}, status: 'confirmed',
     prepaidMinor: 0, depositMinor: 0, depositStatus: 'none', adults: 1, children: 0 });
   await refreshCore();
-  return b;
+  if (b.ok) return b;
+  // The snapshot is printed only when the booking was refused. It answers the two questions
+  // that a bare "propertyId is required" cannot: was the unit actually there, and did the
+  // client believe it was allowed to have it?
+  const info = (await window.domBook.system.info()).data;
+  const allowance = (await window.domBook.entitlements.get()).data?.allowance;
+  const listed = (await window.domBook.properties.list()).data.map((p) => p.id);
+  const occupancy = (await window.domBook.calendar.get(60)).data?.occupancy || [];
+  return { ...b, snapshot: { today: info.bookingPolicy.today, window: info.bookingPolicy,
+    allowance, unitIsListed: listed.includes(${JSON.stringify(cancelUnit.id)}), listedCount: listed.length,
+    daysOccupied: occupancy.filter((o) => o.property_id === ${JSON.stringify(cancelUnit.id)}).length } };
 `);
-check(toCancel.ok === true, "a second booking exists", `error=${toCancel.error ?? "none"}`);
-check(await nightsOn(cancelUnit, addDays(base.today, 10), addDays(base.today, 12)) === 2,
+check(toCancel.ok === true, "a second booking exists",
+  `error=${toCancel.error ?? "none"} window=${cancelWindow.from}..${cancelWindow.to} (offset ${cancelWindow.offset})`
+  + (toCancel.snapshot ? ` snapshot=${JSON.stringify(toCancel.snapshot)}` : ""));
+check(await nightsOn(cancelUnit.id, cancelWindow.from, cancelWindow.to) === 2,
   "its nights are occupied before cancelling");
 
 const cancelled = await app.evaluate(`
@@ -173,18 +216,19 @@ const cancelled = await app.evaluate(`
   return r;
 `);
 check(cancelled.ok === true, "the booking can be cancelled", `err=${cancelled.error ?? "none"}`);
-const afterCancel = await nightsOn(cancelUnit, addDays(base.today, 10), addDays(base.today, 12));
+const afterCancel = await nightsOn(cancelUnit.id, cancelWindow.from, cancelWindow.to);
 // A cancelled booking must not keep holding inventory; that is the whole point of cancelling.
 check(afterCancel === 0, "cancelling releases the nights", `still occupied=${afterCancel}`);
 const rebookable = await app.evaluate(`
-  const b = await window.domBook.reservations.create({ propertyId: ${JSON.stringify(cancelUnit)},
-    guestName: 'Встал на освободившееся', checkInDate: ${JSON.stringify(addDays(base.today, 10))},
-    checkOutDate: ${JSON.stringify(addDays(base.today, 12))}, status: 'confirmed',
+  const b = await window.domBook.reservations.create({ propertyId: ${JSON.stringify(cancelUnit.id)},
+    guestName: 'Встал на освободившееся', checkInDate: ${JSON.stringify(cancelWindow.from)},
+    checkOutDate: ${JSON.stringify(cancelWindow.to)}, status: 'confirmed',
     prepaidMinor: 0, depositMinor: 0, depositStatus: 'none', adults: 1, children: 0 });
   await refreshCore();
   return b;
 `);
-check(rebookable.ok === true, "the freed dates can be sold again", `err=${rebookable.error}`);
+check(rebookable.ok === true, "the freed dates can be sold again",
+  `err=${rebookable.error ?? "none"} dates=${cancelWindow.from}..${cancelWindow.to} unit=${cancelUnit.id}`);
 
 // --- Deleting a booking ---------------------------------------------------
 // Deleting is a two-step decision in this app: an active booking must be cancelled first,

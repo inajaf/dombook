@@ -7,7 +7,14 @@
 # tables themselves, so they are repeatable without a restart; the stack is brought up fresh
 # once, because /auth/setup only bootstraps while no user exists.
 set -uo pipefail
-ROOT="/Users/eldar/Projects/Book program"
+
+# Resolve the repository root from this script's own location rather than an absolute path,
+# so the suites run from any clone (or CI checkout).
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [ ! -f "${ROOT}/package.json" ]; then
+  echo "cannot locate the repository root (looked in ${ROOT})" >&2
+  exit 1
+fi
 cd "$ROOT"
 
 bash scripts/e2e-stack.sh up || exit 1

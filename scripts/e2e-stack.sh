@@ -12,7 +12,15 @@
 set -euo pipefail
 
 export PATH="/opt/homebrew/opt/postgresql@16/bin:$PATH"
-ROOT="/Users/eldar/Projects/Book program"
+
+# Resolve the repository root from this script's own location, so the stack can be brought up
+# from any clone (or CI checkout) instead of only the machine it was written on.
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [ ! -f "${ROOT}/package.json" ]; then
+  echo "cannot locate the repository root (looked in ${ROOT})" >&2
+  exit 1
+fi
+
 DB="${DOMBOOK_E2E_DB:-dombook_e2e}"
 PORT="${DOMBOOK_E2E_PORT:-8787}"
 CDP_PORT="${CDP_PORT:-9555}"
@@ -50,10 +58,12 @@ start_api() {
   echo "API did not start; see /tmp/e2e-api.log" >&2; tail -5 /tmp/e2e-api.log >&2; return 1
 }
 start_app() {
-  cd "$ROOT"
   rm -rf "$HOME/Library/Application Support/rentkeeper-desktop"
+  # The app path is passed EXPLICITLY. Electron resolves "." against the working directory,
+  # not against a project path, so launching from elsewhere silently starts whatever package
+  # happens to sit in the cwd — and the app then never exposes CDP on the expected port.
   env -u ELECTRON_RUN_AS_NODE DOMBOOK_API_URL="http://127.0.0.1:${PORT}" \
-    ./node_modules/electron/dist/Electron.app/Contents/MacOS/Electron . \
+    "${ROOT}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron" "$ROOT" \
     --remote-debugging-port="${CDP_PORT}" > /tmp/e2e-app.log 2>&1 &
   for _ in $(seq 1 30); do
     curl -sf "http://127.0.0.1:${CDP_PORT}/json/list" >/dev/null 2>&1 && { sleep 2; return 0; }
@@ -68,9 +78,15 @@ case "${1:-up}" in
     dropdb --if-exists "$DB" 2>/dev/null || true
     createdb "$DB"
     cd "$ROOT/server"
-    DOMBOOK_DSN="postgres://eldar@127.0.0.1:5432/${DB}?sslmode=disable" go run ./cmd/migrate up >/dev/null
-    psql -d "$DB" -q -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='dombook_app') THEN CREATE ROLE dombook_app LOGIN NOBYPASSRLS; END IF; END \$\$;"
-    psql -d "$DB" -q -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='dombook_admin') THEN CREATE ROLE dombook_admin LOGIN BYPASSRLS; END IF; END \$\$;"
+    # The migrations are applied as the local OS user, who owns the database and therefore
+    # owns the objects they create. Keep one migration role per database: 0003's
+    # ALTER DEFAULT PRIVILEGES binds to that role, and a different one would silently stop
+    # granting the app role access to new tables.
+    DOMBOOK_DSN="postgres://$(whoami)@127.0.0.1:5432/${DB}?sslmode=disable" go run ./cmd/migrate up >/dev/null
+    # Both roles already exist at this point: 0003_roles.sql creates them with their correct
+    # attributes (NOBYPASSRLS for the app, BYPASSRLS for admin). Only the passwords are local
+    # to this script — a migration deliberately never sets one, so no default credential can
+    # ship to production. These DSNs are the ones start_api connects with above.
     psql -d "$DB" -q -c "ALTER ROLE dombook_app WITH PASSWORD 'app'; ALTER ROLE dombook_admin WITH PASSWORD 'adminpw';"
     start_api
     start_app
