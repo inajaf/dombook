@@ -85,15 +85,15 @@ type Config struct {
 // NewFromEnv builds a Config from environment variables.
 func NewFromEnv() (*Config, error) {
 	cfg := &Config{
-		Address:           envOr("DOMBOOK_ADDR", ":8787"),
-		DatabaseDSN:       os.Getenv("DOMBOOK_DSN"),
-		AdminDatabaseDSN:  os.Getenv("DOMBOOK_ADMIN_DSN"),
-		SkipMigrations:    os.Getenv("DOMBOOK_SKIP_MIGRATE") == "1",
+		Address:           envOr("RENTKEEPER_ADDR", envOr("DOMBOOK_ADDR", ":8787")),
+		DatabaseDSN:       envFallback("RENTKEEPER_DSN", "DOMBOOK_DSN"),
+		AdminDatabaseDSN:  envFallback("RENTKEEPER_ADMIN_DSN", "DOMBOOK_ADMIN_DSN"),
+		SkipMigrations:    envBool("RENTKEEPER_SKIP_MIGRATE", envBool("DOMBOOK_SKIP_MIGRATE", false)),
 		JWTSecret:         os.Getenv("JWT_SECRET"),
 		SetupToken:        os.Getenv("SETUP_TOKEN"),
 		AdminAPIKey:       os.Getenv("ADMIN_API_KEY"),
 		AppName:           envOr("APP_NAME", "RentKeeper"),
-		AuthExposeCode:    envBool("AUTH_EXPOSE_CODE", false),
+		AuthExposeCode:    envBool("RENTKEEPER_EXPOSE_CODE", envBool("AUTH_EXPOSE_CODE", false)),
 		AccessTokenTTL:    time.Duration(envInt("AUTH_ACCESS_TTL_SECONDS", 900)) * time.Second,
 		RefreshTokenTTL:   time.Duration(envInt("AUTH_REFRESH_TTL_SECONDS", 30*24*3600)) * time.Second,
 		OTPTTL:            time.Duration(envInt("AUTH_OTP_TTL_SECONDS", 600)) * time.Second,
@@ -108,6 +108,22 @@ func NewFromEnv() (*Config, error) {
 		return nil, err
 	}
 	return cfg, nil
+}
+
+// envFallback reads the current variable name, falling back to the name the product used
+// before it was renamed from DomBook.
+//
+// The fallback exists because these are DEPLOYMENT inputs: an existing installation has the
+// old names in its systemd unit, its compose file or its secret store, and a rename that
+// silently stopped honouring them would leave a server without a DSN — or, worse for
+// AUTH_EXPOSE_CODE, quietly revert to a default instead of the operator's explicit choice.
+// Nothing on a user's disk is named after these variables, so unlike the userData directory
+// and the SQLite filename (see AGENTS.md) they CAN be renamed; they just must not break anyone.
+func envFallback(current, legacy string) string {
+	if value := strings.TrimSpace(os.Getenv(current)); value != "" {
+		return value
+	}
+	return strings.TrimSpace(os.Getenv(legacy))
 }
 
 // Validate reports missing or nonsensical settings. It is called at startup and
@@ -155,7 +171,7 @@ func (c *Config) Validate() error {
 	// for local development and for a self-hosted install with no mail provider,
 	// but it makes the login endpoint equivalent to "log in as anyone". Surfacing
 	// it at startup is the difference between a deliberate choice and an accident.
-	if c.AuthExposeCode && os.Getenv("DOMBOOK_ENV") == "production" {
+	if c.AuthExposeCode && envFallback("RENTKEEPER_ENV", "DOMBOOK_ENV") == "production" {
 		return errors.New("AUTH_EXPOSE_CODE must be off in production: it returns login codes to the caller")
 	}
 	return nil

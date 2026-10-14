@@ -1,4 +1,4 @@
-// Package domain holds DomBook's business rules: booking windows, stay
+// Package domain holds RentKeeper's business rules: booking windows, stay
 // pricing, and plan quotas. It imports no database and no HTTP, so the same
 // rules can be exercised directly by tests and reused by any transport.
 //

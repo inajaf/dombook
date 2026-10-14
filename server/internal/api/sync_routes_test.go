@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 // Sync endpoint tests. These cover the wire contract rather than the merge logic, which
@@ -12,11 +13,24 @@ import (
 // but these two endpoints.
 
 // syncSetup returns a domain server, a token, and a unit to book against.
+//
+// The sleep is load-bearing, not padding. The server decides which of two copies of a row
+// wins by comparing the incoming push's server-side timestamp against the stored
+// `updated_at`, and treats "not strictly newer" as a STALE outcome the client must adopt.
+// This setup creates the unit and the test immediately pushes a modification of it, so under
+// load both can land inside the SAME microsecond — PostgreSQL stores timestamptz at
+// microsecond precision, so the later write is then not strictly newer and the push is
+// rejected as stale. The symptom is three sync tests failing together and passing on rerun;
+// it was first seen when the whole suite ran with -race.
+//
+// A millisecond is three orders of magnitude larger than the clock's precision, so it costs
+// nothing measurable and removes the race rather than the assertion.
 func syncSetup(t *testing.T) (*httptest.Server, string, string) {
 	t.Helper()
 	server, token := newDomainServer(t)
 	placeID := createPlaceForTest(t, server, token, "Синхронизация")
 	unitID := createUnitForTest(t, server, token, placeID, "Коттедж")
+	time.Sleep(time.Millisecond)
 	return server, token, unitID
 }
 
