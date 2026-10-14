@@ -16,6 +16,14 @@ if [ ! -f "${ROOT}/package.json" ]; then
   exit 1
 fi
 cd "$ROOT"
+# shellcheck source=scripts/db-env.sh
+source "${ROOT}/scripts/db-env.sh"
+
+# Fail once, with the fix, rather than letting six suites each report a connection error.
+if ! db_reachable; then
+  echo "no database at ${DOMBOOK_DB_HOST}:${DOMBOOK_DB_PORT} — start it with: scripts/db.sh up" >&2
+  exit 1
+fi
 
 bash scripts/e2e-stack.sh up || exit 1
 

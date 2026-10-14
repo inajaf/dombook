@@ -20,10 +20,18 @@ if [ ! -f "${ROOT}/package.json" ]; then
   echo "cannot locate the repository root (looked in ${ROOT})" >&2
   exit 1
 fi
+# shellcheck source=scripts/db-env.sh
+source "${ROOT}/scripts/db-env.sh"
 
-DB="${DOMBOOK_E2E_DB:-dombook_e2e}"
+DB="$DOMBOOK_E2E_DB"
 PORT="${DOMBOOK_E2E_PORT:-8787}"
 CDP_PORT="${CDP_PORT:-9555}"
+
+# Its own database, so a run cannot destroy development data, but on the SAME server the rest
+# of the project uses. A separate instance here is how the suites drift onto a schema the
+# server does not have.
+PSQL=(psql -h "$DOMBOOK_DB_HOST" -p "$DOMBOOK_DB_PORT" -U "$DOMBOOK_DB_ADMIN_USER")
+export PGPASSWORD="$DOMBOOK_DB_ADMIN_PASSWORD"
 
 stop_app() {
   # Match the binary path, not "MacOS/Electron ." — the main process is launched as
@@ -44,9 +52,9 @@ stop_api() { pkill -f "/tmp/dombook-api" 2>/dev/null || true; sleep 1; }
 start_api() {
   cd "$ROOT/server"
   go build -o /tmp/dombook-api ./cmd/api
-  DOMBOOK_DSN="postgres://dombook_app:app@127.0.0.1:5432/${DB}?sslmode=disable" \
+  DOMBOOK_DSN="$(app_role_dsn "$DB")" \
   DOMBOOK_SKIP_MIGRATE=1 \
-  DOMBOOK_ADMIN_DSN="postgres://dombook_admin:adminpw@127.0.0.1:5432/${DB}?sslmode=disable" \
+  DOMBOOK_ADMIN_DSN="postgres://dombook_admin:${DOMBOOK_ADMIN_PASSWORD}@${DOMBOOK_DB_HOST}:${DOMBOOK_DB_PORT}/${DB}?sslmode=disable" \
   ADMIN_API_KEY="e2e-admin-key-long-enough-value" \
   JWT_SECRET="e2e-run-secret-value-16chars" \
   DOMBOOK_ADDR="127.0.0.1:${PORT}" AUTH_EXPOSE_CODE=true \
@@ -75,25 +83,34 @@ start_app() {
 case "${1:-up}" in
   up)
     stop_app; stop_api
-    dropdb --if-exists "$DB" 2>/dev/null || true
-    createdb "$DB"
+    # Fail with instructions rather than letting a dozen suites report connection errors.
+    if ! db_reachable; then
+      echo "no database at ${DOMBOOK_DB_HOST}:${DOMBOOK_DB_PORT} — run: scripts/db.sh up" >&2
+      exit 1
+    fi
+    "${PSQL[@]}" -d "$DOMBOOK_DEV_DB" -q -c "DROP DATABASE IF EXISTS \"${DB}\"" 2>/dev/null || true
+    "${PSQL[@]}" -d "$DOMBOOK_DEV_DB" -q -c "CREATE DATABASE \"${DB}\""
     cd "$ROOT/server"
-    # The migrations are applied as the local OS user, who owns the database and therefore
-    # owns the objects they create. Keep one migration role per database: 0003's
-    # ALTER DEFAULT PRIVILEGES binds to that role, and a different one would silently stop
-    # granting the app role access to new tables.
-    DOMBOOK_DSN="postgres://$(whoami)@127.0.0.1:5432/${DB}?sslmode=disable" go run ./cmd/migrate up >/dev/null
+    # Migrations run as the database owner, which is the role that owns the objects they
+    # create. Keep ONE migration role per database: 0003's ALTER DEFAULT PRIVILEGES binds to
+    # that role, and a different one would silently stop granting the app role access to
+    # tables added later.
+    DOMBOOK_DSN="$(db_owner_dsn "$DB")" go run ./cmd/migrate up >/dev/null
     # Both roles already exist at this point: 0003_roles.sql creates them with their correct
     # attributes (NOBYPASSRLS for the app, BYPASSRLS for admin). Only the passwords are local
     # to this script — a migration deliberately never sets one, so no default credential can
-    # ship to production. These DSNs are the ones start_api connects with above.
-    psql -d "$DB" -q -c "ALTER ROLE dombook_app WITH PASSWORD 'app'; ALTER ROLE dombook_admin WITH PASSWORD 'adminpw';"
+    # ship to production. These are the credentials start_api connects with above.
+    "${PSQL[@]}" -d "$DB" -q -c "ALTER ROLE dombook_app WITH PASSWORD '${DOMBOOK_APP_PASSWORD}'; ALTER ROLE dombook_admin WITH PASSWORD '${DOMBOOK_ADMIN_PASSWORD}';"
     start_api
     start_app
-    echo "stack up: api http://127.0.0.1:${PORT}  cdp ${CDP_PORT}  db ${DB}"
+    echo "stack up: api http://127.0.0.1:${PORT}  cdp ${CDP_PORT}  db ${DB} at ${DOMBOOK_DB_HOST}:${DOMBOOK_DB_PORT}"
     ;;
   api) stop_api; start_api; echo "api restarted" ;;
   app) stop_app; start_app; echo "app restarted" ;;
-  down) stop_app; stop_api; dropdb --if-exists "$DB" 2>/dev/null || true; echo "stack down" ;;
+  down)
+    stop_app; stop_api
+    "${PSQL[@]}" -d "$DOMBOOK_DEV_DB" -q -c "DROP DATABASE IF EXISTS \"${DB}\"" 2>/dev/null || true
+    echo "stack down"
+    ;;
   *) echo "usage: $0 {up|api|app|down}" >&2; exit 2 ;;
 esac

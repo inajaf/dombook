@@ -4,8 +4,11 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
+	"time"
 
+	"github.com/inajaf/dombook/server/internal/billing"
 	"github.com/inajaf/dombook/server/internal/domain"
 	"github.com/inajaf/dombook/server/internal/store"
 )
@@ -134,6 +137,77 @@ func TestLicenceLiftsTheUnitCap(t *testing.T) {
 			t.Errorf("units.limit = %v, want 0 (the unlimited sentinel)", usage["limit"])
 		}
 	})
+}
+
+// TestEveryPaidSKULiftsTheCapInTheDatabase is the guard on the one failure mode that a
+// catalog-only change cannot catch.
+//
+// account_is_paid() gates the free-tier quota trigger with its own hard-coded SKU allowlist,
+// in SQL. A SKU added to the catalog without being added there produces the worst shape of
+// bug: the service accepts the paying customer, and the database refuses their write. It
+// would not show up in internal/billing, whose tests are pure and never touch SQL.
+//
+// This iterates the catalog rather than naming SKUs, so the NEXT licence term added is
+// covered automatically — the three-month term is simply the first to need it. It exercises
+// the trigger directly, which is the authority: the same insert is refused before the grant
+// and accepted after it, and that transition is what proves the SKU is in the allowlist.
+func TestEveryPaidSKULiftsTheCapInTheDatabase(t *testing.T) {
+	_, database := newDomainServerWithDatabase(t)
+	ctx := context.Background()
+
+	paidSKUs := 0
+	for _, definition := range billing.Sellable() {
+		if !slices.Contains(definition.Grants, billing.FeaturePaidTier) {
+			continue // an add-on such as WhatsApp does not lift the unit cap
+		}
+		paidSKUs++
+
+		t.Run(string(definition.SKU), func(t *testing.T) {
+			account, place := newTenantAndPlace(t, database, string(definition.SKU))
+
+			newUnit := func(name string) error {
+				status := "active"
+				_, err := database.CreateUnit(ctx, account.ID, &domain.UnitInput{
+					PlaceID: &place, Kind: "cottage", Name: name, Capacity: 4,
+					BasePriceMinor: 20000, Currency: "AZN", Status: status,
+					CheckInTime: "15:00", CheckOutTime: "11:00",
+				}, "test")
+				return err
+			}
+
+			if err := newUnit("Первый"); err != nil {
+				t.Fatalf("the first unit should be allowed on the free tier: %v", err)
+			}
+			// Without a licence the second activation is refused, so the account really is
+			// on the free tier and the grant below is what changes its mind.
+			if err := newUnit("Второй"); err == nil {
+				t.Fatal("the trigger allowed a second unit before any licence was granted")
+			}
+
+			// ExpiryFor is the same call the grant path uses, so a term-based SKU is granted
+			// with the expiry it would really have.
+			if _, err := database.GrantEntitlement(ctx, account.ID,
+				string(definition.SKU), string(definition.Source), "test-"+account.ID,
+				definition.ExpiryFor(time.Now()), nil); err != nil {
+				t.Fatalf("GrantEntitlement(%s): %v", definition.SKU, err)
+			}
+			// A term licence opens the tier while the term runs, so the expiry must not be
+			// the reason this passes: accept only a future one.
+			if expiry := definition.ExpiryFor(time.Now()); expiry != nil && !expiry.After(time.Now()) {
+				t.Fatalf("%s computed an expiry in the past: %v", definition.SKU, expiry)
+			}
+
+			if err := newUnit("Второй"); err != nil {
+				t.Fatalf("%s lifted no cap, so the database does not accept it as paid: %v\n"+
+					"Add the SKU to the account_is_paid() allowlist — see "+
+					"migrations/20260811000009_quarterly_licence.sql", definition.SKU, err)
+			}
+		})
+	}
+
+	if paidSKUs == 0 {
+		t.Fatal("no sellable SKU grants the paid tier, so this test proved nothing")
+	}
 }
 
 // TestDatabaseTriggerFollowsTheLicence checks the race-safety backstop agrees with the

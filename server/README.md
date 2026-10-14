@@ -15,20 +15,41 @@ legacy implementation, which has been removed (see `CUTOVER.md`)
 
 ## Local setup
 
-Start PostgreSQL, then create the databases:
+**PostgreSQL runs in Docker.** One command creates it and both databases:
 
 ```bash
-createdb dombook_dev
-createdb dombook_test
+scripts/db.sh up          # from the repository root
+```
+
+That starts the `postgres` service from `docker-compose.yml` and creates `dombook_dev` and
+`dombook_test`. It is one command rather than a documented sequence because the sequence is
+what goes stale — the server needs the first database and the Go integration tests need the
+second, and a container made from the compose file alone only has the first. Before this
+script existed, each of those facts was written down separately in this file, in the root
+`AGENTS.md` and in `scripts/e2e-stack.sh`, and they disagreed.
+
+The container publishes **55432**, not 5432, because a Homebrew PostgreSQL is often already
+bound to 5432; a collision there either refuses to start or silently talks to the wrong
+server. Host and port are therefore read from the environment rather than assumed —
+`scripts/db-env.sh` is the single place that decides them, shared by `db.sh`, `e2e-stack.sh`,
+`check-all.sh` and the e2e suites. To use a native PostgreSQL instead:
+
+```bash
+export DOMBOOK_DB_HOST=127.0.0.1 DOMBOOK_DB_PORT=5432 DOMBOOK_DB_USER="$(whoami)" DOMBOOK_DB_PASSWORD=
 ```
 
 Apply migrations (from `server/`):
 
 ```bash
-export DOMBOOK_DSN="postgres://$(whoami)@127.0.0.1:5432/dombook_dev?sslmode=disable"
+export DOMBOOK_DSN="postgres://dombook:dombook@127.0.0.1:55432/dombook_dev?sslmode=disable"
 go run ./cmd/migrate up       # apply everything pending, then print status
 go run ./cmd/migrate status   # list migrations and whether they are applied
 ```
+
+Migrations must run as the **database owner** (`dombook` in the container), which is the role
+that owns the objects they create: migration 0003's `ALTER DEFAULT PRIVILEGES` binds to that
+role, so running them as a different one silently stops granting the application role access
+to tables added later.
 
 `migrate reset` reverts every migration and requires `DOMBOOK_ALLOW_RESET=1`, so
 dropping the schema cannot happen by accident.
@@ -179,8 +200,16 @@ it connects as `dombook_app` and cannot create objects.
 ## Tests
 
 ```bash
-export DOMBOOK_TEST_DSN="postgres://$(whoami)@127.0.0.1:5432/dombook_test?sslmode=disable"
+scripts/db.sh up                                   # from the repository root, once
+export DOMBOOK_TEST_DSN="postgres://dombook:dombook@127.0.0.1:55432/dombook_test?sslmode=disable"
 go test -p 1 ./...
+```
+
+Or run everything the project checks, in one command from the repository root:
+
+```bash
+scripts/check-all.sh          # unit suites and the server
+scripts/check-all.sh --e2e    # ... plus the end-to-end suites
 ```
 
 **`-p 1` is required, not optional.** Integration tests share one database, and

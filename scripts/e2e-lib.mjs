@@ -10,6 +10,35 @@ import { createRequire } from "node:module";
 
 const PORT = process.env.CDP_PORT || "9555";
 
+/**
+ * The database the suites check against, and the psql invocation that reaches it.
+ *
+ * Host and port come from the environment rather than defaulting to a local socket, because
+ * the development database lives in Docker on a non-default port (scripts/db-env.sh). A suite
+ * that silently read a DIFFERENT database than the server writes to would report every
+ * assertion as a product bug.
+ */
+export const e2eDb = process.env.DOMBOOK_E2E_DB || "dombook_e2e";
+
+export function psqlArgs(extra = []) {
+  return [
+    "-h", process.env.DOMBOOK_DB_HOST || "127.0.0.1",
+    "-p", process.env.DOMBOOK_DB_PORT || "55432",
+    "-U", process.env.DOMBOOK_DB_ADMIN_USER || "dombook",
+    "-d", e2eDb,
+    ...extra,
+  ];
+}
+
+/** Environment for a psql call: PATH for Homebrew's psql, PGPASSWORD for the password. */
+export function psqlEnv() {
+  return {
+    ...process.env,
+    PATH: `/opt/homebrew/opt/postgresql@16/bin:${process.env.PATH}`,
+    PGPASSWORD: process.env.DOMBOOK_DB_ADMIN_PASSWORD || "dombook",
+  };
+}
+
 /** Attach to the running app's renderer. */
 export async function connect() {
   const list = await fetch(`http://127.0.0.1:${PORT}/json/list`).then((r) => r.json());
@@ -98,24 +127,24 @@ export const wait = (ms) => new Promise((r) => setTimeout(r, ms));
  */
 export async function resetAuthState({ app = null } = {}) {
   const { execFileSync } = createRequire(import.meta.url)("node:child_process");
-  const env = { ...process.env, PATH: `/opt/homebrew/opt/postgresql@16/bin:${process.env.PATH}` };
+  const env = psqlEnv();
   // TRUNCATE ... CASCADE reaches the tenant tables through their account foreign key, so the
   // previous run's bookings, units and places go too. That matters: truncating ONLY the auth
   // tables leaves the old tenant data on the server, the fresh client pulls it back down, and
   // its rows then collide with the new run's — a booking refused as "already occupied" by a
   // row the suite never created in this run.
-  execFileSync("psql", ["-d", process.env.DOMBOOK_E2E_DB || "dombook_e2e", "-q", "-v", "ON_ERROR_STOP=1", "-c",
+  execFileSync("psql", psqlArgs(["-q", "-v", "ON_ERROR_STOP=1", "-c",
     "TRUNCATE users, accounts, verification_codes, sessions, invites, devices RESTART IDENTITY CASCADE;",
-  ], { env, stdio: "pipe" });
+  ]), { env, stdio: "pipe" });
 
   // The parent tables are truncated explicitly as well as by cascade. Belt and braces: if a
   // future migration removes the cascade path, the suite would silently start reusing the
   // previous run's bookings — which surfaces as "already occupied" for a row this run never
   // created, i.e. exactly like a product bug.
   try {
-    execFileSync("psql", ["-d", process.env.DOMBOOK_E2E_DB || "dombook_e2e", "-q", "-v", "ON_ERROR_STOP=1", "-c",
+    execFileSync("psql", psqlArgs(["-q", "-v", "ON_ERROR_STOP=1", "-c",
       "TRUNCATE reservation_nights, reservation_services, reservation_meals, reservations, units, places, app_settings, audit_log, tenant_state RESTART IDENTITY CASCADE;",
-    ], { env, stdio: "pipe" });
+    ]), { env, stdio: "pipe" });
   } catch (error) {
     // Loud on purpose: a silent failure here leaves the previous run's data on the server,
     // the fresh client pulls it back, and later assertions report it as a product bug.

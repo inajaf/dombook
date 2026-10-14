@@ -26,11 +26,12 @@ npm run test:smoke           # desktop smoke test against a temp profile
 env -u ELECTRON_RUN_AS_NODE npm start   # the app; unset that var first, see "Running locally"
 bash scripts/e2e-all.sh      # brings up the stack, then drives the real app over CDP
 
-cd server
-go build ./... && go vet ./...
-DOMBOOK_TEST_DSN="postgres://$(whoami)@127.0.0.1:5432/dombook_test?sslmode=disable" \
-  go test -p 1 -race ./...   # -p 1 is required; see server/README.md
+scripts/db.sh up             # the database, in Docker, with both databases created
+scripts/check-all.sh         # every check: unit suites + build/vet/test/gofmt
+scripts/check-all.sh --e2e   # ... plus the end-to-end suites
 ```
+
+`npm run check` / `npm run check:e2e` / `npm run db:up` are the same commands.
 
 There is **no linter or formatter configured** for the JavaScript (`gofmt` covers the Go). Match the
 surrounding style by hand rather than introducing a toolchain.
@@ -73,14 +74,26 @@ Desktop domain tables (places, properties, reservations, reservation_nights, res
 
 ## Licences & entitlements (Go server)
 
-The product is a **one-time purchase**, not a subscription. The rules live in
-`server/internal/billing/catalog.go` — a SKU's name, duration, and what it unlocks. `accounts.plan`
+The paid tier is sold as a **three-month term** (`app_quarterly`, 90 days). It used to be a
+one-time perpetual purchase; that SKU is withdrawn from sale but every grant already issued
+stays valid **forever**, so `app_perpetual` must remain in the catalog and in the SQL allowlist
+even though nothing sells it. The rules live in `server/internal/billing/catalog.go` — a SKU's
+name, duration, what it unlocks, and whether it is still `Sellable`. `accounts.plan`
 is a **legacy subscription column and no longer decides anything**; both the service check and the
 database trigger read `account_entitlements` via `account_is_paid()`. Reading the plan column
 anywhere would let a customer who paid once fall back to the free cap.
 
-- Perpetual is `expires_at IS NULL`, not a far-future date. A dated grant (annual, trial) differs
-  only by having an expiry, so both models fit one table.
+- **A SKU lives in TWO places, and they must agree.** `Catalog` in Go, and the hard-coded
+  `e.sku IN (...)` allowlist inside `account_is_paid()` in SQL. Adding one to the catalog only
+  means the service accepts the customer and the database trigger then refuses their write —
+  the worst shape of bug, because it arrives at the moment of a write rather than a purchase.
+  `TestEveryPaidSKULiftsTheCapInTheDatabase` iterates the catalog, grants each paid SKU and
+  performs a real second-unit insert, so the next term added is covered without anyone
+  remembering this. Adding a SKU means adding a migration; 0009 is the quarterly one.
+- **Retire, never delete.** `Evaluate` ignores a SKU it cannot look up, so removing a catalog
+  entry silently demotes paying customers to the free tier. `Sellable: false` is how a SKU
+  leaves the shop; deleting the entry is how you revoke licences by accident.
+- Perpetual is `expires_at IS NULL`, not a far-future date.
 - A grant is never edited in place: refunds/revocations set `revoked_at`, so the history survives a
   payment dispute. `grant_entitlement` is idempotent on `(account, sku, reference)` because payment
   webhooks are retried on any non-2xx.
@@ -351,11 +364,71 @@ reintroduce a way for the two modes to disagree.
 
 ## Running locally
 
-- Server (Go + PostgreSQL, the target): see `server/README.md`. `createdb dombook_dev`, then `DOMBOOK_DSN=... go run ./cmd/migrate up`. Tests need `DOMBOOK_TEST_DSN`, otherwise the PostgreSQL integration tests skip instead of failing.
-- **Run the Go tests as `go test -p 1 ./...`.** Integration tests share one test database, so parallel package processes fight over the schema. The helper detects this and fails with instructions, but the serial form is the correct command.
-- To prove a test really catches a regression: mutate the schema, then `DOMBOOK_SKIP_MIGRATE=1 go test -p 1 ...` so the migrations do not silently repair it. Full recipe in `server/README.md`.
+**The database is a Docker container, started with one command.** `scripts/db.sh up` creates
+it and both databases. Everything else — the server, migrations, Go tests, the e2e suites —
+reads its host, port and credentials from `scripts/db-env.sh`, which is the single place that
+decides them.
+
+- **The container is on 55432, not 5432**, because a Homebrew PostgreSQL is often already
+  bound there. Never hardcode either: source `scripts/db-env.sh`, or `require` nothing and
+  read `DOMBOOK_DB_HOST`/`DOMBOOK_DB_PORT`. A script that assumes a port is how a suite ends
+  up testing a different database than the server writes to — which presents as a product bug.
+- Go tests need `DOMBOOK_TEST_DSN`, otherwise the PostgreSQL integration tests **skip instead
+  of failing**. CI must set it or tenant isolation goes untested; `scripts/check-all.sh` sets it.
+- **Run the Go tests as `go test -p 1 ./...`.** Integration tests share one test database, so
+  parallel package processes fight over the schema. The helper detects this and fails with
+  instructions, but the serial form is the correct command.
+- Migrations run as the **database owner** (`dombook` in the container). Migration 0003's
+  `ALTER DEFAULT PRIVILEGES` binds to the role that runs them, so a different one silently
+  stops granting the application role access to new tables.
+- To prove a test really catches a regression: mutate the schema, then
+  `DOMBOOK_SKIP_MIGRATE=1 go test -p 1 ...` so the migrations do not silently repair it. Full
+  recipe in `server/README.md`.
 - Desktop: `npm start`, but **clear `ELECTRON_RUN_AS_NODE` first** (`env -u ELECTRON_RUN_AS_NODE npm start`). VS Code and other Electron-based terminals export `ELECTRON_RUN_AS_NODE=1`, which makes `require("electron")` return its path string instead of the API, so `src/main.cjs` dies at `app.setName(...)` with `Cannot read properties of undefined`.
 - `/auth/setup` bootstraps the first owner account only while zero users exist; afterwards it needs `SETUP_TOKEN`. A local DB with a test user therefore cannot be re-bootstrapped — clear the `users` table to re-open setup.
+
+## How to work in this repository without being asked twice
+
+The instruction is a task or a feature, not a procedure. Everything below is expected to be
+done without asking, because asking for each step is slower than the work itself.
+
+**Do these without asking:**
+
+1. Read the relevant code before changing it. This file and `server/README.md` carry the
+   sharp edges; the code carries the conventions. Both beat guessing.
+2. Work in small verified steps. Change one thing, run the checks that cover it, then continue.
+   `scripts/check-all.sh` runs everything; `--e2e` adds the real-app suites.
+3. **Add or update tests with every behaviour change.** A fix without a regression test is a
+   fix that will come back. When a rule changes, change the test that pins it in the same
+   commit, and say why in a comment.
+4. Fix what the work exposes. A stale comment, a doc that now lies, a test that could never
+   have failed (see the cancel-block section) — repair it as part of the change.
+5. Leave evidence. Report the exact commands run and their real results, including failures.
+   A claim that is not backed by a command in the transcript is not a result.
+6. Commit in reviewable pieces with messages that explain *why*, on a branch, and open a PR.
+   Describe the limitation you did not fix as plainly as the thing you did.
+
+**Stop and ask first for:**
+
+- **Anything that changes what a customer paid for.** Licences, entitlements, quotas, prices,
+  and the database's `account_is_paid()` allowlist. Getting this wrong takes access away from
+  someone who paid; a wrong guess here is worse than a delay.
+- **Destructive or shared-state actions**: dropping or migrating production data, force-pushing,
+  rewriting published history, merging to `main`, deleting a volume or an AVD, changing CI secrets.
+- **Deleting a plan or a product option that was not named in the task.** Replacing one SKU is
+  a decision about that SKU; removing others that merely look redundant is a separate decision
+  that was not made. Do the named thing and say what else you noticed.
+- **Irreversible schema changes to data that exists**, as opposed to adding to it.
+
+**Never:**
+
+- Weaken, skip or delete a test to make a suite pass. If a test is wrong, fix the test and say
+  so in the commit; if it is right, the code is wrong.
+- Claim a check passed that did not run, or hide a failure behind "flaky". An intermittent
+  failure is a finding: reproduce it, instrument it if you cannot, and document what you learned.
+- Leave the machine or the working tree in a state the next person has to clean up: stop
+  servers you started, drop the throwaway database, delete probe files, and leave no stray
+  processes. `git status` is expected to be clean of debris when you report.
 
 ## Tenant isolation (Go server)
 
