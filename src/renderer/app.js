@@ -2050,7 +2050,7 @@ function createBrowserDemoApi() {
   };
   const exportBackup = () => {
     const createdAt = new Date();
-    const file = `dombook-web-${createdAt.toISOString().replaceAll(":", "-")}.json`;
+    const file = `rentkeeper-web-${createdAt.toISOString().replaceAll(":", "-")}.json`;
     const payload = JSON.stringify({ version: 1, exportedAt: createdAt.toISOString(), places, properties, reservations }, null, 2);
     const blob = new Blob([payload], { type: "application/json" });
     const url = URL.createObjectURL(blob);

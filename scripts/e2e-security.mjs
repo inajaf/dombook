@@ -9,7 +9,7 @@
 import { createRequire } from "node:module";
 import {connect, freshStart, psqlArgs, psqlEnv, reporter, resetAuthState, wait} from "./e2e-lib.mjs";
 
-const API = process.env.DOMBOOK_E2E_URL || "http://127.0.0.1:8787";
+const API = process.env.RENTKEEPER_E2E_URL || "http://127.0.0.1:8787";
 const { check, finish } = reporter("Security");
 
 async function api(method, path, { token, body, headers: extra } = {}) {

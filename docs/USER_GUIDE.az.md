@@ -1,24 +1,24 @@
-# DomBook istifadəçi təlimatı
+# RentKeeper istifadəçi təlimatı
 
-DomBook istirahət evləri, kotteclər və ayrıca kirayə verilən evlərin sahibləri üçün bron idarəetmə sistemidir. Sistem bir administrator üçün nəzərdə tutulub və obyektləri, təqvimi, qonaqları, ödənişləri, depozitləri, qidalanmanı və ehtiyat nüsxələri vahid sadə interfeysdə birləşdirir.
+RentKeeper istirahət evləri, kotteclər və ayrıca kirayə verilən evlərin sahibləri üçün bron idarəetmə sistemidir. Sistem bir administrator üçün nəzərdə tutulub və obyektləri, təqvimi, qonaqları, ödənişləri, depozitləri, qidalanmanı və ehtiyat nüsxələri vahid sadə interfeysdə birləşdirir.
 
 ## 1. Quraşdırma və açılış
 
 ### macOS
 
 1. GitHub Release səhifəsindən macOS üçün `.dmg` və ya `.zip` faylını endirin.
-2. **DomBook** tətbiqini Applications qovluğuna köçürün və açın.
+2. **RentKeeper** tətbiqini Applications qovluğuna köçürün və açın.
 3. Açıq buraxılış Apple tərəfindən notarizasiya edilməyib. macOS ilk açılışı bloklayarsa, tətbiqə sağ klik edib **Open** seçin və ya **System Settings → Privacy & Security** bölməsindən icazə verin.
 
 ### Windows
 
 1. GitHub Release səhifəsindən installer və ya portable `.exe` faylını endirin.
 2. Quraşdırıcını başladın və ya portable versiyanı quraşdırmadan açın.
-3. Açıq buraxılış kod imzasına malik deyil. Windows SmartScreen xəbərdarlıq göstərə bilər; yalnız fayl rəsmi DomBook buraxılışındandırsa **More info → Run anyway** seçin.
+3. Açıq buraxılış kod imzasına malik deyil. Windows SmartScreen xəbərdarlıq göstərə bilər; yalnız fayl rəsmi RentKeeper buraxılışındandırsa **More info → Run anyway** seçin.
 
 ### Web versiya
 
-1. `DomBook-…-web.zip` faylını endirib arxivdən çıxarın.
+1. `RentKeeper-…-web.zip` faylını endirib arxivdən çıxarın.
 2. `web` qovluğunu statik serverlə başladın, məsələn:
 
    ```bash
@@ -67,7 +67,7 @@ Aktiv bronu açıb **Erkən çıxış** seçin. Faktiki çıxış tarixini və h
 - **Yalnız istifadə olunan gecələr** yaşayışı yenidən hesablayır və azad edilən tarixlərdən qidalanmanı silir.
 - **Tam məbləği saxla** gələcək gecələri təqvimdə azad edir, lakin ilkin yaşayış məbləğini saxlayır.
 
-Öncədən ödəniş yeni yekun məbləğdən çox olarsa, DomBook qonağa qaytarılacaq məbləği göstərir.
+Öncədən ödəniş yeni yekun məbləğdən çox olarsa, RentKeeper qonağa qaytarılacaq məbləği göstərir.
 
 ## 6. Təqvim və bron siyahısı
 

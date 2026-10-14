@@ -1,6 +1,6 @@
 // Verifies long-term rentals against a running server.
 //
-//   DOMBOOK_SKIP_MIGRATE=1 AUTH_EXPOSE_CODE=true go run ./cmd/api   # then:
+//   RENTKEEPER_SKIP_MIGRATE=1 AUTH_EXPOSE_CODE=true go run ./cmd/api   # then:
 //   node scripts/verify-rentals.mjs
 //
 // Covers the things a rental can get wrong that a unit test does not reach: that the
@@ -13,9 +13,9 @@
 // That is a precondition rather than a bug, so it is checked and reported rather than
 // failing later with a confusing undefined.
 //
-// Set DOMBOOK_VERIFY_URL to point at a non-default server.
+// Set RENTKEEPER_VERIFY_URL to point at a non-default server.
 
-const BASE = process.env.DOMBOOK_VERIFY_URL || "http://127.0.0.1:8787";
+const BASE = process.env.RENTKEEPER_VERIFY_URL || "http://127.0.0.1:8787";
 
 async function call(method, path, { token, body } = {}) {
   const headers = {};
@@ -47,7 +47,7 @@ if (setup.status !== 201) {
     `(${setup.body?.error?.code ?? "no code"}).\n` +
     "This script needs a FRESH database, because setup only works while no user exists.\n" +
     "  dropdb dombook_rental && createdb dombook_rental\n" +
-    "  DOMBOOK_DSN=... go run ./cmd/migrate up",
+    "  RENTKEEPER_DSN=... go run ./cmd/migrate up",
   );
   process.exit(2);
 }

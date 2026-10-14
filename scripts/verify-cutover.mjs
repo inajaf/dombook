@@ -2,14 +2,14 @@
 //
 // Run it after migrating and starting the API:
 //
-//   DOMBOOK_DSN=... go run ./cmd/migrate up
-//   DOMBOOK_DSN=... go run ./cmd/migrate-d1 -source /tmp/d1.sqlite
-//   DOMBOOK_DSN=postgres://dombook_app:... DOMBOOK_SKIP_MIGRATE=1 ... go run ./cmd/api
+//   RENTKEEPER_DSN=... go run ./cmd/migrate up
+//   RENTKEEPER_DSN=... go run ./cmd/migrate-d1 -source /tmp/d1.sqlite
+//   RENTKEEPER_DSN=postgres://rentkeeper_app:... RENTKEEPER_SKIP_MIGRATE=1 ... go run ./cmd/api
 //   node scripts/verify-cutover.mjs
 //
 // It asserts the things a migration can silently get wrong: identity, the unit rename, the
 // field the baseline schema had dropped, and that credentials were left behind.
-const BASE = process.env.DOMBOOK_VERIFY_URL || "http://127.0.0.1:8787";
+const BASE = process.env.RENTKEEPER_VERIFY_URL || "http://127.0.0.1:8787";
 async function call(method, path, { token, body } = {}) {
   const headers = {};
   if (body !== undefined) headers["content-type"] = "application/json";

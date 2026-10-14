@@ -21,7 +21,7 @@ source "${ROOT}/scripts/db-env.sh"
 
 # Fail once, with the fix, rather than letting six suites each report a connection error.
 if ! db_reachable; then
-  echo "no database at ${DOMBOOK_DB_HOST}:${DOMBOOK_DB_PORT} — start it with: scripts/db.sh up" >&2
+  echo "no database at ${RENTKEEPER_DB_HOST}:${RENTKEEPER_DB_PORT} — start it with: scripts/db.sh up" >&2
   exit 1
 fi
 
