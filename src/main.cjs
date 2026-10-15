@@ -172,7 +172,7 @@ function registerIpc() {
   handle("auth:setup", (payload) => authApi.setup(payload?.email));
   handle("auth:verify", async (payload) => {
     const session = await authApi.verify(payload?.email, payload?.code);
-    const adopted = await adoptAccount(session);
+    const adopted = await adoptAccount(session, { accountCreated: payload?.accountCreated === true });
     // The renderer needs to say so when someone else's local data has just been removed: it is
     // the one consequence of signing in that a user can lose work to.
     return { ...session, accountSwitched: adopted.switched };
@@ -484,12 +484,22 @@ function registerIpc() {
    * No marker means an install that predates this check. Nothing is thrown away on a guess: it is
    * adopted as-is, and the marker is written so the next switch is caught.
    */
-  async function adoptAccount(session) {
+  async function adoptAccount(session, { accountCreated = false } = {}) {
     const accountId = session?.accountId || "";
     if (!accountId) return { switched: false };
     const stored = storedAccountId();
     const switched = Boolean(stored) && stored !== accountId;
-    if (switched) {
+    // Nothing but the demo seed, no marker, and an account that already existed: this device has
+    // never talked to the server, so there is nothing of the account's to keep and nothing of the
+    // user's to lose. It is discarded for the same reason a switch is — see hasNeverSynced() for
+    // what the seed costs when it is pushed at an account that already holds one.
+    //
+    // `accountCreated` is the whole difference between a SECOND DEVICE and a SIGNUP, which look
+    // identical from here: both are an empty database and an address that was just typed. A signup
+    // must keep the sample — it is the only data the new account has — and a second device must
+    // throw it away and take the account's.
+    const pristine = !switched && !stored && !accountCreated && database.hasNeverSynced();
+    if (switched || pristine) {
       database.reset();
     }
     try {
@@ -499,7 +509,7 @@ function registerIpc() {
       // over it would be worse.
       console.error("Could not record the account marker:", error);
     }
-    return { switched };
+    return { switched: switched || pristine };
   }
 
   /**

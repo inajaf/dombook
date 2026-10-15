@@ -1009,6 +1009,25 @@ class RentKeeperDatabase {
   }
 
   /**
+   * Whether this device has ever exchanged anything with the server.
+   *
+   * A device that has not is holding nothing but the demo seed — and pushing that seed into an
+   * account that already exists is refused ("Такое название уже используется"), which matters far
+   * more than the refusal itself: a refused push SKIPS the pull, so the device never receives the
+   * account's data at all. That is what a second device, or any device whose profile has just been
+   * recreated, does on its first sign-in: it shows the sample and nothing else, forever.
+   *
+   * The cursor is per-device and never replicated, so it is a reliable "this installation has
+   * never heard from the server" signal.
+   */
+  hasNeverSynced() {
+    const cursor = Number(this.scalar(
+      "SELECT setting_value FROM app_settings WHERE setting_key = 'sync_cursor'",
+    ) || 0);
+    return !(cursor > 0);
+  }
+
+  /**
    * Throw the local database away and start from an empty one.
    *
    * Called when a DIFFERENT account signs in on this device. The local database is a replica of

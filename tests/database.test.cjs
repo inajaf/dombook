@@ -968,3 +968,18 @@ test("сброс локальной базы оставляет пустую с�
   // server attribute the new account's writes to the previous device.
   assert.notEqual(database.writerId, before);
 });
+
+test("свежее устройство, не обменивавшееся с сервером, можно распознать", async (t) => {
+  // The sign-in path uses this to tell "a brand-new device holding only the demo seed" from
+  // "a device with the user's work on it". Getting it wrong in the permissive direction leaves the
+  // device unable to sync at all; getting it wrong in the other direction discards real work, so
+  // the signal is the per-device cursor, which is never replicated.
+  const { database } = await createTestDatabase(t);
+  assert.equal(database.hasNeverSynced(), true, "новая база ещё не обменивалась с сервером");
+
+  database.run(
+    "INSERT INTO app_settings(id, setting_key, setting_value, created_at, updated_at, version, last_writer) VALUES (?, 'sync_cursor', '7', ?, ?, 1, ?)",
+    ["test-cursor", new Date().toISOString(), new Date().toISOString(), database.writerId],
+  );
+  assert.equal(database.hasNeverSynced(), false, "курсор больше нуля — устройство уже получало данные");
+});

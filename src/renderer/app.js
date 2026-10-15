@@ -40,6 +40,8 @@ const state = {
   quote: null,
   // Bumped per request so a slow quote cannot overwrite a newer one.
   quoteRequest: 0,
+  // Set when this sign-in created the account (the address was not loginable a moment ago).
+  accountCreated: false,
   // True once the owner types an amount: the computed figure stops replacing it.
   accommodationManual: false,
   // The booking the documents dialog is currently about, and where generated documents live.
@@ -2370,6 +2372,7 @@ async function enterApp() {
 async function requestLoginCode() {
   const email = $("#loginEmail").value.trim();
   $("#loginEmailError").hidden = true;
+  state.accountCreated = false;
   if (!email) {
     showError($("#loginEmailError"), new Error("Укажите email"));
     return;
@@ -2389,6 +2392,10 @@ async function requestLoginCode() {
         // one, which it does only with AUTH_EXPOSE_CODE on.
         const alreadyIssued = result?.code;
         await unwrap(api.auth.setup(email));
+        // Remembered so the sign-in can tell "this address just became an account" from "this
+        // device has never seen the account it is signing in to". The two look identical locally
+        // — an empty database either way — and only the first should keep the demo sample.
+        state.accountCreated = true;
         // Provisioning the account is exactly what makes the address loginable, so the
         // judgement made a moment ago is now stale. Without this, the client rejects the
         // account it just created — "no account for this email" on the user's own signup.
@@ -2429,7 +2436,8 @@ async function submitLoginCode() {
   const button = $("#loginCodeSubmit");
   setBusy(button, true, "Вход…");
   try {
-    const result = await unwrap(api.auth.verify(state.loginEmail, code));
+    const result = await unwrap(api.auth.verify(state.loginEmail, code, state.accountCreated === true));
+    state.accountCreated = false;
     applySession(result);
     reportAccountSwitch(result);
     // SessionView carries the account's plan, so an account that is already paid skips the
