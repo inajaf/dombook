@@ -97,3 +97,34 @@ test("измерение читаемости существует в одном
   const measure = read("scripts", "lib", "measure.mjs");
   assert.match(measure, /export const MEASURE_SOURCE/);
 });
+
+test("нигде не собирают путь к Electron руками", () => {
+  // The same mistake THREE times, which is what makes it a rule rather than an incident:
+  // `e2e-stack.sh` spawned a macOS path, `e2e-lib.mjs` spawned the same one (CI died with ENOENT
+  // on every suite), and both used macOS-shaped pkill patterns that match nothing on Linux — so a
+  // stale app kept the debug port and the next suite attached to the previous run's window.
+  // `check-web.mjs` had already learned this and the lesson had not travelled.
+  //
+  // The path must be ASKED OF THE PACKAGE (`require("electron")`); the only place the string may
+  // appear is a comment explaining why it is not used.
+  const offenders = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) { walk(full); continue; }
+      if (!/\.(mjs|cjs|js|sh|yml)$/.test(entry.name)) continue;
+      // This file has to contain the string in order to forbid it.
+      if (entry.name === "agent-tooling.test.cjs") continue;
+      for (const [index, line] of fs.readFileSync(full, "utf8").split("\n").entries()) {
+        if (!line.includes("Electron.app/Contents/MacOS")) continue;
+        const code = line.split("//")[0].split("#")[0];
+        if (code.includes("Electron.app/Contents/MacOS")) {
+          offenders.push(`${path.relative(ROOT, full)}:${index + 1}`);
+        }
+      }
+    }
+  };
+  walk(ROOT);
+  assert.deepEqual(offenders, [], "путь к Electron собирают руками — спросите у пакета: require(\"electron\")");
+});

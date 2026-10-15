@@ -202,14 +202,18 @@ export async function resetAuthState({ app = null } = {}) {
   for (const name of PROFILE_NAMES) fsSync.rmSync(userDataDir(name), { recursive: true, force: true });
 }
 
+/** Where Electron actually is on this platform. Assembling the path is how CI broke. */
+export function electronBinary() {
+  return createRequire(import.meta.url)("electron");
+}
+
 /** Stop every Electron process and wait until the CDP port is actually free. */
 export function killApp() {
   const { execFileSync } = createRequire(import.meta.url)("node:child_process");
-  for (const pattern of [
-    "electron/dist/Electron.app/Contents/MacOS/Electron",
-    "MacOS/Electron Helper",
-    "MacOS/Electron",
-  ]) {
+  // Matching the BINARY is what makes this portable; the three macOS-shaped strings this used to
+  // hold match nothing on Linux, so a stale app would keep holding the debug port and the next
+  // suite would attach to the previous run's window.
+  for (const pattern of [electronBinary(), "rentkeeper-desktop"]) {
     try { execFileSync("pkill", ["-9", "-f", pattern], { stdio: "pipe" }); } catch { /* none running */ }
   }
 }
@@ -290,8 +294,12 @@ export async function restartApp(previous = null) {
   const env = { ...process.env, RENTKEEPER_API_URL: `http://127.0.0.1:${port}` };
   delete env.ELECTRON_RUN_AS_NODE;
   const log = fsSync.openSync("/tmp/e2e-app.log", "w");
-  spawn(`${root}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`,
-    [root, `--remote-debugging-port=${PORT}`], { env, detached: true, stdio: ["ignore", log, log] }).unref();
+  // Asked of the package, never assembled: the macOS path this used to hardcode does not exist on
+  // a Linux runner, so every suite died with ENOENT the first time they were run anywhere but a
+  // Mac. `--no-sandbox` on Linux because the SUID helper is owned by the checkout there.
+  const flags = process.platform === "linux" ? ["--no-sandbox"] : [];
+  spawn(electronBinary(),
+    [...flags, root, `--remote-debugging-port=${PORT}`], { env, detached: true, stdio: ["ignore", log, log] }).unref();
 
   for (let i = 0; i < 40; i += 1) {
     await wait(500);

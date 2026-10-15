@@ -68,8 +68,10 @@ stop_app() {
   # `.../MacOS/Electron <project> --remote-debugging-port=...`, so a pattern anchored on a
   # trailing space misses it, the old process keeps the CDP port, and the new one dies with
   # "bind() failed: Address already in use". The symptom is a suite that hangs at connect.
-  pkill -9 -f "electron/dist/Electron.app/Contents/MacOS/Electron" 2>/dev/null || true
-  for pid in $(pgrep -f "MacOS/Electron" 2>/dev/null || true); do kill -9 "$pid" 2>/dev/null || true; done
+  # Match the binary itself. The macOS-shaped patterns this held before matched nothing on Linux,
+  # so a stale app kept the debug port and the next suite attached to the previous run's window.
+  pkill -9 -f "$ELECTRON_BIN" 2>/dev/null || true
+  for pid in $(pgrep -f "rentkeeper-desktop" 2>/dev/null || true); do kill -9 "$pid" 2>/dev/null || true; done
   sleep 2
   # Wait for the debug port to actually be free before starting another app.
   for _ in $(seq 1 20); do
