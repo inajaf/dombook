@@ -523,6 +523,26 @@ tbody tr:last-child td { border-bottom: 0; }
 .confirm-modal p { margin: 0; color: var(--muted); }
 .confirm-icon { width: 58px; height: 58px; border-radius: 18px; display: grid; place-items: center; margin: auto; background: var(--danger-soft); color: var(--danger); }
 .confirm-icon svg { width: 27px; height: 27px; }
+/* The team, and who has been invited but not arrived.
+ *
+ * One row per person, in the order the server returns (owner, admins, staff), because the first
+ * question about a shared account is who is in it and the second is what they may do. */
+.team-list, .invite-list { display: grid; gap: 8px; margin: 16px 20px; }
+.team-heading { margin: 0 20px 4px; font-size: var(--text-sm); color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.team-row {
+  display: grid; grid-template-columns: 42px minmax(0, 1fr) auto auto; align-items: center; gap: 12px;
+  padding: 11px 13px; border: 1px solid var(--line); border-radius: var(--radius); background: #fafcfb;
+}
+.team-avatar {
+  width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--primary-soft); color: var(--primary-strong); font-weight: 800; font-size: var(--text-lg);
+}
+.team-avatar.pending { border-radius: 12px; }
+.team-avatar svg { width: 20px; }
+.team-row strong, .team-row small { display: block; overflow-wrap: anywhere; }
+.team-row small { color: var(--muted); font-size: var(--text-xs); }
+.form-success { margin-top: 12px; border-radius: 11px; padding: 11px 13px; background: var(--primary-soft); color: var(--primary-strong); font-weight: 650; }
+
 /* Choosing which document to print. Two cards, because a contract and an invoice go to different
  * readers and a person about to hand paperwork to a tax office should not have to guess which
  * button produces which. */

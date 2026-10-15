@@ -23,6 +23,13 @@ contextBridge.exposeInMainWorld("domBook", {
     archive: (id) => invoke("properties:archive", { id }),
     restore: (id) => invoke("properties:restore", { id }),
   },
+  // Who may sign in to this account. The server authorizes by role; this only relays.
+  team: {
+    members: () => invoke("team:members"),
+    invites: () => invoke("team:invites"),
+    invite: (email, role) => invoke("team:invite", { email, role }),
+    revokeInvite: (inviteId) => invoke("team:revokeInvite", { inviteId }),
+  },
   // Contracts and invoices. The document is built in the main process from stored rows, so the
   // renderer cannot produce paperwork the database does not agree with.
   documents: {

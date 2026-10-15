@@ -427,6 +427,13 @@ function registerIpc() {
       createMenu(language);
       return language;
     });
+    // Team and invitations. Passed straight through to the server, which decides by role:
+    // nothing about who may see what is decided here.
+    handle("team:members", () => authApi.members());
+    handle("team:invites", () => authApi.invites());
+    handle("team:invite", (payload) => authApi.invite(payload?.email, payload?.role));
+    handle("team:revokeInvite", (payload) => authApi.revokeInvite(payload?.inviteId));
+
     handle("system:setDocumentRequisites", (payload) => database.setDocumentRequisites(payload));
     handle("system:openBackupDirectory", async () => {
       const error = await shell.openPath(database.systemInfo().backupDir);

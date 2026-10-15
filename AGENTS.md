@@ -534,6 +534,35 @@ rule set stored as JSON text on the unit row (`units.rate_rules` / `properties.r
   empty rule set, and an update leaves the stored rules alone. The desktop is a sync client, so
   nothing in the product is affected; a future web client editing rules would need the plumbing.
 
+## Access between accounts (invitations)
+
+Isolation is the default and is enforced in PostgreSQL. **The only way access is granted is an
+invitation created by the account itself**, from Настройки → «Доступ к аккаунту» — which is what
+the owner asked for in those words: another account sees nothing of this one unless this one
+opens the door.
+
+- **`GET /account/members` is for every member; the invitation routes are owner/admin only.** Who
+  you work alongside is not administration; who may be invited is. `RequireRole("owner", "admin")`
+  is the server's decision, never the client's — the panel hides the form when the list answers
+  403, and that is presentation, not the control.
+- **An invitation is bound to one email address and is what makes it loginable.** An address
+  nobody invited cannot sign in at all (`loginable: false`), and `/auth/verify` turns a pending
+  invitation into membership on that address's first sign-in.
+- **An invitation can never grant `owner`** — `create_login_invite()` enforces that in the
+  database, so an invite that could grant ownership cannot exist even if a handler were wrong.
+- **It works only for an address with no user yet.** An existing account signing in is treated as
+  "Existing member" (`server/internal/auth/service.go`) and lands in its own account; the
+  invitation is ignored. Giving an ALREADY EXISTING account access to another would need
+  memberships (one login, several accounts) — a change to how a session picks its tenant, not a
+  new route. Not built.
+- `e2e-security.mjs` holds the whole contract as assertions: nothing gets in before the grant, the
+  colleague signs in and lands in the inviting account, they see the inviter's data, they cannot
+  invite anyone else, and a revoked invitation closes the address again.
+- **A test that takes a token from account creation and uses it later will get a 401**: clicking
+  "sign out" calls `RevokeUserSessions`, which kills every session for that user, including the
+  one an API client is holding. And re-signing in is not a workaround — `/auth/send` is throttled
+  per address, and the window outlasts a 45-second wait. Take the token where you use it.
+
 ## Printed documents (contracts and invoices)
 
 `src/main/documents.cjs` builds the HTML for two documents; `src/main/pdf.cjs` renders it to PDF
