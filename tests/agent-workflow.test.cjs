@@ -75,7 +75,7 @@ test("хук пропускает ветку, detached HEAD и осознанн�
 });
 
 /** The merge gate reads a verdict file and a PR head; `gh` is the only thing that needs faking. */
-function runMergeGate(t, { pr = "7", sha, verdict }) {
+function runMergeGate(t, { pr = "7", sha, verdict, remoteSha = null, branch = "feature/x" }) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rentkeeper-merge-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   fs.mkdirSync(path.join(dir, "scripts"), { recursive: true });
@@ -88,11 +88,18 @@ function runMergeGate(t, { pr = "7", sha, verdict }) {
   const bin = path.join(dir, "bin");
   fs.mkdirSync(bin);
   fs.writeFileSync(path.join(bin, "gh"), `#!/usr/bin/env bash
-if [ "$1" = "pr" ] && [ "$2" = "view" ]; then echo "${sha}"; exit 0; fi
+if [ "$1" = "pr" ] && [ "$2" = "view" ]; then echo "${sha} ${branch}"; exit 0; fi
 echo "gh $@" >> "${dir}/gh-calls.txt"
 exit 0
 `);
+  // The gate asks the REMOTE where the branch is, because GitHub's answer can lag a push — the
+  // case below is not hypothetical: it merged a pull request on a verdict for the previous commit.
+  fs.writeFileSync(path.join(bin, "git"), `#!/usr/bin/env bash
+if [ "$1" = "ls-remote" ]; then echo "${remoteSha ?? sha}	refs/heads/${branch}"; exit 0; fi
+exec /usr/bin/git "$@"
+`);
   fs.chmodSync(path.join(bin, "gh"), 0o755);
+  fs.chmodSync(path.join(bin, "git"), 0o755);
   const result = spawnSync("bash", [path.join(dir, "scripts", "merge-verified.sh"), pr], {
     cwd: dir, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
   });
@@ -126,6 +133,21 @@ test("проваленный вердикт не даёт сливать", (t) =
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /слияние запрещено/i);
   assert.equal(result.calls, "");
+});
+
+test("расхождение между GitHub и origin слияние останавливает", (t) => {
+  // Found by using the gate on itself: the PR head GitHub reported was one commit behind the
+  // branch, so the verdict check passed for a commit that was no longer the tip. The remote is the
+  // authority for where a branch is, and a disagreement is refused rather than resolved.
+  const sha = "e".repeat(40);
+  const result = runMergeGate(t, {
+    sha,
+    remoteSha: "f".repeat(40),
+    verdict: { sha, branch: "feature/x", status: "passed", exit: 0 },
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /устарел|расхождени/i);
+  assert.equal(result.calls, "", "gh pr merge не должен вызываться");
 });
 
 test("пройденный вердикт для этого же коммита слияние разрешает", (t) => {

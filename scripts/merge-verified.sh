@@ -28,10 +28,34 @@ if [ -z "$PR" ]; then
   exit 2
 fi
 
-SHA="$(gh pr view "$PR" --json headRefOid --jq .headRefOid 2>/dev/null)"
-if [ -z "$SHA" ]; then
+INFO="$(gh pr view "$PR" --json headRefOid,headRefName --jq '.headRefOid + " " + .headRefName' 2>/dev/null)"
+if [ -z "$INFO" ]; then
   echo "merge-verified: PR #${PR} не найден (или gh не авторизован)." >&2
   exit 2
+fi
+SHA="${INFO%% *}"
+BRANCH="${INFO##* }"
+
+# GitHub's answer can LAG a push by a few seconds, and this gate was caught by exactly that: it
+# merged a pull request on the strength of a verdict for the commit BEFORE the last one. The remote
+# is the authority for where a branch is, and the two are compared rather than trusted:
+#
+#   * a disagreement means one of them is stale — refuse and say so, do not pick a winner;
+#   * if the remote cannot be read, there is nothing to verify against, so there is no merge.
+REMOTE_SHA="$(git ls-remote origin "refs/heads/${BRANCH}" 2>/dev/null | cut -f1)"
+if [ -z "$REMOTE_SHA" ]; then
+  echo "merge-verified: не удалось прочитать ветку ${BRANCH} на origin — проверять не с чем." >&2
+  exit 2
+fi
+if [ "$REMOTE_SHA" != "$SHA" ]; then
+  cat >&2 <<MESSAGE
+merge-verified: GitHub отдаёт ${SHA:0:7}, а ветка ${BRANCH} на origin стоит на ${REMOTE_SHA:0:7}.
+
+  Один из ответов устарел — обычно GitHub не успел за пушем. Повторите команду
+  через несколько секунд; сливать по расхождению нельзя, потому что вердикт
+  относится к конкретному коммиту.
+MESSAGE
+  exit 1
 fi
 SHORT="$(git rev-parse --short "$SHA" 2>/dev/null || echo "${SHA:0:7}")"
 VERDICT="artifacts/verdict-${SHORT}.json"
