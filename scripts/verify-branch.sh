@@ -53,6 +53,7 @@ echo "=== независимая проверка ${BRANCH} @ ${SHORT} ==="
 echo "  чистая копия: ${WORKTREE}"
 
 cleanup() {
+  rm -f "$LOCK"
   # The stack is stopped first: it holds the ports the NEXT verification needs, and a worktree
   # removed under a running app leaves a process writing to a deleted directory.
   "${WORKTREE}/scripts/e2e-stack.sh" down >/dev/null 2>&1 || true
@@ -74,6 +75,17 @@ fi
 
 LOG="${ARTIFACTS}/verify-${SHORT}.log"
 mkdir -p "$ARTIFACTS"
+
+# A LOCK, because the guard above is one-directional.
+#
+# It refuses to start while a stack is running. It cannot stop somebody starting a stack WHILE it
+# runs — and that is not hypothetical: a verification was launched in the background and the same
+# machine's stack was brought up minutes later for unrelated work. Both use the same ports and the
+# same e2e database, so the run was worthless and did not say so. `e2e-stack.sh` now refuses while
+# this file exists, which turns a silent collision into a refusal.
+LOCK="${ARTIFACTS}/.verifying"
+echo "${SHORT}" > "$LOCK"
+trap 'rm -f "$LOCK"' EXIT
 
 if [ "$QUICK" -eq 1 ]; then
   echo "  режим: быстрый (без e2e-сьютов)" | tee "$LOG"

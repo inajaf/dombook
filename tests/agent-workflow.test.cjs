@@ -75,7 +75,7 @@ test("хук пропускает ветку, detached HEAD и осознанн�
 });
 
 /** The merge gate reads a verdict file and a PR head; `gh` is the only thing that needs faking. */
-function runMergeGate(t, { pr = "7", sha, verdict, remoteSha = null, branch = "feature/x" }) {
+function runMergeGate(t, { pr = "7", sha, verdict, remoteSha = null, branch = "feature/x", checks = "none" }) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rentkeeper-merge-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   fs.mkdirSync(path.join(dir, "scripts"), { recursive: true });
@@ -87,8 +87,24 @@ function runMergeGate(t, { pr = "7", sha, verdict, remoteSha = null, branch = "f
   }
   const bin = path.join(dir, "bin");
   fs.mkdirSync(bin);
+  // The gate asks GitHub two things, and the answers differ: whether there is a required check at
+  // all, and whether any of them is not green. A fake that answers both the same way cannot tell
+  // "CI is green" from "CI never ran", which are opposite outcomes.
   fs.writeFileSync(path.join(bin, "gh"), `#!/usr/bin/env bash
-if [ "$1" = "pr" ] && [ "$2" = "view" ]; then echo "${sha} ${branch}"; exit 0; fi
+if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
+  echo "${sha} ${branch}"
+  exit 0
+fi
+if [ "$1" = "pr" ] && [ "$2" = "checks" ]; then
+  case "$*" in
+    *state*)  # the list of checks that are NOT green
+      if [ "${checks}" = "green" ]; then exit 0; fi
+      echo "test"; exit 1 ;;
+    *)        # how many checks exist
+      if [ "${checks}" = "none" ]; then exit 1; fi
+      echo 1; exit 0 ;;
+  esac
+fi
 echo "gh $@" >> "${dir}/gh-calls.txt"
 exit 0
 `);
@@ -172,4 +188,23 @@ test("пройденный полный вердикт для этого же к
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /192/);
   assert.match(result.calls, /pr merge 7/);
+});
+
+test("зелёная проверка CI заменяет локальный вердикт", (t) => {
+  // The rule was "no merge without a LOCAL verdict", written when CI ran the unit layer only. CI
+  // now runs the same gate the verifier does — including the suites that launch the real app — on a
+  // clean machine, so a second local copy of that run is ceremony. What is not relaxed: it must be
+  // green, and for this sha (checked against the remote above).
+  const sha = "1".repeat(40);
+  const result = runMergeGate(t, { sha, checks: "green" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /обязательная проверка CI пройдена/);
+  assert.match(result.calls, /pr merge 7/);
+});
+
+test("красная проверка CI слияние останавливает", (t) => {
+  const sha = "2".repeat(40);
+  const result = runMergeGate(t, { sha, checks: "red" });
+  assert.notEqual(result.status, 0);
+  assert.equal(result.calls, "", "gh pr merge не должен вызываться при красной проверке");
 });

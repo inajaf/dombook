@@ -1,0 +1,291 @@
+/* RentKeeper — one page, no build step, no framework.
+ *
+ * The same rule as the application's own stylesheet: colours live in named roles at the top and
+ * nowhere else, so the palette can be changed in one place and a stray literal cannot survive.
+ * The page has one theme — dark — because a product page has no user preference to respect and
+ * two palettes would be twice the surface to keep readable. */
+
+:root {
+  --bg: #0a0f0c;
+  --bg-soft: #101713;
+  --surface: #141d18;
+  --surface-2: #1a2620;
+  --line: #24332b;
+  --line-soft: #1c2822;
+  --ink: #eef6f1;
+  --ink-soft: #b9c9c0;
+  --muted: #8a9d93;
+  --accent: #2f8f68;
+  --accent-bright: #43c08c;
+  --accent-ink: #eafff5;
+  --radius: 16px;
+  --radius-lg: 22px;
+  --shadow: 0 24px 60px rgb(0 0 0 / 45%);
+  --shadow-soft: 0 8px 30px rgb(0 0 0 / 30%);
+  --maxw: 1160px;
+  --ease: cubic-bezier(.22, .61, .36, 1);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+img { max-width: 100%; height: auto; display: block; }
+a { color: inherit; text-decoration: none; }
+
+/* ---------- The mobile gate ----------
+ * The application is desktop software. On a phone this page says so in one screen instead of
+ * reflowing a layout built for a window — a responsive version would promise an app that does not
+ * exist, and the promise is the part a visitor remembers. */
+.mobile-gate { display: none; }
+
+@media (max-width: 860px) {
+  .page { display: none; }
+  .mobile-gate {
+    /* `minmax(0, 1fr)`, not the implicit `auto` column: a grid column sized to `auto` grows to the
+       MAX-CONTENT of its item, so a card with `max-width: 460px` made the column 460px wide inside
+       a 390px screen and the text was clipped off the right edge. `minmax(0, …)` is what lets the
+       column shrink. Caught by rendering the page at a phone width, twice. */
+    display: grid; grid-template-columns: minmax(0, 1fr); align-content: center;
+    min-height: 100vh; min-height: 100dvh; padding: 28px;
+    background: radial-gradient(120% 90% at 50% 0%, #16241d 0%, var(--bg) 70%);
+  }
+  .mobile-gate__card {
+    /* `width: 100%` is load-bearing: `place-items: center` sizes a grid item to its CONTENT, so
+       `max-width` alone let the card grow past a 430px screen and the text was clipped off the
+       right edge. Caught by rendering the page at a phone width. */
+    width: 100%; max-width: 460px; margin: 0 auto; padding: 30px 26px; border: 1px solid var(--line);
+    border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-soft);
+    animation: rise .5s var(--ease) both;
+  }
+  .mobile-gate__mark { display: inline-flex; margin-bottom: 16px; }
+  .mobile-gate h1 { margin: 0 0 12px; font-size: 1.5rem; line-height: 1.25; letter-spacing: -.02em; }
+  .mobile-gate p { margin: 0 0 12px; color: var(--ink-soft); font-size: .97rem; }
+  .mobile-gate__hint { color: var(--muted) !important; font-size: .9rem; }
+}
+
+/* ---------- Navigation ---------- */
+.nav {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; gap: 24px;
+  max-width: var(--maxw); margin: 0 auto; padding: 16px 24px;
+  transition: background .3s var(--ease), border-color .3s var(--ease), backdrop-filter .3s var(--ease);
+  border-bottom: 1px solid transparent;
+}
+.nav.is-stuck {
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter: blur(14px);
+  border-bottom-color: var(--line-soft);
+}
+.nav__brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: -.01em; }
+.nav__mark { display: inline-flex; border-radius: 9px; overflow: hidden; }
+.nav__links { display: flex; gap: 26px; margin-left: auto; font-size: .93rem; color: var(--ink-soft); }
+.nav__links a { position: relative; padding: 4px 0; transition: color .2s var(--ease); }
+.nav__links a::after {
+  content: ""; position: absolute; left: 0; right: 100%; bottom: 0; height: 2px;
+  background: var(--accent-bright); transition: right .28s var(--ease);
+}
+.nav__links a:hover { color: var(--ink); }
+.nav__links a:hover::after { right: 0; }
+
+/* ---------- Buttons ---------- */
+.button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 46px; padding: 0 22px; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--surface-2); color: var(--ink); font-size: .95rem; font-weight: 600;
+  cursor: pointer; transition: transform .18s var(--ease), border-color .18s var(--ease), background .18s var(--ease);
+}
+.button:hover { transform: translateY(-2px); border-color: var(--accent); }
+.button--small { min-height: 40px; padding: 0 16px; font-size: .9rem; margin-left: 8px; }
+.button--primary {
+  border-color: transparent;
+  background: linear-gradient(180deg, var(--accent-bright), var(--accent));
+  color: #05231a; font-weight: 750;
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--accent) 34%, transparent);
+}
+.button--primary:hover { box-shadow: 0 16px 36px color-mix(in srgb, var(--accent) 44%, transparent); }
+
+/* ---------- Hero ---------- */
+.hero { position: relative; padding: 84px 24px 40px; overflow: hidden; }
+.hero__glow {
+  position: absolute; inset: -40% 10% auto; height: 780px; pointer-events: none;
+  background:
+    radial-gradient(46% 46% at 30% 40%, color-mix(in srgb, var(--accent) 30%, transparent), transparent 70%),
+    radial-gradient(38% 38% at 72% 26%, color-mix(in srgb, var(--accent-bright) 20%, transparent), transparent 72%);
+  filter: blur(30px); opacity: .85;
+  animation: drift 18s ease-in-out infinite alternate;
+}
+.hero__inner { position: relative; max-width: 820px; margin: 0 auto; text-align: center; }
+.eyebrow {
+  margin: 0 0 14px; color: var(--accent-bright);
+  font-size: .78rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+}
+.hero__title {
+  margin: 0 0 20px; font-size: clamp(2.3rem, 5.4vw, 4rem); line-height: 1.06; letter-spacing: -.035em;
+}
+.hero__title-accent {
+  background: linear-gradient(100deg, var(--accent-bright), #8fe6c0 60%, var(--accent-bright));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.hero__lede { margin: 0 auto 30px; max-width: 640px; color: var(--ink-soft); font-size: clamp(1rem, 1.4vw, 1.12rem); }
+.hero__actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+.hero__note { margin: 18px 0 0; color: var(--muted); font-size: .87rem; }
+
+/* ---------- The app window ---------- */
+.hero__shot { max-width: var(--maxw); margin: 56px auto 0; padding: 0 24px; }
+.window {
+  border: 1px solid var(--line); border-radius: var(--radius-lg); overflow: hidden;
+  background: var(--surface); box-shadow: var(--shadow);
+  transition: transform .5s var(--ease);
+}
+.window__bar {
+  display: flex; align-items: center; gap: 8px; padding: 12px 16px;
+  background: var(--surface-2); border-bottom: 1px solid var(--line-soft);
+}
+.window__dot { width: 11px; height: 11px; border-radius: 50%; background: var(--line); }
+.window__dot:first-child { background: #e0605d; }
+.window__dot:nth-child(2) { background: #dfb356; }
+.window__dot:nth-child(3) { background: #55b46a; }
+.window__title { margin-left: 10px; color: var(--muted); font-size: .82rem; }
+
+/* ---------- Numbers ---------- */
+.strip {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px;
+  max-width: var(--maxw); margin: 72px auto 0; padding: 0 24px;
+}
+.strip__item {
+  display: flex; flex-direction: column; gap: 4px; padding: 24px 20px;
+  border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface);
+  text-align: center;
+}
+.strip__item strong { font-size: 1.8rem; letter-spacing: -.02em; color: var(--accent-bright); }
+.strip__item span { color: var(--muted); font-size: .87rem; }
+
+/* ---------- Sections ---------- */
+.section { max-width: var(--maxw); margin: 0 auto; padding: 104px 24px 0; }
+.section__head { max-width: 660px; margin: 0 auto 46px; text-align: center; }
+.section h2 { margin: 0 0 14px; font-size: clamp(1.7rem, 3.1vw, 2.5rem); line-height: 1.14; letter-spacing: -.028em; }
+.section__lede { margin: 0; color: var(--ink-soft); }
+
+.section--split { display: grid; grid-template-columns: 1fr 1.15fr; gap: 56px; align-items: center; }
+.section--reverse .section__copy { order: 2; }
+.section--reverse .section__shot { order: 1; }
+.section__copy p { color: var(--ink-soft); }
+.section__shot img {
+  border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-soft);
+  transition: transform .5s var(--ease);
+}
+.section__shot img:hover { transform: translateY(-4px) scale(1.01); }
+
+.ticks { list-style: none; margin: 22px 0 0; padding: 0; display: grid; gap: 10px; }
+.ticks li { position: relative; padding-left: 30px; color: var(--ink-soft); font-size: .95rem; }
+.ticks li::before {
+  content: "✓"; position: absolute; left: 0; top: 0;
+  width: 20px; height: 20px; display: grid; place-items: center;
+  border-radius: 50%; background: color-mix(in srgb, var(--accent) 26%, transparent);
+  color: var(--accent-bright); font-size: .72rem; font-weight: 800;
+}
+
+/* ---------- Cards ---------- */
+.grid { display: grid; gap: 18px; }
+.grid--3 { grid-template-columns: repeat(3, 1fr); }
+.card {
+  padding: 26px 24px; border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--surface);
+  transition: transform .24s var(--ease), border-color .24s var(--ease), background .24s var(--ease);
+}
+.card:hover { transform: translateY(-4px); border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); background: var(--surface-2); }
+.card__icon {
+  display: grid; place-items: center; width: 44px; height: 44px; margin-bottom: 16px;
+  border-radius: 12px; background: color-mix(in srgb, var(--accent) 20%, transparent);
+  color: var(--accent-bright); font-size: 1.2rem;
+}
+.card h3 { margin: 0 0 8px; font-size: 1.06rem; letter-spacing: -.01em; }
+.card p { margin: 0; color: var(--muted); font-size: .93rem; }
+
+/* ---------- Download ---------- */
+.download__grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; max-width: 780px; margin: 0 auto; }
+.download__card {
+  display: flex; align-items: center; gap: 18px; padding: 24px;
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
+  transition: transform .2s var(--ease), border-color .2s var(--ease), box-shadow .2s var(--ease);
+}
+.download__card:hover {
+  transform: translateY(-3px); border-color: var(--accent);
+  box-shadow: 0 14px 34px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.download__os { display: grid; place-items: center; width: 54px; height: 54px; border-radius: 14px; background: var(--surface-2); color: var(--ink); }
+.download__body { display: flex; flex-direction: column; gap: 3px; }
+.download__body strong { font-size: 1.08rem; }
+.download__body small { color: var(--muted); font-size: .84rem; }
+.download__arrow { margin-left: auto; color: var(--accent-bright); font-size: 1.3rem; transition: transform .2s var(--ease); }
+.download__card:hover .download__arrow { transform: translateX(4px); }
+.download__notes { max-width: 780px; margin: 34px auto 0; display: grid; gap: 12px; }
+.download__notes p { margin: 0; color: var(--muted); font-size: .9rem; }
+.download__notes strong { color: var(--ink-soft); }
+
+/* ---------- Footer ---------- */
+.footer { margin-top: 110px; border-top: 1px solid var(--line-soft); background: var(--bg-soft); }
+.footer__inner {
+  max-width: var(--maxw); margin: 0 auto; padding: 40px 24px;
+  display: grid; gap: 10px; justify-items: center; text-align: center;
+}
+.footer__brand { display: flex; align-items: center; gap: 10px; font-weight: 700; }
+.footer__note { margin: 0; color: var(--muted); font-size: .9rem; }
+.footer__links { display: flex; gap: 20px; font-size: .9rem; color: var(--ink-soft); }
+.footer__links a:hover { color: var(--accent-bright); }
+
+/* ---------- Motion ----------
+ * Everything animated is decoration: the content is readable with JavaScript off, with the
+ * animations off, and for anyone who asked their system not to move things. A reveal that hides
+ * content until script runs is a page that never appears when the script fails. */
+/* The hidden state is OPT-IN, and only when scripting is on.
+ *
+ * This was `opacity: 0` unconditionally, with the script responsible for revealing — and the page
+ * rendered BLANK, because an observer that never fires leaves every section invisible. A page that
+ * hides its content until a script says otherwise is a page that shows nothing when the script
+ * is slow, blocked, or simply not the one you tested with. Found by screenshotting the site.
+ *
+ * `@media (scripting: enabled)` means a reader with JavaScript off gets the whole page with no
+ * animation, and the timeout in main.js is the second net for a script that runs but whose
+ * observer never does. */
+@media (scripting: enabled) {
+  .reveal { opacity: 0; transform: translateY(18px); transition: opacity .7s var(--ease), transform .7s var(--ease); }
+  .reveal.is-in { opacity: 1; transform: none; }
+}
+
+@keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+@keyframes drift {
+  from { transform: translate3d(-3%, -2%, 0) scale(1); }
+  to { transform: translate3d(3%, 3%, 0) scale(1.08); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+  .reveal { opacity: 1; transform: none; }
+}
+
+/* ---------- Narrow windows ----------
+ * Between a phone and a laptop the layout stacks, because a window can be narrow without being a
+ * phone — a small laptop window is not a reason to hide the page. */
+@media (max-width: 1080px) {
+  .nav__links { display: none; }
+  .grid--3 { grid-template-columns: repeat(2, 1fr); }
+  .section--split { grid-template-columns: 1fr; gap: 32px; }
+  .section--reverse .section__copy, .section--reverse .section__shot { order: 0; }
+  .strip { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 900px) {
+  .download__grid { grid-template-columns: 1fr; }
+}
