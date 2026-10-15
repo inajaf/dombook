@@ -31,6 +31,23 @@ export const interfaceLanguage = () => window.i18n?.language || "ru";
  * `app_settings` replicates, so syncing a theme would let one device repaint another.
  */
 
+/**
+ * Today, spelled out for the header: "Четверг, 15 октября".
+ *
+ * The dashboard's eyebrow used to read "Рабочий день", which is the same every day and therefore
+ * tells the reader nothing they did not already know. A date is the one fact that changes, and it
+ * is the fact an owner opening the app first checks — the weekday especially, because it decides
+ * whether the weekend's arrivals are today's problem.
+ */
+export function todayLabel(today) {
+  const iso = today || new Date().toISOString().slice(0, 10);
+  const parsed = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return "";
+  const weekday = new Intl.DateTimeFormat(interfaceLocale(), { weekday: "long" }).format(parsed);
+  const rest = new Intl.DateTimeFormat(interfaceLocale(), { day: "numeric", month: "long" }).format(parsed);
+  return `${weekday.charAt(0).toUpperCase()}${weekday.slice(1)}, ${rest}`;
+}
+
 export function money(minor, currency = "AZN") {
   return new Intl.NumberFormat(interfaceLocale(), {
     style: "currency",

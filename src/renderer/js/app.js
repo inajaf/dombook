@@ -12,7 +12,7 @@
  */
 
 import { $, $$, escapeHtml, icon, setBusy, showError } from "./dom.js";
-import { interfaceLocale, interfaceLanguage, money, objectCountLabel, guestCountLabel, capacityLabel, bookingWindowHelp, maximumCheckoutHelp, maximumStayHelp, balanceLabel, shortDate, longDate, decimalToMinor, minorToDecimal, addDaysIso, nightsBetween, addCalendarMonthsIso, nightLabel, monthLabel, formulaLabel, privateStorageLabel, formatBytes, reservationStatusLabel, ROLE_LABELS, STATUS_LABELS, DEPOSIT_LABELS } from "./formatters.js";
+import { todayLabel, interfaceLocale, interfaceLanguage, money, objectCountLabel, guestCountLabel, capacityLabel, bookingWindowHelp, maximumCheckoutHelp, maximumStayHelp, balanceLabel, shortDate, longDate, decimalToMinor, minorToDecimal, addDaysIso, nightsBetween, addCalendarMonthsIso, nightLabel, monthLabel, formulaLabel, privateStorageLabel, formatBytes, reservationStatusLabel, ROLE_LABELS, STATUS_LABELS, DEPOSIT_LABELS } from "./formatters.js";
 import { themeChoice, applyTheme, textScaleName, applyTextScale } from "./theme.js";
 import { toast } from "./toast.js";
 import { confirmAction } from "./modal.js";
@@ -97,7 +97,11 @@ function navigate(page) {
   $$(".nav-item[data-page]").forEach((button) => button.classList.toggle("active", button.dataset.page === page));
   $$(".page").forEach((section) => section.classList.toggle("active", section.id === `page-${page}`));
   const meta = PAGE_META[page];
-  $("#pageEyebrow").textContent = meta.eyebrow;
+  // «Сегодня» is the one page whose subject is the date, so its eyebrow IS the date. Everything
+  // else keeps a phrase describing what the page holds.
+  $("#pageEyebrow").textContent = page === "dashboard"
+    ? todayLabel(state.systemInfo?.bookingPolicy?.today)
+    : meta.eyebrow;
   $("#pageTitle").textContent = meta.title;
   $("#primaryAction span").textContent = meta.action;
   $("#primaryAction").dataset.actionType = meta.actionType;
@@ -1024,10 +1028,11 @@ function bindEvents() {
     }
     refreshCore().catch((error) => toast(error.message, "error"));
   });
-  $("#calendarContainer")?.addEventListener("change", (event) => {
-    if (event.target.id !== "calendarRange") return;
-    const days = Number(event.target.value);
-    if (!CALENDAR_RANGES.includes(days)) return;
+  $("#calendarContainer")?.addEventListener("click", (event) => {
+    const option = event.target.closest("[data-calendar-range]");
+    if (!option) return;
+    const days = Number(option.dataset.calendarRange);
+    if (!CALENDAR_RANGES.includes(days) || days === state.calendarDays) return;
     state.calendarDays = days;
     // The window's START is kept, so changing the range widens the view around the same first day
     // rather than jumping the owner somewhere else.
@@ -1039,6 +1044,25 @@ function bindEvents() {
     else hideCalendarPopover();
   });
   $("#calendarContainer")?.addEventListener("mouseleave", hideCalendarPopover);
+  // A calendar is the one screen where paging is muscle memory. The arrows in the toolbar are the
+  // only way to do it with a mouse; this is the same thing with a keyboard, and it stays out of
+  // the way of typing because it only fires on the calendar page with nothing focused.
+  document.addEventListener("keydown", (event) => {
+    if (state.page !== "calendar") return;
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    const focused = document.activeElement;
+    if (focused && (focused.tagName === "INPUT" || focused.tagName === "TEXTAREA" || focused.tagName === "SELECT" || focused.isContentEditable)) return;
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const from = state.calendar?.startDate || state.systemInfo?.bookingPolicy?.today;
+    if (!from) return;
+    if (event.key === "ArrowLeft" && !state.calendarStart) {
+      // Left from the default window means "back", so it must become an explicit date first.
+      state.calendarStart = from;
+    }
+    state.calendarStart = addDaysIso(from, event.key === "ArrowRight" ? state.calendarDays : -state.calendarDays);
+    refreshCore().catch((error) => toast(error.message, "error"));
+  });
   $("#calendarContainer")?.addEventListener("focusin", (event) => {
     const cell = event.target.closest("[data-calendar-reservation]");
     if (cell) showCalendarPopover(cell);
