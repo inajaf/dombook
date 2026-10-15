@@ -43,7 +43,9 @@ fi
 
 SHA="$(git rev-parse "$REF")"
 SHORT="$(git rev-parse --short "$SHA")"
-BRANCH="$(git rev-parse --abbrev-ref "$REF" 2>/dev/null || echo "$REF")"
+BRANCH="$(git for-each-ref --points-at "$SHA" --format='%(refname:short)' refs/heads refs/remotes 2>/dev/null | head -1)"
+[ -z "$BRANCH" ] && BRANCH="detached"
+BRANCH="${BRANCH#origin/}"
 WORKTREE="$(mktemp -d "${TMPDIR:-/tmp}/rentkeeper-verify.XXXXXX")"
 STARTED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
