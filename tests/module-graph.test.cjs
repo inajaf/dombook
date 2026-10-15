@@ -19,15 +19,32 @@ const path = require("node:path");
 // regular expressions reports destructuring targets and parameters as errors, and a test nobody
 // trusts is worse than no test.
 const RENDERER = path.join(__dirname, "..", "src", "renderer", "js");
+const SCRIPTS = path.join(__dirname, "..", "scripts");
 
+/**
+ * Every ES module in the project, not only the renderer's.
+ *
+ * The renderer is the graph this test was written for — it has no bundler, so nothing links it
+ * ahead of time and a missing import is a `ReferenceError` at the moment that line runs. The
+ * harness under `scripts/` is the same kind of graph for the same reason, and it was NOT covered:
+ * `scripts/e2e-lib.mjs` came to use `userDataDir` from a sibling without importing it and this
+ * suite stayed green. The failure it would have produced is the one that costs the most here —
+ * a profile that is never deleted, so every suite inherits the previous run's rows and the
+ * failures look like product bugs.
+ */
 function moduleFiles() {
-  const files = fs.readdirSync(RENDERER)
-    .filter((name) => name.endsWith(".js"))
-    .map((name) => path.join(RENDERER, name));
-  const views = path.join(RENDERER, "views");
-  if (fs.existsSync(views)) {
-    files.push(...fs.readdirSync(views).filter((name) => name.endsWith(".js")).map((name) => path.join(views, name)));
-  }
+  const files = [];
+  const add = (dir, filter = () => true) => {
+    if (!fs.existsSync(dir)) return;
+    for (const name of fs.readdirSync(dir)) {
+      if (!name.endsWith(".js") && !name.endsWith(".mjs")) continue;
+      if (filter(name)) files.push(path.join(dir, name));
+    }
+  };
+  add(RENDERER);
+  add(path.join(RENDERER, "views"));
+  add(SCRIPTS);
+  add(path.join(SCRIPTS, "lib"));
   return files;
 }
 
@@ -71,18 +88,92 @@ function importedNames(source) {
   return names;
 }
 
-/** Comments, strings and template literals mention names without using them. */
+/**
+ * Replace comments and string literals with BLANKS OF THE SAME LENGTH.
+ *
+ * This was five regular expressions, and they were wrong in a way that mattered: a template literal
+ * containing `${...}` closes at the FIRST backtick the regex finds, not at the real one, so
+ * everything after a mis-paired backtick was DELETED from the text under analysis. On
+ * `scripts/e2e-lib.mjs` — a file full of template literals holding CDP blocks — the stripper
+ * reduced 14628 bytes to 5054, and every check below ran against the remaining third and reported
+ * a pass. `userDataDir`, used without being imported a few lines past the damage, was never seen.
+ *
+ * That is the failure this project already has a name for: a measurement that silently skips what
+ * it cannot parse is worse than no measurement, because it reports a pass. So the replacement is a
+ * scanner rather than a pattern, and it is LENGTH-PRESERVING on purpose — the test below asserts
+ * that for every file, so a stripper that eats code fails loudly instead of quietly.
+ */
 function stripNonCode(text) {
-  return text
-    .replace(/\/\*[\s\S]*?\*\//g, " ")
-    .replace(/\/\/[^\n]*/g, " ")
-    .replace(/`(?:[^`\\]|\\.)*`/g, "``")
-    .replace(/"(?:[^"\\\n]|\\.)*"/g, '""')
-    .replace(/'(?:[^'\\\n]|\\.)*'/g, "''");
+  const out = text.split("");
+  const blank = (from, to) => {
+    for (let k = from; k < to && k < out.length; k += 1) if (out[k] !== "\n") out[k] = " ";
+  };
+  const n = text.length;
+  let i = 0;
+  while (i < n) {
+    const c = text[i];
+    if (c === "/" && text[i + 1] === "/") {
+      const stop = text.indexOf("\n", i);
+      const end = stop === -1 ? n : stop;
+      blank(i, end);
+      i = end;
+      continue;
+    }
+    if (c === "/" && text[i + 1] === "*") {
+      const stop = text.indexOf("*/", i + 2);
+      const end = stop === -1 ? n : stop + 2;
+      blank(i, end);
+      i = end;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      let j = i + 1;
+      while (j < n && text[j] !== c) {
+        if (text[j] === "\\") j += 1;
+        j += 1;
+      }
+      const end = Math.min(j + 1, n);
+      blank(i, end);
+      i = end;
+      continue;
+    }
+    if (c === "`") {
+      // A template closes at its OWN backtick, not at the first one inside an interpolation, and
+      // `${` may nest. Tracking that depth is the whole difference between this and the regex.
+      let j = i + 1;
+      let depth = 0;
+      while (j < n) {
+        if (text[j] === "\\") { j += 2; continue; }
+        if (text[j] === "$" && text[j + 1] === "{") { depth += 1; j += 2; continue; }
+        if (text[j] === "}" && depth > 0) { depth -= 1; j += 1; continue; }
+        if (text[j] === "`" && depth === 0) { j += 1; break; }
+        j += 1;
+      }
+      blank(i, j);
+      i = j;
+      continue;
+    }
+    i += 1;
+  }
+  return out.join("");
 }
 
 const files = moduleFiles();
 const sources = new Map(files.map((file) => [file, fs.readFileSync(file, "utf8")]));
+
+test("разбор кода не съедает сам код", () => {
+  // The stricter check below is worth only what it can SEE. A stripper that removes a third of a
+  // file makes every check after it vacuous while still reporting a pass — which is what happened
+  // here — so the property is asserted rather than assumed.
+  const shrunk = [];
+  for (const [file, source] of sources) {
+    const stripped = stripNonCode(source);
+    if (stripped.length !== source.length) {
+      shrunk.push(`${path.relative(process.cwd(), file)}: ${source.length} → ${stripped.length}`);
+    }
+  }
+  assert.deepEqual(shrunk, [], "стриппер обязан сохранять длину: он затирает код пробелами, а не удаляет его");
+});
 
 test("модуль не пользуется экспортом соседа, не импортировав его", () => {
   const problems = [];
@@ -115,6 +206,10 @@ test("каждый импорт указывает на то, что модул�
   const problems = [];
   for (const file of moduleFiles()) {
     for (const match of sources.get(file).matchAll(/import\s*\{([^}]*)\}\s*from\s*"([^"]+)"/g)) {
+      // Only RELATIVE imports are part of this graph. A Node builtin (`node:fs`) has no file to
+      // resolve to and no exports to compare against, and treating one as a sibling produced a
+      // page of confident nonsense the moment this suite was widened to cover scripts/.
+      if (!match[2].startsWith(".")) continue;
       const target = path.resolve(path.dirname(file), match[2]);
       const wanted = match[1].split(",").map((piece) => piece.trim().split(/\s+as\s+/)[0]).filter(Boolean);
       for (const name of wanted) {

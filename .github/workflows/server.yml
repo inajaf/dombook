@@ -38,7 +38,20 @@ jobs:
       - name: Start the database
         run: scripts/db.sh up
 
+      # The end-to-end suites launch the real desktop app and drive it over the DevTools
+      # Protocol, so they need a display. This is also the step that makes runtime verification
+      # MANDATORY rather than remembered: `main` requires this check to pass before a merge, and
+      # an agent that skips the suites locally still cannot merge past them.
+      - name: A display for the app
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq xvfb
+
       # `-p 1` (inside the script) is required, not an optimisation: every integration test
       # package shares one database and each resets the schema. See server/README.md.
       - name: All checks
-        run: scripts/check-all.sh
+        run: xvfb-run -a scripts/check-all.sh --e2e
+
+      # The app writes here and a failed suite leaves the log behind; without it a red run says
+      # only "checks failed" and the reason never leaves the runner.
+      - name: App log
+        if: failure()
+        run: tail -60 /tmp/e2e-app.log /tmp/e2e-api.log 2>/dev/null || true

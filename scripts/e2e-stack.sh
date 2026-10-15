@@ -27,6 +27,36 @@ DB="$RENTKEEPER_E2E_DB"
 PORT="${RENTKEEPER_E2E_PORT:-8787}"
 CDP_PORT="${CDP_PORT:-9555}"
 
+# Where Electron actually is, asked of the package rather than assembled.
+#
+# This used to be a hardcoded `node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`,
+# which does not exist on Linux — so the end-to-end suites could never run in CI, and runtime
+# verification stayed a thing a developer did on a laptop. `check-web.mjs` already resolved the
+# binary this way after the same path failed CI with ENOENT; the lesson had not been applied here.
+ELECTRON_BIN="$(node -p 'require("electron")' 2>/dev/null || true)"
+if [ ! -x "$ELECTRON_BIN" ]; then
+  echo "cannot find the Electron binary (require("electron") answered '${ELECTRON_BIN}')" >&2
+  echo "  run npm install, and see the note about ELECTRON_RUN_AS_NODE in AGENTS.md" >&2
+  exit 1
+fi
+
+# Chromium's SUID sandbox helper is owned by the checkout on a CI runner and is not setuid, so
+# the app aborts before it opens its debug port. Local files and 127.0.0.1 only, Linux only.
+APP_FLAGS=()
+[ "$(uname -s)" = "Linux" ] && APP_FLAGS+=(--no-sandbox)
+
+# A GUI process needs a display. CI has xvfb; a headless container may not, and a stack that
+# silently fails to start is worse than one that says why.
+APP_RUNNER=()
+if [ "$(uname -s)" = "Linux" ] && [ -z "${DISPLAY:-}" ]; then
+  if command -v xvfb-run >/dev/null 2>&1; then
+    APP_RUNNER=(xvfb-run -a)
+  else
+    echo "no DISPLAY and no xvfb-run: the desktop app cannot be started here" >&2
+    exit 1
+  fi
+fi
+
 # Its own database, so a run cannot destroy development data, but on the SAME server the rest
 # of the project uses. A separate instance here is how the suites drift onto a schema the
 # server does not have.
@@ -38,8 +68,10 @@ stop_app() {
   # `.../MacOS/Electron <project> --remote-debugging-port=...`, so a pattern anchored on a
   # trailing space misses it, the old process keeps the CDP port, and the new one dies with
   # "bind() failed: Address already in use". The symptom is a suite that hangs at connect.
-  pkill -9 -f "electron/dist/Electron.app/Contents/MacOS/Electron" 2>/dev/null || true
-  for pid in $(pgrep -f "MacOS/Electron" 2>/dev/null || true); do kill -9 "$pid" 2>/dev/null || true; done
+  # Match the binary itself. The macOS-shaped patterns this held before matched nothing on Linux,
+  # so a stale app kept the debug port and the next suite attached to the previous run's window.
+  pkill -9 -f "$ELECTRON_BIN" 2>/dev/null || true
+  for pid in $(pgrep -f "rentkeeper-desktop" 2>/dev/null || true); do kill -9 "$pid" 2>/dev/null || true; done
   sleep 2
   # Wait for the debug port to actually be free before starting another app.
   for _ in $(seq 1 20); do
@@ -66,12 +98,17 @@ start_api() {
   echo "API did not start; see /tmp/e2e-api.log" >&2; tail -5 /tmp/e2e-api.log >&2; return 1
 }
 start_app() {
-  rm -rf "$HOME/Library/Application Support/rentkeeper-desktop"
+  # Asked of the same module the JS harness uses, so the two cannot disagree about what "clean"
+  # means. The path was macOS-only, which on a Linux runner deleted nothing and left every suite
+  # inheriting the previous run's rows.
+  for name in rentkeeper-desktop dombook-desktop; do
+    rm -rf "$(node "${ROOT}/scripts/lib/profile.mjs" "$name")"
+  done
   # The app path is passed EXPLICITLY. Electron resolves "." against the working directory,
   # not against a project path, so launching from elsewhere silently starts whatever package
   # happens to sit in the cwd — and the app then never exposes CDP on the expected port.
   env -u ELECTRON_RUN_AS_NODE RENTKEEPER_API_URL="http://127.0.0.1:${PORT}" \
-    "${ROOT}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron" "$ROOT" \
+    ${APP_RUNNER[@]+"${APP_RUNNER[@]}"} "$ELECTRON_BIN" ${APP_FLAGS[@]+"${APP_FLAGS[@]}"} "$ROOT" \
     --remote-debugging-port="${CDP_PORT}" > /tmp/e2e-app.log 2>&1 &
   for _ in $(seq 1 30); do
     curl -sf "http://127.0.0.1:${CDP_PORT}/json/list" >/dev/null 2>&1 && { sleep 2; return 0; }
