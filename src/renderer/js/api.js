@@ -5,6 +5,7 @@
  * call crosses IPC, where the main process checks the session. A browser has no bridge, so
  * `createBrowserDemoApi` answers from memory — a demo, not the product.
  */
+import { addDaysIso, nightsBetween } from "./formatters.js";
 
 export const api = window.domBook || createBrowserDemoApi();
 

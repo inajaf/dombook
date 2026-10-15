@@ -12,7 +12,7 @@ Two stacks live in one repository, and it is worth knowing which one a change be
 |---|---|
 | `src/main.cjs`, `src/main/` | Electron main process: IPC handlers, auth, sync client |
 | `src/database.cjs` | The desktop domain layer on sql.js (in-memory SQLite + file persistence) |
-| `src/renderer/` | Sandboxed renderer (`app.js`, `styles.css`, `i18n/`) — cannot `require` |
+| `src/renderer/` | Sandboxed renderer — cannot `require`. Entry `js/app.js`; see the module map below |
 | `src/domain/booking/` | Booking-policy math shared with the server through `fixtures/` |
 | `server/` | Go + PostgreSQL API. `server/README.md` is authoritative for it |
 | `scripts/e2e-*.mjs` | Suites that drive the real app over CDP; `verify-*.mjs` check API contracts |
@@ -158,6 +158,42 @@ What it still tells you: it was the behaviour the Go server had to match. Its ru
 subscription-shaped (`free | pro | business`, 1 place + 1 property), which the per-unit
 licensing model replaced — see the licences section above. Its migration files are the source
 of the D1 shapes that `internal/d1import` reads.
+
+## The renderer is a module graph with no bundler
+
+`src/renderer/js/` is ES modules loaded by `<script type="module">`, which works over `file://` in
+this Electron version — verified before the split depended on it, because the alternative (a custom
+protocol to serve the renderer) is a much larger change. **No build step, no transpiler: the file
+the browser loads is the file in the repository.**
+
+| | |
+|---|---|
+| `js/app.js` | the shell: routing, redrawing, the login flow, boot |
+| `js/api.js` | everything the page asks the outside world for, including the browser demo |
+| `js/store.js` | the state object and the page labels |
+| `js/formatters.js` | values to words and numbers — pure, no DOM, no state |
+| `js/dom.js` | `$`, `$$`, `escapeHtml`, `icon`, `setBusy`, `showError` |
+| `js/theme.js` | the theme and text-size switches |
+| `js/toast.js`, `js/modal.js` | the message with an action, and the confirmation |
+| `js/runtime.js` | the seam a view uses to ask the SHELL to redraw |
+| `js/views/*.js` | one module per page: `calendar`, `dashboard`, `reservations`, `properties`, `rentals`, `conflicts`, `settings` |
+| `js/theme-boot.js` | the ONE classic script, in `<head>`: a module is deferred, so a module would paint the window light and then turn it dark |
+
+- **A view never imports the shell.** The shell imports the views to draw them; the other direction
+  is a cycle, and a cycle's failure mode is a half-initialised module rather than an error. A view
+  that needs a redraw calls `runtime.refresh()`; the shell fills `runtime` in at boot
+  (`connectShell`). Keep it one-way.
+- **A missing import is not a build error here.** It is a `ReferenceError` at the moment that line
+  runs, and only then. Three shipped during the split: `$` in `toast.js` (so the message reporting a
+  failure was itself the failure), `api` in `views/properties.js` (so saving a unit did nothing),
+  and `statusLabelsFor` in `views/conflicts.js`, which never existed anywhere — a missing EXPORT is
+  worse still: the browser refuses to link the graph and the window is blank. `tests/module-graph.test.cjs`
+  now fails on both: a name a sibling exports that this file did not import, and an import that its
+  target does not export. It is deliberately narrow — a general unresolved-identifier linter written
+  with regular expressions reports parameters and destructuring targets as errors, and a test nobody
+  trusts is worse than no test.
+- Exports are computed from what OTHER files reference, so a module's surface is what it actually
+  lends out rather than everything it happens to define.
 
 ## The renderer is sandboxed (desktop)
 
