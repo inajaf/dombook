@@ -1,328 +1,23 @@
-const PAGE_META = {
-  dashboard: { eyebrow: "Рабочий день", title: "Сегодня", action: "Новая бронь", actionType: "reservation", search: false },
-  calendar: { eyebrow: "Доступность", title: "Календарь", action: "Новая бронь", actionType: "reservation", search: false },
-  reservations: { eyebrow: "Гости и деньги", title: "Бронирования", action: "Новая бронь", actionType: "reservation", search: true },
-  properties: { eyebrow: "Инвентарь", title: "Объекты", action: "Добавить объект", actionType: "property", search: true },
-  rentals: { eyebrow: "Договоры", title: "Аренда", action: "Новый договор", actionType: "rental", search: true },
-  conflicts: { eyebrow: "Целостность данных", title: "Конфликты", action: "Новая бронь", actionType: "reservation", search: false },
-  settings: { eyebrow: "Надёжность", title: "Настройки", action: "Создать backup", actionType: "backup", search: false },
-};
-
-const STATUS_LABELS = {
-  hold: "Холд",
-  confirmed: "Подтверждена",
-  checked_in: "Заехал",
-  checked_out: "Выехал",
-  cancelled: "Отменена",
-  no_show: "Не заехал",
-};
-
-const DEPOSIT_LABELS = {
-  none: "Не требуется",
-  due: "Ожидается",
-  received: "Получен",
-  returned: "Возвращён",
-  partially_withheld: "Частично удержан",
-  withheld: "Удержан",
-};
-
-const state = {
-  page: "dashboard",
-  places: [],
-  properties: [],
-  reservations: [],
-  dashboard: null,
-  calendar: null,
-  backups: [],
-  systemInfo: null,
-  // The price of the booking being edited, as computed by the main process. Null until the
-  // dates and the unit are both chosen.
-  quote: null,
-  // Bumped per request so a slow quote cannot overwrite a newer one.
-  quoteRequest: 0,
-  // Set when this sign-in created the account (the address was not loginable a moment ago).
-  accountCreated: false,
-  // True once the owner types an amount: the computed figure stops replacing it.
-  accommodationManual: false,
-  // The booking the documents dialog is currently about, and where generated documents live.
-  documentsReservation: null,
-  documentsFolder: "",
-  reservationFilter: "all",
-  search: "",
-  expandedGroups: new Set(),
-  session: null,
-  authBaseUrl: null,
-  // Conflicts are bookings that arrived from a device that was offline and collided with
-  // dates already sold. They are stored rather than rejected, so they are visible here
-  // instead of silently missing from the calendar.
-  conflicts: [],
-  sync: { pending: 0, lastResult: null, cursor: 0 },
-  // The account's booking window as last reported by the server. Cached so the panel shows
-  // real values offline rather than defaults it would invite the owner to overwrite.
-  bookingPolicy: null,
-  // The account's licence, as last reported by the server. Cached in the main process so an
-  // offline device still knows what it may do.
-  entitlements: null,
-  // Tenancies, filtered from the same reservation list the rest of the app uses. Kept
-  // separate so the page and its badge do not re-scan the list on every render.
-  rentals: [],
-};
-
-const api = window.domBook || createBrowserDemoApi();
-const $ = (selector, root = document) => root.querySelector(selector);
-const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-const interfaceLocale = () => window.i18n?.locale || "ru-RU";
-const interfaceLanguage = () => window.i18n?.language || "ru";
-
 /**
- * Interface text size.
+ * The renderer's entry point: the shell.
  *
- * Everything in styles.css is sized from `--text-scale`, so this is the whole implementation of
- * "make it readable" — one number. It is a property of the SCREEN rather than of the business:
- * a 60-year-old owner on a laptop wants large type, the same account on a wall-mounted office
- * display does not, and neither should sync the other's preference. That is why it lives in
- * localStorage and not in app_settings, which the server replicates.
+ * It owns the screen — routing between pages, redrawing after a write, the login flow — and it is
+ * the only module that wires the others together. Everything else is a leaf: api.js talks to the
+ * main process, store.js holds the state, formatters.js turns values into words, views/ draw a
+ * page, and none of them knows about the others beyond that.
+ *
+ * A MODULE, loaded with <script type="module">. That works over file:// in this Electron version,
+ * which is what keeps the project build-free: no bundler, no transpiler, and the file the browser
+ * loads is the file in the repository.
  */
-/**
- * The theme switch.
- *
- * The choice is light/dark/auto; the DOCUMENT always carries a resolved light or dark, because the
- * stylesheet has one dark block and a media-query copy would be a second palette to keep in step.
- * The pre-paint bootstrap in js/theme-boot.js owns reading and applying it; this only drives the
- * two controls and keeps them agreeing with each other.
- *
- * Like the text size, and for the same reason: it is a device preference, not account data.
- * `app_settings` replicates, so syncing a theme would let one device repaint another.
- */
-const THEME_NAMES = { auto: "Как в системе", light: "Светлая", dark: "Тёмная" };
 
-function themeChoice() {
-  return window.RentKeeperTheme?.read() || "auto";
-}
-
-/** The glyph shows what a click will SWITCH TO, which is what a toggle is for. */
-function themeIcon(resolved) {
-  return resolved === "dark"
-    ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2.2M12 19.2v2.2M4.2 12H2M22 12h-2.2M6.3 6.3 4.8 4.8M19.2 19.2l-1.5-1.5M17.7 6.3l1.5-1.5M4.8 19.2l1.5-1.5"/></svg>'
-    : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 14.6A8.6 8.6 0 1 1 9.4 3.5a6.9 6.9 0 0 0 11.1 11.1Z"/></svg>';
-}
-
-function applyTheme(choice) {
-  const resolved = window.RentKeeperTheme?.apply(choice) || "light";
-  const label = $("#themeToggleLabel");
-  const icon = $("#themeToggleIcon");
-  const select = $("#themeSelect");
-  if (label) label.textContent = THEME_NAMES[resolved];
-  if (icon) icon.innerHTML = themeIcon(resolved);
-  // The select shows the CHOICE, including "auto", while the button shows what is on screen.
-  if (select && select.value !== choice) select.value = choice;
-  const toggle = $("#themeToggle");
-  if (toggle) {
-    toggle.setAttribute("aria-label", `Тема: ${THEME_NAMES[resolved]}. Переключить`);
-    toggle.dataset.resolved = resolved;
-  }
-  return resolved;
-}
-
-const TEXT_SCALES = { normal: 1, large: 1.12, xlarge: 1.28 };
-const TEXT_SCALE_KEY = "rentkeeper.interface-scale";
-
-function textScaleName() {
-  try {
-    const stored = localStorage.getItem(TEXT_SCALE_KEY);
-    return stored in TEXT_SCALES ? stored : "normal";
-  } catch {
-    // Storage can be unavailable; the default is the same as a first run.
-    return "normal";
-  }
-}
-
-function applyTextScale(name) {
-  const resolved = name in TEXT_SCALES ? name : "normal";
-  document.documentElement.style.setProperty("--text-scale", String(TEXT_SCALES[resolved]));
-  try {
-    localStorage.setItem(TEXT_SCALE_KEY, resolved);
-  } catch {
-    // A device that refuses storage still gets the size for this session.
-  }
-  return resolved;
-}
-
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function icon(id) {
-  return `<svg aria-hidden="true"><use href="#${id}"></use></svg>`;
-}
-
-function money(minor, currency = "AZN") {
-  return new Intl.NumberFormat(interfaceLocale(), {
-    style: "currency",
-    currency,
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  }).format(Number(minor || 0) / 100);
-}
-
-function objectCountLabel(count) {
-  const value = Number(count || 0);
-  if (interfaceLanguage() === "en") return `${value} ${value === 1 ? "property" : "properties"}`;
-  if (interfaceLanguage() === "az") return `${value} obyekt`;
-  const mod100 = value % 100;
-  const mod10 = value % 10;
-  if (mod100 >= 11 && mod100 <= 14) return `${value} объектов`;
-  if (mod10 === 1) return `${value} объект`;
-  if (mod10 >= 2 && mod10 <= 4) return `${value} объекта`;
-  return `${value} объектов`;
-}
-
-function guestCountLabel(count) {
-  const value = Number(count || 0);
-  if (interfaceLanguage() === "en") return `${value} ${value === 1 ? "guest" : "guests"}`;
-  if (interfaceLanguage() === "az") return `${value} qonaq`;
-  const mod100 = value % 100;
-  const mod10 = value % 10;
-  if (mod100 >= 11 && mod100 <= 14) return `${value} гостей`;
-  if (mod10 === 1) return `${value} гость`;
-  if (mod10 >= 2 && mod10 <= 4) return `${value} гостя`;
-  return `${value} гостей`;
-}
-
-function capacityLabel(count) {
-  if (interfaceLanguage() === "en") return `up to ${guestCountLabel(count)}`;
-  if (interfaceLanguage() === "az") return `maksimum ${guestCountLabel(count)}`;
-  return `до ${Number(count || 0)} гостей`;
-}
-
-function bookingWindowHelp(fromDate, toDate) {
-  if (interfaceLanguage() === "en") return `Check-in can be selected from ${longDate(fromDate)} to ${longDate(toDate)}.`;
-  if (interfaceLanguage() === "az") return `Giriş ${longDate(fromDate)} tarixindən ${longDate(toDate)} tarixinədək seçilə bilər.`;
-  return `Можно выбрать заезд с ${longDate(fromDate)} по ${longDate(toDate)}.`;
-}
-
-function maximumCheckoutHelp(date) {
-  if (interfaceLanguage() === "en") return `For the selected check-in, checkout must be no later than ${longDate(date)}.`;
-  if (interfaceLanguage() === "az") return `Seçilmiş giriş üçün çıxış ${longDate(date)} tarixindən gec olmamalıdır.`;
-  return `Для выбранного заезда — не позже ${longDate(date)}.`;
-}
-
-function maximumStayHelp(months) {
-  if (interfaceLanguage() === "en") return `Maximum stay is ${months} calendar months.`;
-  if (interfaceLanguage() === "az") return `Maksimum qalma müddəti ${months} təqvim ayıdır.`;
-  return `Проживание — максимум ${months} календарных месяца.`;
-}
-
-function balanceLabel(reservation) {
-  const value = reservation.refund_due_minor > 0
-    ? money(reservation.refund_due_minor, reservation.currency)
-    : money(reservation.balance_minor, reservation.currency);
-  if (reservation.refund_due_minor > 0) {
-    if (interfaceLanguage() === "en") return `refund ${value}`;
-    if (interfaceLanguage() === "az") return `qaytarılacaq ${value}`;
-    return `к возврату ${value}`;
-  }
-  if (interfaceLanguage() === "en") return `balance ${value}`;
-  if (interfaceLanguage() === "az") return `qalıq ${value}`;
-  return `остаток ${value}`;
-}
-
-function shortDate(value) {
-  if (!value) return "—";
-  return new Intl.DateTimeFormat(interfaceLocale(), { day: "2-digit", month: "short" })
-    .format(new Date(`${value}T00:00:00`))
-    .replace(".", "");
-}
-
-function longDate(value) {
-  if (!value) return "—";
-  return new Intl.DateTimeFormat(interfaceLocale(), { day: "numeric", month: "long", year: "numeric" })
-    .format(new Date(`${value}T00:00:00`));
-}
-
-function decimalToMinor(value) {
-  return Math.round(Number(value || 0) * 100);
-}
-
-function minorToDecimal(value) {
-  return (Number(value || 0) / 100).toFixed(2);
-}
-
-function addDaysIso(value, days = 1) {
-  const date = new Date(`${value}T00:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
-}
-
-function nightsBetween(checkInDate, checkOutDate) {
-  if (!checkInDate || !checkOutDate) return 0;
-  const checkIn = new Date(`${checkInDate}T00:00:00Z`);
-  const checkOut = new Date(`${checkOutDate}T00:00:00Z`);
-  const nights = Math.round((checkOut - checkIn) / 86_400_000);
-  return Number.isFinite(nights) && nights > 0 ? nights : 0;
-}
-
-async function unwrap(promise) {
-  const result = await promise;
-  if (!result?.ok) throw new Error(result?.error || "Операция не выполнена");
-  return result.data;
-}
-
-/**
- * A short message, optionally with one thing to do about it.
- *
- * The action exists for the case that produced it: a generated document announced itself and then
- * left the owner to find `~/Library/Application Support` — a directory Finder hides by default —
- * to look at the file they had just made. A message that says "the document is ready" without a
- * way to open it is only half an answer.
- */
-function toast(message, type = "success", action = null) {
-  const element = document.createElement("div");
-  element.className = `toast ${type === "error" ? "error" : ""}`;
-  const text = document.createElement("span");
-  text.textContent = message;
-  element.append(text);
-  if (action) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "toast-action";
-    button.textContent = action.label;
-    button.addEventListener("click", () => {
-      element.remove();
-      action.run();
-    });
-    element.append(button);
-  }
-  $("#toastRegion").append(element);
-  // A toast with an action stays long enough to be read and clicked; both disappear together.
-  const lifetime = action ? 9000 : 3700;
-  setTimeout(() => element.classList.add("is-leaving"), lifetime);
-  setTimeout(() => element.remove(), lifetime + 200);
-}
-
-function showError(target, error) {
-  target.textContent = error.message || String(error);
-  target.hidden = false;
-  target.focus?.();
-}
-
-function setBusy(button, busy, text = "Сохранение…") {
-  if (busy) {
-    button.dataset.originalText = button.textContent;
-    button.textContent = text;
-    button.disabled = true;
-    button.classList.add("is-busy");
-  } else {
-    button.textContent = button.dataset.originalText || button.textContent;
-    button.disabled = false;
-    button.classList.remove("is-busy");
-  }
-}
+import { $, $$, escapeHtml, icon, setBusy, showError } from "./dom.js";
+import { interfaceLocale, interfaceLanguage, money, objectCountLabel, guestCountLabel, capacityLabel, bookingWindowHelp, maximumCheckoutHelp, maximumStayHelp, balanceLabel, shortDate, longDate, decimalToMinor, minorToDecimal, addDaysIso, nightsBetween, addCalendarMonthsIso, nightLabel, monthLabel, formulaLabel, privateStorageLabel, formatBytes, reservationStatusLabel, ROLE_LABELS, STATUS_LABELS, DEPOSIT_LABELS } from "./formatters.js";
+import { themeChoice, applyTheme, textScaleName, applyTextScale } from "./theme.js";
+import { toast } from "./toast.js";
+import { confirmAction } from "./modal.js";
+import { PAGE_META, state } from "./store.js";
+import { api, unwrap } from "./api.js";
 
 async function refreshCore() {
   const [places, properties, reservations, dashboard, calendar, systemInfo] = await Promise.all([
@@ -630,28 +325,7 @@ function renderRentals() {
   }).join("");
 }
 
-/**
- * The Russian label for a reservation status.
- *
- * The rentals page rendered the raw stored value ("HOLD"), which is an internal token rather
- * than something an owner should read. An unknown status falls back to the raw value so a new
- * status is visible rather than blank.
- */
-const RESERVATION_STATUS_LABELS = {
-  hold: "Предварительная",
-  confirmed: "Подтверждена",
-  checked_in: "Гость в доме",
-  checked_out: "Завершена",
-  cancelled: "Отменена",
-  no_show: "Не приехал",
-  conflict: "Конфликт",
-};
 
-function reservationStatusLabel(status) {
-  return RESERVATION_STATUS_LABELS[status] || status || "";
-}
-
-/** Parse stored meter readings, tolerating anything unreadable. */
 function readMeterReadings(raw) {
   if (!raw) return {};
   try {
@@ -1199,19 +873,6 @@ function renderSettings() {
   `).join("") : `<div class="empty-inline">Копий пока нет. Создайте первую перед внесением реальных данных.</div>`;
 }
 
-/**
- * Who may sign in to this account, and who has been invited.
- *
- * Isolation between accounts is the default and is enforced on the server; this panel is the only
- * place access is GRANTED. Two rules are the server's, and the panel states them rather than
- * pretending otherwise: an invitation belongs to one email address, and it can never grant
- * ownership.
- */
-const ROLE_LABELS = {
-  owner: "Владелец",
-  admin: "Администратор",
-  staff: "Сотрудник",
-};
 
 async function refreshTeam() {
   const list = $("#teamList");
@@ -1305,19 +966,7 @@ async function submitRequisites(event) {
   }
 }
 
-function privateStorageLabel(value, fallback) {
-  if (!value) return fallback;
-  if (value === "Browser local storage" || value === "Browser downloads") return value;
-  const segments = String(value).split(/[\\/]/).filter(Boolean);
-  return segments.at(-1) || fallback;
-}
 
-function formatBytes(bytes) {
-  const units = interfaceLanguage() === "ru" ? ["Б", "КБ", "МБ"] : ["B", "KB", "MB"];
-  if (bytes < 1024) return `${bytes} ${units[0]}`;
-  if (bytes < 1_048_576) return `${(bytes / 1024).toFixed(1)} ${units[1]}`;
-  return `${(bytes / 1_048_576).toFixed(1)} ${units[2]}`;
-}
 
 function updateBadge() {
   const count = state.reservations.filter((item) => ["hold", "confirmed", "checked_in"].includes(item.status)).length;
@@ -1375,13 +1024,6 @@ function activeProperties() {
   return state.properties.filter((property) => property.status === "active");
 }
 
-function addCalendarMonthsIso(value, months) {
-  const [year, month, day] = value.split("-").map(Number);
-  const target = new Date(Date.UTC(year, month - 1 + months, 1));
-  const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
-  target.setUTCDate(Math.min(day, lastDay));
-  return target.toISOString().slice(0, 10);
-}
 
 function updateReservationDateLimits() {
   const form = $("#reservationForm");
@@ -1681,62 +1323,6 @@ function renderReservationCalculation() {
   $("#calculationDeposit").textContent = money(depositMinor, property?.currency);
 }
 
-/** The night count with the right Russian form, which the app already needed elsewhere. */
-function nightLabel(count) {
-  if (interfaceLanguage() === "en") return count === 1 ? "night" : "nights";
-  if (interfaceLanguage() === "az") return "gecə";
-  const mod100 = count % 100;
-  const mod10 = count % 10;
-  if (mod100 >= 11 && mod100 <= 14) return "ночей";
-  if (mod10 === 1) return "ночь";
-  if (mod10 >= 2 && mod10 <= 4) return "ночи";
-  return "ночей";
-}
-
-/** "мес." with the right form, which the app already needed for the rentals page. */
-function monthLabel(months) {
-  if (interfaceLanguage() === "en") return months === 1 ? "month" : "months";
-  if (interfaceLanguage() === "az") return "ay";
-  const mod100 = months % 100;
-  const mod10 = months % 10;
-  if (mod100 >= 11 && mod100 <= 14) return "месяцев";
-  if (mod10 === 1) return "месяц";
-  if (mod10 >= 2 && mod10 <= 4) return "месяца";
-  return "месяцев";
-}
-
-/**
- * The one-line explanation above the total.
- *
- * It is the answer to "why is it this much?", which is the question a season raises: a stay whose
- * nights are not all the same price cannot be summarised as a rate times a count.
- */
-function formulaLabel(quote, property, currency) {
-  if (!quote) return "Выберите корректные даты";
-  if (quote.kind === "rental") {
-    const base = `${quote.months} × ${money(quote.monthlyRateMinor, property?.currency)}`;
-    return quote.discountPercent
-      ? `${base} − ${quote.discountPercent}% = ${money(quote.effectiveMonthlyMinor, property?.currency)}/мес`
-      : base;
-  }
-  if (!quote.nights) return "Выберите корректные даты";
-  const distinct = new Set(quote.lines.map((line) => line.nightlyRateMinor));
-  if (distinct.size === 1) return `${money(quote.lines[0].nightlyRateMinor, property?.currency)} × ${quote.nights}`;
-  return quote.lines
-    .map((line) => `${line.nights} × ${money(line.nightlyRateMinor, property?.currency)}`)
-    .join(" + ");
-}
-
-/**
- * Ask the main process what this booking costs, and show it.
- *
- * The arithmetic is NOT repeated here. The renderer is sandboxed and cannot load the pricing
- * module, and a second copy of seasons and discounts in the view is exactly the drift the shared
- * fixtures exist to prevent — the preview would then disagree with the amount the save stores.
- *
- * A quote that arrives out of order is dropped rather than rendered: two keystrokes in the date
- * field produce two requests, and the slower one is not the newer one.
- */
 async function recalculateReservationTotal() {
   const form = $("#reservationForm");
   const propertyId = form.elements.propertyId.value;
@@ -2041,23 +1627,6 @@ async function submitEarlyCheckout(event) {
   }
 }
 
-function confirmAction({ title, text, button = "Подтвердить", action }) {
-  $("#confirmTitle").textContent = title;
-  $("#confirmText").textContent = text;
-  $("#confirmAction").textContent = button;
-  const dialog = $("#confirmDialog");
-  dialog.returnValue = "";
-  dialog.showModal();
-  dialog.addEventListener("close", async function onClose() {
-    dialog.removeEventListener("close", onClose);
-    if (dialog.returnValue !== "confirm") return;
-    try {
-      await action();
-    } catch (error) {
-      toast(error.message, "error");
-    }
-  });
-}
 
 async function createBackup() {
   const button = $("#createBackup");
@@ -2704,184 +2273,38 @@ async function init() {
   await boot();
 }
 
-function createBrowserDemoApi() {
-  const storageKey = "dombook.web.v1";
-  let interfaceLanguage = "ru";
-  let places = [
-    { id: "1", name: "Дом отдыха «Лесная долина»", address: "Габала", has_food_service: 1, status: "active", notes: "", active_unit_count: 2, total_unit_count: 2 },
-  ];
-  let properties = [
-    { id: "1", place_id: "1", place_name: "Дом отдыха «Лесная долина»", place_address: "Габала", kind: "cottage", name: "Коттедж «Сосны»", location: "", capacity: 6, base_price_minor: 24000, deposit_minor: 30000, currency: "AZN", check_in_time: "15:00", check_out_time: "11:00", notes: "", status: "active", reservation_count: 1 },
-    { id: "2", place_id: "1", place_name: "Дом отдыха «Лесная долина»", place_address: "Габала", kind: "cottage", name: "Коттедж «У озера»", location: "", capacity: 8, base_price_minor: 32000, deposit_minor: 40000, currency: "AZN", check_in_time: "15:00", check_out_time: "11:00", notes: "", status: "active", reservation_count: 0 },
-    { id: "3", place_id: null, place_name: null, place_address: null, kind: "house", name: "Отдельный дом в Шеки", location: "Шеки", capacity: 3, base_price_minor: 17000, deposit_minor: 20000, currency: "AZN", check_in_time: "15:00", check_out_time: "11:00", notes: "", status: "active", reservation_count: 0 },
-  ];
-  let reservations = [];
-  let backups = [];
-  try {
-    const saved = JSON.parse(localStorage.getItem(storageKey) || "null");
-    if (saved) {
-      if (Array.isArray(saved.places)) places = normalizeIds(saved.places);
-      if (Array.isArray(saved.properties)) properties = normalizeIds(saved.properties);
-      if (Array.isArray(saved.reservations)) reservations = normalizeIds(saved.reservations);
-      if (Array.isArray(saved.backups)) backups = saved.backups;
-      if (["ru", "az", "en"].includes(saved.language)) interfaceLanguage = saved.language;
-    }
-  } catch (error) {
-    console.warn("RentKeeper web storage could not be restored", error);
-  }
-  const response = (data) => Promise.resolve({ ok: true, data });
-  const error = (message) => Promise.resolve({ ok: false, error: message });
-  let requisites = {};
-  const documentPreviewHtml = () => "<!doctype html><p>Документ формируется в приложении для компьютера.</p>";
-  const idOf = (value) => (value === null || value === undefined ? null : String(value));
-  const findById = (list, id, key = "id") => list.find((item) => idOf(item[key]) === idOf(id));
-  const normalizeIds = (list, keys = ["id", "place_id", "property_id", "reservation_id"]) => (list || []).map((item) => {
-    const copy = { ...item };
-    keys.forEach((key) => { if (copy[key] !== null && copy[key] !== undefined) copy[key] = String(copy[key]); });
-    return copy;
-  });
-  const persist = () => localStorage.setItem(storageKey, JSON.stringify({
-    version: 1,
-    language: interfaceLanguage,
-    places,
-    properties,
-    reservations,
-    backups,
-  }));
-  const persistedResponse = (data) => {
-    persist();
-    return response(data);
-  };
-  const exportBackup = () => {
-    const createdAt = new Date();
-    const file = `rentkeeper-web-${createdAt.toISOString().replaceAll(":", "-")}.json`;
-    const payload = JSON.stringify({ version: 1, exportedAt: createdAt.toISOString(), places, properties, reservations }, null, 2);
-    const blob = new Blob([payload], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = file;
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    const backup = { file, size: blob.size, createdAt: createdAt.toISOString() };
-    backups = [backup, ...backups].slice(0, 20);
-    return persistedResponse(backup);
-  };
-  const list = () => reservations.map((item) => {
-    const property = findById(properties, item.property_id);
-    return { ...item, property_name: property?.name || "—", place_name: property?.place_name || null, currency: "AZN", balance_minor: Math.max(item.total_minor - item.prepaid_minor, 0), refund_due_minor: Math.max(item.prepaid_minor - item.total_minor, 0) };
-  });
-  const demoReservation = (data, previous = null) => {
-    const property = findById(properties, data.propertyId);
-    const place = findById(places, property?.place_id);
-    const nights = nightsBetween(data.checkInDate, data.checkOutDate);
-    const nightlyRate = previous?.nightly_rate_minor || property.base_price_minor;
-    const meals = place?.has_food_service
-      ? (data.mealItems || []).filter((item) => Number(item.amountMinor) > 0)
-      : [];
-    const servicesMinor = meals.reduce((sum, item) => sum + Number(item.amountMinor), 0);
-    const accommodationMinor = nightlyRate * nights;
-    return {
-      property_id: data.propertyId, guest_name: data.guestName, guest_phone: data.guestPhone,
-      guest_email: data.guestEmail, check_in_date: data.checkInDate, check_out_date: data.checkOutDate,
-      adults: data.adults, children: data.children, status: data.status, nightly_rate_minor: nightlyRate,
-      accommodation_minor: accommodationMinor, services_minor: servicesMinor,
-      total_minor: accommodationMinor + servicesMinor, prepaid_minor: data.prepaidMinor,
-      deposit_minor: data.depositMinor, deposit_status: data.depositStatus, notes: data.notes,
-      actual_check_out_date: previous?.actual_check_out_date || null,
-      meals: meals.map((item) => ({
-        reservation_id: previous?.id || null,
-        meal_date: item.date,
-        meal_type: item.type,
-        amount_minor: item.amountMinor,
-      })),
-    };
-  };
-  return {
-    dashboard: { get: () => response({ today: new Date().toISOString().slice(0, 10), activeProperties: properties.filter((p) => p.status === "active").length, activeReservations: reservations.filter((r) => ["hold", "confirmed", "checked_in"].includes(r.status)).length, expectedMinor: reservations.reduce((sum, r) => sum + Math.max(r.total_minor - r.prepaid_minor, 0), 0), refundsDueMinor: reservations.reduce((sum, r) => sum + Math.max(r.prepaid_minor - r.total_minor, 0), 0), depositsHeldMinor: reservations.filter((r) => r.deposit_status === "received").reduce((sum, r) => sum + r.deposit_minor, 0), arrivals: [], departures: [] }) },
-    calendar: { get: (days = 14) => {
-      const start = new Date();
-      const dates = Array.from({ length: days }, (_, index) => new Date(start.getTime() + index * 86_400_000).toISOString().slice(0, 10));
-      const occupancy = [];
-      reservations.filter((r) => !["cancelled", "no_show"].includes(r.status)).forEach((r) => {
-        for (let cursor = new Date(`${r.check_in_date}T00:00:00`); cursor < new Date(`${r.actual_check_out_date || r.check_out_date}T00:00:00`); cursor = new Date(cursor.getTime() + 86_400_000)) {
-          occupancy.push({ property_id: r.property_id, night_date: cursor.toISOString().slice(0, 10), reservation_id: r.id, guest_name: r.guest_name, status: r.status });
-        }
-      });
-      return response({ dates, properties: properties.filter((p) => p.status === "active"), occupancy });
-    } },
-    places: {
-      list: () => response(places),
-      create: (data) => { if (places.some((p) => p.name.toLowerCase() === data.name.toLowerCase())) return error("Дом отдыха с таким названием уже существует"); const item = { id: String(Date.now()), name: data.name, address: data.address, has_food_service: data.hasFoodService ? 1 : 0, notes: data.notes, status: "active", active_unit_count: 0, total_unit_count: 0 }; places.push(item); return persistedResponse(item); },
-      update: (id, data) => { const item = findById(places, id); Object.assign(item, { name: data.name, address: data.address, has_food_service: data.hasFoodService ? 1 : 0, notes: data.notes }); properties.filter((property) => idOf(property.place_id) === idOf(id)).forEach((property) => Object.assign(property, { place_name: item.name, place_address: item.address })); return persistedResponse(item); },
-      archive: (id) => { findById(places, id).status = "archived"; return persistedResponse(true); },
-      restore: (id) => { findById(places, id).status = "active"; return persistedResponse(true); },
-    },
-    properties: {
-      list: () => response(properties),
-      create: (data) => { if (properties.some((p) => p.name.toLowerCase() === data.name.toLowerCase())) return error("Дом с таким наименованием уже существует"); const place = findById(places, data.placeId); const item = { id: String(Date.now()), place_id: data.placeId || null, place_name: place?.name || null, place_address: place?.address || null, kind: data.kind, name: data.name, location: data.location, capacity: data.capacity, base_price_minor: data.basePriceMinor, deposit_minor: data.depositMinor, currency: data.currency, check_in_time: data.checkInTime, check_out_time: data.checkOutTime, notes: data.notes, status: "active", reservation_count: 0 }; properties.push(item); return persistedResponse(item); },
-      update: (id, data) => { const item = findById(properties, id); const place = findById(places, data.placeId); Object.assign(item, { place_id: data.placeId || null, place_name: place?.name || null, place_address: place?.address || null, kind: data.kind, name: data.name, location: data.location, capacity: data.capacity, base_price_minor: data.basePriceMinor, deposit_minor: data.depositMinor, currency: data.currency, check_in_time: data.checkInTime, check_out_time: data.checkOutTime, notes: data.notes }); return persistedResponse(item); },
-      archive: (id) => { findById(properties, id).status = "archived"; return persistedResponse(true); },
-      restore: (id) => { findById(properties, id).status = "active"; return persistedResponse(true); },
-    },
-    reservations: {
-      list: () => response(list()),
-      create: (data) => { const item = { id: String(Date.now()), ...demoReservation(data) }; reservations.push(item); return persistedResponse(item); },
-      update: (id, data) => { const item = findById(reservations, id); Object.assign(item, demoReservation(data, item)); return persistedResponse(item); },
-      cancel: (id) => { findById(reservations, id).status = "cancelled"; return persistedResponse(true); },
-      delete: (id) => { reservations = reservations.filter((r) => !(idOf(r.id) === idOf(id))); return persistedResponse(true); },
-      earlyCheckout: (id, data) => {
-        const item = findById(reservations, id);
-        item.actual_check_out_date = data.actualCheckOutDate;
-        item.status = "checked_out";
-        item.meals = (item.meals || []).filter((meal) => meal.meal_date < data.actualCheckOutDate);
-        item.services_minor = item.meals.reduce((sum, meal) => sum + Number(meal.amount_minor), 0);
-        if (data.billingPolicy !== "keep_total") {
-          item.accommodation_minor = item.nightly_rate_minor * nightsBetween(item.check_in_date, data.actualCheckOutDate);
-        }
-        item.total_minor = item.accommodation_minor + item.services_minor;
-        return persistedResponse(item);
-      },
-    },
-    backups: { list: () => response(backups), create: exportBackup },
-    system: {
-      info: () => {
-        const today = new Date().toISOString().slice(0, 10);
-        return response({
-          databasePath: "Browser local storage",
-          backupDir: "Browser downloads",
-          databaseSize: new Blob([localStorage.getItem(storageKey) || ""]).size,
-          bookingPolicy: {
-            today,
-            maximumCheckInDate: addDaysIso(today, 21),
-            maximumCheckOutDate: null,
-            maximumAdvanceDays: 21,
-            maximumStayMonths: 3,
-            timeZone: "Asia/Baku",
-          },
-          language: interfaceLanguage,
-        });
-      },
-      setLanguage: (language) => {
-        interfaceLanguage = ["ru", "az", "en"].includes(language) ? language : "ru";
-        return persistedResponse(interfaceLanguage);
-      },
-      openBackupDirectory: () => response(true),
-      setDocumentRequisites: (data) => {
-        requisites = { ...requisites, ...data };
-        return persistedResponse(requisites);
-      },
-    },
-    // The browser build has no Electron main process to render a PDF in, so a document is
-    // downloaded as an HTML file instead of silently doing nothing. The demo is a preview of the
-    // product, and a button that appears to work is more honest than one that is missing.
-    documents: {
-      html: (data) => response(documentPreviewHtml(data)),
-      create: () => error("PDF создаётся только в приложении для компьютера"),
-      folder: () => response("Browser downloads"),
-      openFolder: () => response("Browser downloads"),
-    },
-  };
-}
+/**
+ * The handles the end-to-end suites drive the app through.
+ *
+ * They live on `window` because that is where a CDP `Runtime.evaluate` can reach them: the suites
+ * reload the page, create a booking through the bridge, and then need the SHELL to redraw — which
+ * is exactly what `refreshCore` does. Before the split these were globals by accident; now they
+ * are exported on purpose, and this list is the contract those suites depend on.
+ */
+Object.assign(window, {
+  state,
+  PAGE_META,
+  // The redraw the suites call after creating a row through the bridge: a write made behind the
+  // screen's back is invisible until the shell re-reads it.
+  refreshCore,
+  navigate,
+  activeProperties,
+  openDocumentsDialog,
+  openDocumentFile,
+  renderGeneratedDocuments,
+  openReservationDialog,
+  openPropertyDialog,
+  openPlaceDialog,
+  openRentalDialog,
+  applyTheme,
+  themeChoice,
+  applyTextScale,
+  textScaleName,
+  unwrap,
+  toast,
+});
 
+// Booting here rather than in a DOMContentLoaded handler: a module is deferred, so the document is
+// already parsed and every element the boot sequence reads exists.
 init();
+
