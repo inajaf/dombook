@@ -108,8 +108,17 @@ const checkedIn = await app.evaluate(`
 `);
 check(checkedIn.ok === true, "the guest can be checked in", `err=${checkedIn.error ?? "none"}`);
 check(checkedIn.data?.status === "checked_in", "the status is stored", `status=${checkedIn.data?.status}`);
-check(await nightsOn(base.unitId, addDays(base.today, 2), addDays(base.today, 5)) === 3,
-  "checking in keeps the nights occupied");
+// The window is the booking's OWN dates, not fixed offsets from today.
+//
+// It was `today+2 .. today+5`, which is only the booking's window when the free-window search
+// above happened to land on offset 2. On a clean database it lands on offset 1, and the check then
+// counted two of the three nights and failed — while the behaviour it names was perfectly correct.
+// It passed historically for a reason unrelated to what it asserts: leftover nights from an
+// earlier run of this suite pushed the search to an offset where the fixed window happened to
+// line up. That is the same trap this file's section header warns about, one level down.
+check(await nightsOn(base.unitId, stay.data.check_in_date, stay.data.check_out_date) === 3,
+  "checking in keeps the nights occupied",
+  `${stay.data.check_in_date}..${stay.data.check_out_date}`);
 
 // --- Early checkout -------------------------------------------------------
 // A guest leaves after one night. The nights that are no longer used must be released, or the

@@ -271,14 +271,20 @@ to use.
 
 ## End-to-end suites (real app, real database)
 
-`scripts/e2e-all.sh` brings up the stack and drives the actual Electron app over CDP — 93
-checks across six suites. These exist because every serious bug in this project was invisible
-to both unit suites:
+`scripts/e2e-all.sh` brings up the stack and drives the actual Electron app over CDP. These exist
+because every serious bug in this project was invisible to both unit suites:
 
 - **`e2e-scenarios.mjs`** — signup, the plan step, a guest house and a unit.
 - **`e2e-booking.mjs`** — a stay through the dialog, its nights on the calendar, overlap
   refused, back-to-back allowed, capacity enforced.
 - **`e2e-branding.mjs`** — the product name as rendered, in three locales and both windows.
+- **`e2e-interface.mjs`** — the sidebar's grouping, and the readability floor measured on the
+  rendered page (text sizes, contrast, control sizes) across every screen.
+- **`e2e-pricing.mjs`** — a season and a discount reaching the dialog, the amount and its
+  breakdown being stored, a negotiated amount overriding the calculation, and the unit dialog
+  keeping the values it does not show.
+- **`e2e-documents.mjs`** — a contract and an invoice written as real PDF files, checked for a
+  PDF header, a plausible size and a PAGE COUNT, plus the requisites they print.
 - **`e2e-operations.mjs`** — check-in, early checkout, cancel, delete, archive/restore, backup.
 - **`e2e-security.mjs`** — two tenants; neither can read, write or book into the other's data,
   and the signed-out bridge refuses everything.
@@ -297,6 +303,14 @@ to both unit suites:
 - **Never reuse fixed date offsets.** The operations suite derived `today+2..today+5`, and a
   leftover row from an earlier run made a correct booking look broken. It now picks the first
   free window from live occupancy and re-reads the booking's real dates for every later step.
+- **...including in the ASSERTION, not just in the setup.** The same suite picked its booking's
+  dates from live occupancy but then asserted occupancy over a fixed `today+2..today+5`. That
+  window is the booking's own only when the free-window search lands on offset 2; on a clean
+  database it lands on offset 1, and the check counted two of three nights and failed while the
+  behaviour it named was correct. It passed historically for a reason unrelated to what it
+  asserts — leftover nights from an earlier run pushed the search to a later offset. The check now
+  uses the booking's own dates. Deriving the fixture and hard-coding the expectation is not
+  deriving the fixture.
 - **Each suite creates its own place and unit, timestamped**, rather than sharing the demo seed.
 - **The renderer caches the unit list.** A unit created through the bridge is invisible to a
   dialog until `refreshCore()` runs, exactly as the app does after a form submit. Skipping it
@@ -341,7 +355,7 @@ candidate for any e2e failure in this project.
 
 ## Visual defects found by looking at the app
 
-Two layout faults that no assertion would have caught, both found by reading screenshots:
+Layout faults that no assertion would have caught, all found by reading screenshots:
 
 - **`.empty-state { display: grid }` beat the `hidden` attribute.** A UA `[hidden]` rule has no
   specificity over a class, so four elements stayed on screen while the renderer believed they
@@ -353,9 +367,101 @@ Two layout faults that no assertion would have caught, both found by reading scr
   container collapsed the day columns below their minimum and clipped the last one mid-header,
   with no way to reach it. The grid now sizes from `--calendar-days`, which the renderer sets,
   so it overflows into the scroll container instead. 15 header cells, all reachable.
+- **Two CSS custom properties were used but never defined.** `--border` (conflict and rental
+  cards) and `--text` (`.empty-state strong`). A custom property that does not exist makes the
+  whole declaration invalid at computed-value time, so `border: 1px solid var(--border)` silently
+  removed the border and every contract floated on the background as a loose white rectangle.
+  Both now use `--line`/`--ink`. **Grep for this class of bug** — the one-liner is below.
+- **`.empty-state` was declared twice**, and the second copy silently won the shared properties:
+  a 56px empty state was rendering at 44px. Merged into one block.
+- **An entrance animation can hide the content it was meant to decorate.**
+  `.topbar.is-changing h1 { animation: … both }` holds the element at `opacity: 0` for the whole
+  delay, and a renderer that never composites — an occluded or throttled window — leaves the page
+  title and the primary button invisible. The class is now removed on `animationend` (with a
+  timer fallback), so the resting state is the visible one. A new `fill-mode: both` entrance
+  needs the same treatment.
+- **The booking form numbered its sections in the markup.** The food section is hidden for a
+  place with no kitchen, so the owner read "1 Дом и даты, 2 Гость, **4** Деньги и статус" and
+  had to work out that nothing was missing. The number is a position and is now computed from
+  the visible sections (`renumberReservationSections`).
 
-Vision is worth running over the main screens after UI work; both of these were invisible to
-92 passing checks. (The suite is 93 now; both of these were found at the 92-check revision.)
+### Readability is measured, not asserted
+
+The pass for older users started from numbers rather than opinions, and the numbers are now a
+suite: **`scripts/e2e-interface.mjs`** (run by `e2e-all.sh` after `branding`). It measures the
+rendered page — text sizes, contrast against the *effective* background (walking up through
+translucent layers), and control sizes — across all seven pages plus the booking dialog. The
+baseline it was written against, and what it reads now:
+
+| | before | after |
+|---|---|---|
+| visible text below 12px | 198 of 502 nodes (39%) | 0 |
+| contrast failures | 9 | 0 |
+| controls under 24px | 5 | 0 |
+
+- **`--text-scale` is the whole type system.** Every size in `styles.css` is a `calc()` on it and
+  nothing is set in raw px below `--text-xs`. The Settings "Размер текста" control changes that
+  one value, and it lives in **localStorage, not `app_settings`**: screen size belongs to the
+  device, and the server replicates `app_settings`, so syncing it would let one device enlarge
+  another's interface.
+- **`<small>` needs its size named.** The UA sheet renders it at `smaller` (~0.83em), which put
+  every un-styled hint at 11.7px. One `small { font-size: var(--text-sm) }` covers the class.
+- **A control wrapped in its own `<label>` is hit through the label.** A 20px checkbox in a 44px
+  row is a 44px target; the suite measures the label, and a fix should too.
+- **The Electron window reports `document.visibilityState === "hidden"` when occluded**, so a
+  screenshot or measurement harness must neutralise animation first — otherwise every
+  `animation-fill-mode: both` element is rasterised in its FROM state and the capture shows a
+  blank title. A capture artefact, not what a user with a visible window sees.
+
+### Finding dead CSS tokens
+
+```bash
+grep -o "var(--[a-z0-9-]*" src/renderer/styles.css | sort -u | sed 's/var(//' > /tmp/used
+grep -o "^\s*--[a-z0-9-]*:" src/renderer/styles.css | tr -d ' :' | sort -u > /tmp/def
+comm -23 /tmp/used /tmp/def   # used but never defined
+```
+
+### The sidebar has two named groups
+
+Pages are ordered by how often they are opened, not by category: **Работа** (Сегодня, Календарь,
+Бронирования, **Аренда**, Объекты) then **Система** (Конфликты, Настройки). Long-term rent used
+to sit in the bottom group beside Settings, which made a second revenue line with its own
+contracts read as an afterthought. The placement is pinned by `e2e-interface.mjs`, so moving
+"Аренда" back down fails the suite.
+
+### Every label in the markup must exist in three languages
+
+The Russian source string IS the translation key, so a string with no entry does not fail — it
+silently stays Russian. `tests/i18n.test.cjs` extracts the text nodes and `placeholder` /
+`aria-label` / `title` attributes from `index.html` and asserts az and en cover them. Scope is
+the static markup only: `app.js` builds text at runtime from Russian literals, and guessing which
+of those is user-facing would be a guess, not a test. The suite found twelve strings that had
+never been translated, including every `<option>` label in the currency picker.
+
+### How to actually look at the app
+
+The `vision_*` tools (`vision_glance`, `vision_ground`, `vision_detect`, `vision_crop`,
+`vision_trace`, `vision_pixel_diff`, `vision_long_screenshot_ocr`, `vision_extract_foreground`,
+`vision_dominant_colors`, `vision_html_screenshot`) come from the DSH plugin
+`@anionex/dsh-vision-toolkit`. Call `vision_toolkit_activate` once to expose them.
+
+- **Coordinates are ORIGINAL image pixels**, so a `vision_ground` box feeds straight into
+  `vision_crop` with no scaling in between.
+- **Artifacts are written into the session workspace** under `.dsh-vision-toolkit/`, which is
+  gitignored. Deleting that directory is always safe.
+- **The provider is DeepSeek** (`deepseek-flash`, the only vision-capable model on that key),
+  configured in `~/.dsh/profiles/web/cordis.patch.yml`, with the key held as the DSH credential
+  `VISION_API_KEY`. The plugin's own default is a free public endpoint that answers HTTP 429
+  under any real use, so if vision starts failing with a rate limit, that default is back —
+  meaning the profile config was lost.
+- **The plugin is version-exempt, and the exemption is keyed to the exact DSH version.** It is
+  published for DSH `<0.2.0` while this machine runs a 0.2.x alpha, so DSH loads it only
+  because an explicit exemption was granted. **A DSH upgrade invalidates it** and the tools
+  stop loading. Repair with `~/.dsh/vision-setup.sh` (`--status` to check only; idempotent),
+  then restart DSH.
+
+The older `dsh-glance` / `dsh-ground` / `dsh-detect` / `dsh-crop` shell commands are gone: they
+wrapped a different, now-removed plugin. Use the `vision_*` tools.
 
 ### How to actually look at the app
 
@@ -399,6 +505,93 @@ reintroduce a way for the two modes to disagree.
 - Tenancies are exempt from the advance window and bounded by `maximumTenancyMonths` instead.
 - `MaxNightCount` (1096) must stay above the longest permitted tenancy (24 months = up to 731
   days); a test compares the two.
+
+## Flexible pricing (seasons, discounts, negotiated amounts)
+
+A unit's price is no longer two constants. It is a base nightly rate, a monthly rate, and a small
+rule set stored as JSON text on the unit row (`units.rate_rules` / `properties.rate_rules`):
+
+```json
+{"seasons":[{"name":"Новый год","from":"2026-12-25","to":"2027-01-10","nightlyRateMinor":48000}],
+ "stayDiscounts":[{"minimumNights":7,"percent":10}],
+ "tenancyDiscounts":[{"minimumMonths":12,"percent":10}]}
+```
+
+- **The rules live in `src/domain/booking/pricing.cjs`, mirrored in
+  `server/internal/domain/pricing.go`, pinned by `fixtures/pricing-cases.json`.** Same rule as
+  every other domain calculation in this project — the server prices a booking too (a reservation
+  arriving over REST is recomputed from the unit), so one stack charging a season rate the other
+  does not know about is a booking repriced behind the user's back.
+- **Writing is strict, reading is forgiving.** `validateRateRules` refuses overlapping seasons,
+  because the price would then depend on the order of a list nobody can see in the editor.
+  `parseRateRules` NEVER throws: it drops what it cannot price and falls back to the base rate. A
+  unit whose rules cannot be read must still be sellable — refusing the booking would turn one
+  malformed settings row into a calendar nobody can use.
+- **A season is a range of NIGHTS.** `to` is the check-in date of its last night, so a stay that
+  checks out on the morning after `to` still paid the season rate for that night. The other
+  convention makes the owner subtract a day in their head.
+- **Discounts do not stack.** The largest threshold the booking reaches wins. Stacking produces a
+  12-month let that triples a "10% for a year" rule, and it is invisible until an invoice is wrong.
+- **Rounding is half-up on integer minor units** (`floor((amount * p100 + 5000) / 10000)`), never
+  a float percentage. Go's float64 and JavaScript's Number disagree on some .5 boundaries.
+- **The amount carries its working.** `reservations.rate_breakdown` stores the nights, the season
+  rates that applied and the discount. Recomputing it on read would explain an amount charged
+  months ago with today's prices. A negotiated amount stores `{}` — there is no working to show
+  for a figure that was agreed rather than calculated.
+- **The dialog's price is a QUOTE from the main process** (`pricing:quote`), never arithmetic in
+  the renderer. The renderer is sandboxed and cannot load the module, and a second copy in the
+  view is exactly the drift the fixtures exist to prevent. Quotes carry a request id so the slower
+  of two keystrokes cannot overwrite the newer one.
+- **A typed amount is a negotiated amount**, and it is sent only when it was typed. Sending the
+  displayed value unconditionally would make every booking negotiated and freeze it against later
+  rule changes. `submitReservation` spreads `accommodationMinor` in only while
+  `state.accommodationManual` is set.
+- **Early checkout is repriced through the same quote.** It used to charge nights x the BASE rate,
+  silently refunding a peak-week surcharge for nights the guest actually stayed; a tenancy cut
+  short was charged its monthly rate times its NIGHTS, which is a number that looks like rent and
+  is not one. It is now whole months elapsed, flooring at one month.
+- **Adding a column to the sync allowlist means adding it to the migration too.** The sync
+  sanitizer iterates `syncColumns`, so a payload key that is not listed is not rejected — it is
+  never written, silently. `rate_rules` and `rate_breakdown` are TEXT on both sides and not
+  `jsonb`, so the value round trips byte for byte; a jsonb column comes back re-serialised and the
+  client compares the pulled value against what it stored to decide whether a row changed.
+- **The REST unit endpoints do not expose the rules yet.** A unit created through them gets the
+  empty rule set, and an update leaves the stored rules alone. The desktop is a sync client, so
+  nothing in the product is affected; a future web client editing rules would need the plumbing.
+
+## Printed documents (contracts and invoices)
+
+`src/main/documents.cjs` builds the HTML for two documents; `src/main/pdf.cjs` renders it to PDF
+through an offscreen `BrowserWindow` and `printToPDF`; `src/main.cjs` owns the IPC. No PDF library
+is involved — the browser engine that ships with Electron lays the page out, so what the owner
+prints and what the file contains cannot drift apart.
+
+- **A contract and an invoice are different documents for different readers.** The contract states
+  the parties, the term, the rent, the deposit and the meter readings, and carries a signature
+  block. The invoice lists what was charged, the discount, what was received and what is
+  outstanding — the document an accountant or a tax inspection reads. A tenancy is offered both; a
+  nightly booking is offered the invoice only, because a "договор найма" for two nights would
+  state a monthly rent and a term that do not exist.
+- **The figures come from the stored row, never from today's rates.** A document that re-prices
+  last March's let with this year's season is the one failure a tax document cannot have. The
+  season lines and the discount come from `reservations.rate_breakdown`.
+- **`documentNumber` is DERIVED, not counted**: `<booking date>-<first 4 of the id>`. A counter has
+  to be persisted, and a number that changes when a document is regenerated — or that two devices
+  disagree about — is worse than a slightly ugly one.
+- **The requisites live in `app_settings` as one JSON blob** (`document_requisites`), not as
+  columns on an account: the set of details a jurisdiction wants varies, and a schema with one
+  column per field would need a migration per country. They are editable in Settings, and a
+  document is still produced without them — with blank lines rather than an error.
+- **The month count is derived from the dates** (`wholeMonthsBetween`). `rental_months` is attached
+  by the IPC layer when it LISTS reservations and is absent from a single fetched row, which is how
+  a twelve-month lease printed "(0 мес.)".
+- **`preferCSSPageSize` is left unset.** A two-page contract came out as a single page once, with
+  the clauses and the signature block simply absent, and the file was a valid PDF that opened
+  normally and ended mid-sentence. It has **not been reproduced** — 20 generations since, with and
+  without the flag, all produced two pages — so the 200 ms settle before `printToPDF` is a
+  mitigation for an unexplained truncation, not a fix for a diagnosed one.
+  **`scripts/e2e-documents.mjs` asserts a page count for exactly this reason**: a truncated PDF
+  passes every other check there is, including "the file is a PDF" and "it is not empty".
 
 ## Running locally
 

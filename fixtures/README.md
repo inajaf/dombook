@@ -30,5 +30,7 @@ is bookable. A case added here fails the build in both stacks until both agree.
 | `booking-policy-cases.json` | advance window, past check-in, maximum stay, unchanged-dates skip |
 | `date-math-cases.json` | `addDaysIso` and `addCalendarMonths` incl. month-end clamping |
 | `plan-limit-cases.json` | per-plan unit/place quotas used by entitlement checks |
+| `rental-terms-cases.json` | `wholeMonthsBetween` — the calendar-month arithmetic rent is priced on |
+| `pricing-cases.json` | seasons, length discounts and rounding: what a booking costs |
 
 When adding a rule, add the case here first, then make both stacks pass it.

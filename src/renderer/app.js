@@ -35,6 +35,15 @@ const state = {
   calendar: null,
   backups: [],
   systemInfo: null,
+  // The price of the booking being edited, as computed by the main process. Null until the
+  // dates and the unit are both chosen.
+  quote: null,
+  // Bumped per request so a slow quote cannot overwrite a newer one.
+  quoteRequest: 0,
+  // True once the owner types an amount: the computed figure stops replacing it.
+  accommodationManual: false,
+  // The booking the documents dialog is currently about.
+  documentsReservation: null,
   reservationFilter: "all",
   search: "",
   expandedGroups: new Set(),
@@ -61,6 +70,39 @@ const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const interfaceLocale = () => window.i18n?.locale || "ru-RU";
 const interfaceLanguage = () => window.i18n?.language || "ru";
+
+/**
+ * Interface text size.
+ *
+ * Everything in styles.css is sized from `--text-scale`, so this is the whole implementation of
+ * "make it readable" — one number. It is a property of the SCREEN rather than of the business:
+ * a 60-year-old owner on a laptop wants large type, the same account on a wall-mounted office
+ * display does not, and neither should sync the other's preference. That is why it lives in
+ * localStorage and not in app_settings, which the server replicates.
+ */
+const TEXT_SCALES = { normal: 1, large: 1.12, xlarge: 1.28 };
+const TEXT_SCALE_KEY = "rentkeeper.interface-scale";
+
+function textScaleName() {
+  try {
+    const stored = localStorage.getItem(TEXT_SCALE_KEY);
+    return stored in TEXT_SCALES ? stored : "normal";
+  } catch {
+    // Storage can be unavailable; the default is the same as a first run.
+    return "normal";
+  }
+}
+
+function applyTextScale(name) {
+  const resolved = name in TEXT_SCALES ? name : "normal";
+  document.documentElement.style.setProperty("--text-scale", String(TEXT_SCALES[resolved]));
+  try {
+    localStorage.setItem(TEXT_SCALE_KEY, resolved);
+  } catch {
+    // A device that refuses storage still gets the size for this session.
+  }
+  return resolved;
+}
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -293,6 +335,12 @@ function navigate(page) {
   topbar.classList.remove("is-changing");
   void topbar.offsetWidth;
   topbar.classList.add("is-changing");
+  // The entrance animation is `fill-mode: both`, so the title and the primary action sit at
+  // opacity 0 for as long as the animation is pending. A renderer that is not compositing —
+  // an occluded or throttled window — never advances it, and the page title stays invisible.
+  // Dropping the class when the motion has played makes the resting state the visible one.
+  topbar.addEventListener("animationend", () => topbar.classList.remove("is-changing"), { once: true });
+  setTimeout(() => topbar.classList.remove("is-changing"), 700);
   $("#searchBox").hidden = !meta.search;
   if (!meta.search) {
     state.search = "";
@@ -410,11 +458,12 @@ function renderReservations() {
       <td class="primary-cell reservation-property-cell"><strong data-i18n-ignore title="${escapeHtml(reservation.property_name)}">${escapeHtml(reservation.property_name)}</strong><small ${reservation.place_name ? "data-i18n-ignore" : ""}>${escapeHtml(reservation.place_name || "Отдельный дом")}</small></td>
       <td class="date-range"><span>${shortDate(reservation.check_in_date)} → ${shortDate(reservation.actual_check_out_date || reservation.check_out_date)}</span>${reservation.actual_check_out_date ? "<small>досрочно</small>" : ""}</td>
       <td><span class="status-badge status-${reservation.status}">${STATUS_LABELS[reservation.status]}</span></td>
-      <td class="money-stack"><strong>${money(reservation.prepaid_minor, reservation.currency)}</strong><small>${balanceLabel(reservation)}</small></td>
-      <td class="money-stack"><strong>${money(reservation.deposit_minor, reservation.currency)}</strong><small>${DEPOSIT_LABELS[reservation.deposit_status]}</small></td>
+      <td class="money-stack num"><strong>${money(reservation.prepaid_minor, reservation.currency)}</strong><small>${balanceLabel(reservation)}</small></td>
+      <td class="money-stack num"><strong>${money(reservation.deposit_minor, reservation.currency)}</strong><small>${DEPOSIT_LABELS[reservation.deposit_status]}</small></td>
       <td><div class="row-actions">
         <button class="icon-button" data-edit-reservation="${reservation.id}" aria-label="Редактировать бронь ${escapeHtml(reservation.guest_name)}">${icon("i-edit")}</button>
         ${["hold", "confirmed", "checked_in"].includes(reservation.status) ? `<button class="button secondary row-text-action" data-early-checkout="${reservation.id}">Досрочный выезд</button>` : ""}
+        <button class="icon-button" data-documents-reservation="${reservation.id}" aria-label="Документы по брони ${escapeHtml(reservation.guest_name)}">${icon("i-book")}</button>
         ${["cancelled", "checked_out", "no_show"].includes(reservation.status) ? "" : `<button class="icon-button danger" data-cancel-reservation="${reservation.id}" aria-label="Отменить бронь ${escapeHtml(reservation.guest_name)}">${icon("i-close")}</button>`}
         ${["cancelled", "checked_out", "no_show"].includes(reservation.status) ? `<button class="icon-button danger" data-delete-reservation="${reservation.id}" aria-label="Удалить бронь ${escapeHtml(reservation.guest_name)} навсегда">${icon("i-trash")}</button>` : ""}
       </div></td>
@@ -498,7 +547,7 @@ function renderRentals() {
           <span class="pill">${months} мес.</span>
         </header>
         <dl class="rental-terms">
-          <div><dt>Срок</dt><dd data-i18n-ignore>${escapeHtml(rental.check_in_date)} — ${escapeHtml(rental.check_out_date)}</dd></div>
+          <div><dt>Срок</dt><dd data-i18n-ignore>${escapeHtml(longDate(rental.check_in_date))} — ${escapeHtml(longDate(rental.check_out_date))}</dd></div>
           <div><dt>Аренда</dt><dd>${money(rental.accommodation_minor)}</dd></div>
           <div><dt>Депозит</dt><dd>${money(rental.deposit_minor)}</dd></div>
           <div><dt>Остаток</dt><dd>${money(Math.max((rental.total_minor || 0) - (rental.prepaid_minor || 0), 0))}</dd></div>
@@ -506,6 +555,8 @@ function renderRentals() {
         ${readingsText ? `<p class="muted rental-readings">Показания: <span data-i18n-ignore>${readingsText}</span></p>` : ""}
         <footer class="rental-actions">
           <button class="button secondary compact" data-edit-rental="${escapeHtml(rental.id)}">Изменить</button>
+          <button class="button primary compact" data-contract-rental="${escapeHtml(rental.id)}">Договор PDF</button>
+          <button class="button secondary compact" data-invoice-rental="${escapeHtml(rental.id)}">Счёт PDF</button>
         </footer>
       </article>`;
   }).join("");
@@ -966,9 +1017,42 @@ async function refreshSyncStatus() {
   renderSyncStatus();
 }
 
+/**
+ * The documents dialog for one booking.
+ *
+ * A dialog rather than another icon on the row: a contract and an invoice are different documents
+ * for different readers, and a tooltip is not enough to say which is which.
+ */
+function openDocumentsDialog(reservationId) {
+  const reservation = state.reservations.find((item) => item.id === reservationId);
+  if (!reservation) return;
+  const isRental = reservation.booking_kind === "rental";
+  state.documentsReservation = reservationId;
+  $("#documentsDialogTitle").textContent = `Документы: ${reservation.guest_name}`;
+  $("#documentsError").hidden = true;
+  $("#documentsIntro").textContent = isRental
+    ? "Договор найма — для подписания, счёт и акт — для бухгалтерии и налоговой. Файлы сохраняются в папку документов приложения."
+    : "Для посуточной брони договор найма не нужен, но счёт и акт по ней — тот документ, который просят для отчётности.";
+  // The contract is offered for a tenancy only: printing a "договор найма" for two nights would
+  // produce a document with a monthly rent and a term that do not exist.
+  $("#documentContract").hidden = !isRental;
+  $("#documentsDialog").showModal();
+}
+
+async function createDocument(reservationId, kind) {
+  const choose = $("#documentsChoosePath")?.checked === true;
+  const result = await unwrap(api.documents.create({ reservationId, kind, choose }));
+  if (result?.canceled) return;
+  toast(`Документ сохранён: ${result.fileName}`);
+  return result;
+}
+
 function renderSettings() {
   const info = state.systemInfo || {};
   $("#interfaceLanguage").value = info.language || window.i18n?.language || "ru";
+  const textScale = $("#textScale");
+  if (textScale) textScale.value = textScaleName();
+  renderRequisites();
   $("#systemInfo").innerHTML = `
     <div><dt>Файл базы</dt><dd data-i18n-ignore>${escapeHtml(privateStorageLabel(info.databasePath, "dombook.sqlite"))}</dd></div>
     <div><dt>Размер</dt><dd>${formatBytes(info.databaseSize || 0)}</dd></div>
@@ -981,6 +1065,38 @@ function renderSettings() {
       <small>${formatBytes(backup.size)}</small>
     </div>
   `).join("") : `<div class="empty-inline">Копий пока нет. Создайте первую перед внесением реальных данных.</div>`;
+}
+
+/** The details a contract prints, kept in app_settings so they follow the owner between devices. */
+function renderRequisites() {
+  const form = $("#requisitesForm");
+  if (!form) return;
+  const requisites = state.systemInfo?.documentRequisites || {};
+  Object.entries(requisites).forEach(([key, value]) => {
+    if (form.elements[key]) form.elements[key].value = value || "";
+  });
+}
+
+async function submitRequisites(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const errorBox = $("#requisitesError");
+  errorBox.hidden = true;
+  const payload = Object.fromEntries(
+    ["lessorName", "lessorTaxId", "lessorAddress", "lessorPhone", "bankDetails", "signatoryName", "documentCity"]
+      .map((key) => [key, form.elements[key]?.value ?? ""]),
+  );
+  const submit = $("#requisitesSubmit");
+  try {
+    setBusy(submit, true);
+    const saved = await unwrap(api.system.setDocumentRequisites(payload));
+    state.systemInfo = { ...(state.systemInfo || {}), documentRequisites: saved };
+    toast("Реквизиты сохранены");
+  } catch (error) {
+    showError(errorBox, error);
+  } finally {
+    setBusy(submit, false);
+  }
 }
 
 function privateStorageLabel(value, fallback) {
@@ -1018,10 +1134,16 @@ function openPropertyDialog(property = null, defaults = {}) {
   form.elements.capacity.value = property?.capacity || 4;
   form.elements.currency.value = property?.currency || "AZN";
   form.elements.basePrice.value = minorToDecimal(property?.base_price_minor);
+  // The monthly rate was never loaded, so opening a unit for editing showed 0 and saving wrote
+  // that 0 back — which takes the unit off the rentals screen, because a zero monthly rate is how
+  // the product says "not offered for rent". A dialog that clears a field it did not show is
+  // data loss with no error.
+  form.elements.monthlyRate.value = minorToDecimal(property?.monthly_rate_minor);
   form.elements.deposit.value = minorToDecimal(property?.deposit_minor);
   form.elements.checkInTime.value = property?.check_in_time || "15:00";
   form.elements.checkOutTime.value = property?.check_out_time || "11:00";
   form.elements.notes.value = property?.notes || "";
+  renderRateRuleRows(property?.rate_rules);
   $("#propertyDialogTitle").textContent = property ? "Редактировать дом" : "Новый дом";
   $("#propertySubmit").textContent = property ? "Сохранить изменения" : "Создать дом";
   $("#propertyDialog").showModal();
@@ -1174,6 +1296,11 @@ function openReservationDialog(reservation = null, defaults = {}) {
   form.elements.guestEmail.value = reservation?.guest_email || "";
   form.elements.adults.value = reservation?.adults || 2;
   form.elements.children.value = reservation?.children || 0;
+  // A booking that already exists opens at the amount it was taken at, and is treated as
+  // agreed: re-quoting it on open would reprice a live booking against today's seasons.
+  state.accommodationManual = Boolean(reservation);
+  state.quote = null;
+  state.quoteRequest += 1;
   form.elements.accommodation.value = minorToDecimal(reservation?.accommodation_minor);
   form.elements.prepaid.value = minorToDecimal(reservation?.prepaid_minor);
   form.elements.status.value = reservation?.status || "hold";
@@ -1235,6 +1362,24 @@ function reservationMealDates() {
   return dates;
 }
 
+/**
+ * Number the booking form's sections 1, 2, 3 … as they are actually shown.
+ *
+ * The numbers are printed in the markup, and the food section is hidden for a place with no
+ * kitchen. An owner filling the form then read "1 Дом и даты, 2 Гость, 4 Деньги и статус" and
+ * had to work out that they had not skipped anything. The number is a position, so it has to be
+ * computed from what is on screen rather than typed into the markup.
+ */
+function renumberReservationSections() {
+  let shown = 0;
+  $$(".form-section", $("#reservationForm")).forEach((section) => {
+    if (section.hidden) return;
+    shown += 1;
+    const marker = $("h3 span", section);
+    if (marker) marker.textContent = String(shown);
+  });
+}
+
 function renderMealInputs(reservation = null) {
   const place = selectedPlace();
   const section = $("#reservationFoodSection");
@@ -1244,6 +1389,7 @@ function renderMealInputs(reservation = null) {
     draft.set(`${meal.meal_date}:${meal.meal_type}`, minorToDecimal(meal.amount_minor));
   });
   section.hidden = !place?.has_food_service;
+  renumberReservationSections();
   if (!place?.has_food_service) {
     container.innerHTML = "";
     renderReservationCalculation();
@@ -1291,41 +1437,213 @@ function renderReservationCalculation() {
     $("[data-meal-day-total]", row).textContent = money(dayTotal, property?.currency);
   });
   const totalMinor = accommodationMinor + servicesMinor;
+  const currency = property?.currency;
   const prepaidMinor = decimalToMinor(form.elements.prepaid.value);
   const depositMinor = decimalToMinor(form.elements.deposit.value);
-  const nightLabel = window.i18n?.language === "en"
-    ? (nights === 1 ? "night" : "nights")
-    : window.i18n?.language === "az"
-      ? "gecə"
-      : nights === 1 ? "ночь" : nights < 5 ? "ночи" : "ночей";
-  $("#calculationNights").textContent = `${nights} ${nightLabel}`;
-  $("#calculationFormula").textContent = property && nights
-    ? `${money(property.base_price_minor, property.currency)} × ${nights}`
+  // The quote is the authority on how many nights are being sold, not the local date arithmetic:
+  // a date outside the booking window fails HTML validation, which zeroed the local count while
+  // the price beside it was still quoted for a real stay. Two numbers on one panel disagreeing
+  // about the same booking is worse than either being wrong on its own.
+  const quote = state.quote;
+  $("#calculationNights").textContent = quote
+    ? (quote.kind === "rental"
+      ? `${quote.months} ${monthLabel(quote.months)}`
+      : `${quote.nights} ${nightLabel(quote.nights)}`)
+    : `${nights} ${nightLabel(nights)}`;
+  $("#calculationFormula").textContent = quote && !state.accommodationManual
+    ? formulaLabel(quote, property, currency)
     : "Выберите корректные даты";
+  // One line per rate that applied, so a stay crossing a season boundary explains itself instead
+  // of showing a total the owner has to reverse-engineer.
+  $("#calculationLines").innerHTML = quote && !state.accommodationManual && quote.kind === "stay"
+    ? quote.lines.filter((line) => line.label).map((line) => `
+        <span>${escapeHtml(line.label)}: ${line.nights} × ${money(line.nightlyRateMinor, property?.currency)}</span>`).join("")
+    : "";
   $("#calculationTotal").textContent = money(totalMinor, property?.currency);
   $("#calculationServices").textContent = money(servicesMinor, property?.currency);
+  const discountMinor = quote && !state.accommodationManual ? quote.discountMinor : 0;
+  $("#calculationDiscountRow").hidden = discountMinor <= 0;
+  $("#calculationDiscount").textContent = discountMinor > 0
+    ? `−${money(discountMinor, property?.currency)} (${quote.discountPercent}%)`
+    : money(0, property?.currency);
+  $("#resetAccommodation").hidden = !state.accommodationManual;
+  $("#accommodationHelp").textContent = state.accommodationManual
+    ? "Сумма указана вручную и заменяет расчёт."
+    : "Считается автоматически: ночи, сезоны и скидка за длительность.";
   $("#calculationPrepaid").textContent = money(prepaidMinor, property?.currency);
   $("#calculationBalance").textContent = money(Math.max(0, totalMinor - prepaidMinor), property?.currency);
   $("#calculationDeposit").textContent = money(depositMinor, property?.currency);
 }
 
-function recalculateReservationTotal() {
+/** The night count with the right Russian form, which the app already needed elsewhere. */
+function nightLabel(count) {
+  if (interfaceLanguage() === "en") return count === 1 ? "night" : "nights";
+  if (interfaceLanguage() === "az") return "gecə";
+  const mod100 = count % 100;
+  const mod10 = count % 10;
+  if (mod100 >= 11 && mod100 <= 14) return "ночей";
+  if (mod10 === 1) return "ночь";
+  if (mod10 >= 2 && mod10 <= 4) return "ночи";
+  return "ночей";
+}
+
+/** "мес." with the right form, which the app already needed for the rentals page. */
+function monthLabel(months) {
+  if (interfaceLanguage() === "en") return months === 1 ? "month" : "months";
+  if (interfaceLanguage() === "az") return "ay";
+  const mod100 = months % 100;
+  const mod10 = months % 10;
+  if (mod100 >= 11 && mod100 <= 14) return "месяцев";
+  if (mod10 === 1) return "месяц";
+  if (mod10 >= 2 && mod10 <= 4) return "месяца";
+  return "месяцев";
+}
+
+/**
+ * The one-line explanation above the total.
+ *
+ * It is the answer to "why is it this much?", which is the question a season raises: a stay whose
+ * nights are not all the same price cannot be summarised as a rate times a count.
+ */
+function formulaLabel(quote, property, currency) {
+  if (!quote) return "Выберите корректные даты";
+  if (quote.kind === "rental") {
+    const base = `${quote.months} × ${money(quote.monthlyRateMinor, property?.currency)}`;
+    return quote.discountPercent
+      ? `${base} − ${quote.discountPercent}% = ${money(quote.effectiveMonthlyMinor, property?.currency)}/мес`
+      : base;
+  }
+  if (!quote.nights) return "Выберите корректные даты";
+  const distinct = new Set(quote.lines.map((line) => line.nightlyRateMinor));
+  if (distinct.size === 1) return `${money(quote.lines[0].nightlyRateMinor, property?.currency)} × ${quote.nights}`;
+  return quote.lines
+    .map((line) => `${line.nights} × ${money(line.nightlyRateMinor, property?.currency)}`)
+    .join(" + ");
+}
+
+/**
+ * Ask the main process what this booking costs, and show it.
+ *
+ * The arithmetic is NOT repeated here. The renderer is sandboxed and cannot load the pricing
+ * module, and a second copy of seasons and discounts in the view is exactly the drift the shared
+ * fixtures exist to prevent — the preview would then disagree with the amount the save stores.
+ *
+ * A quote that arrives out of order is dropped rather than rendered: two keystrokes in the date
+ * field produce two requests, and the slower one is not the newer one.
+ */
+async function recalculateReservationTotal() {
   const form = $("#reservationForm");
-  const property = state.properties.find((item) => item.id === form.elements.propertyId.value);
-  const datesAreValid = form.elements.checkInDate.validity.valid && form.elements.checkOutDate.validity.valid;
-  const nights = datesAreValid
-    ? nightsBetween(form.elements.checkInDate.value, form.elements.checkOutDate.value)
-    : 0;
-  if (property && nights) {
-    const reservation = state.reservations.find((item) => item.id === form.elements.id.value);
-    const nightlyRate = reservation && reservation.property_id === property.id
-      ? reservation.nightly_rate_minor
-      : property.base_price_minor;
-    form.elements.accommodation.value = minorToDecimal(nightlyRate * nights);
-  } else {
-    form.elements.accommodation.value = "0.00";
+  const propertyId = form.elements.propertyId.value;
+  const checkInDate = form.elements.checkInDate.value;
+  const checkOutDate = form.elements.checkOutDate.value;
+  const bookingKind = form.elements.bookingKind?.value === "rental" ? "rental" : "stay";
+  const requestId = state.quoteRequest + 1;
+  state.quoteRequest = requestId;
+
+  if (!propertyId || !checkInDate || !checkOutDate || checkOutDate <= checkInDate) {
+    state.quote = null;
+    if (!state.accommodationManual) form.elements.accommodation.value = "0.00";
+    renderReservationCalculation();
+    return;
+  }
+
+  try {
+    const quote = await unwrap(api.pricing.quote({
+      propertyId,
+      bookingKind,
+      checkInDate,
+      checkOutDate,
+      reservationId: form.elements.id.value || null,
+    }));
+    if (requestId !== state.quoteRequest) return;
+    state.quote = quote;
+    // A manual amount is the owner's decision for THIS booking and is not overwritten by a
+    // recalculation — the whole point of typing one is that the rules do not apply.
+    if (!state.accommodationManual) {
+      form.elements.accommodation.value = minorToDecimal(quote.totalMinor);
+    }
+  } catch (error) {
+    state.quote = null;
+    if (!state.accommodationManual) form.elements.accommodation.value = "0.00";
+    console.warn("Quote failed", error);
   }
   renderReservationCalculation();
+}
+
+/**
+ * The seasons and discount rows of the unit dialog.
+ *
+ * A stored rule set is untrusted input as far as the view is concerned — it may come from another
+ * device, or from a version of this app that stored a shape this one does not know. So the rows
+ * are built from the fields that exist here and anything else is dropped, rather than a JSON
+ * blob being handed to the user to edit.
+ */
+function renderRateRuleRows(rawRules) {
+  let rules = {};
+  try {
+    rules = typeof rawRules === "string" ? JSON.parse(rawRules || "{}") : (rawRules || {});
+    if (!rules || typeof rules !== "object") rules = {};
+  } catch {
+    // An unreadable value shows as "no rules", which is what the pricing module would do with it
+    // anyway. Showing a parse error would block an edit that is about to replace the value.
+    rules = {};
+  }
+  $("#stayDiscountRows").innerHTML = (Array.isArray(rules.stayDiscounts) ? rules.stayDiscounts : [])
+    .map((entry) => discountRow("minimumNights", "ночей", entry)).join("");
+  $("#tenancyDiscountRows").innerHTML = (Array.isArray(rules.tenancyDiscounts) ? rules.tenancyDiscounts : [])
+    .map((entry) => discountRow("minimumMonths", "месяцев", entry)).join("");
+  $("#seasonRows").innerHTML = (Array.isArray(rules.seasons) ? rules.seasons : [])
+    .map((season) => `
+      <div class="rule-row season-row" data-rule-row>
+        <label class="field"><span>Название</span>
+          <input data-rule-field="name" maxlength="80" value="${escapeHtml(season.name || "")}" placeholder="Новый год"></label>
+        <label class="field"><span>Первая ночь</span>
+          <input data-rule-field="from" type="date" value="${escapeHtml(season.from || "")}"></label>
+        <label class="field"><span>Последняя ночь</span>
+          <input data-rule-field="to" type="date" value="${escapeHtml(season.to || "")}"></label>
+        <label class="field"><span>Цена за ночь</span>
+          <div class="money-input"><input data-rule-field="nightlyRateMinor" type="number" min="0" step="0.01"
+            value="${escapeHtml(minorToDecimal(season.nightlyRateMinor))}"><span>₼</span></div></label>
+        <button type="button" class="icon-button danger" data-remove-rule aria-label="Удалить сезон">${icon("i-trash")}</button>
+      </div>`).join("");
+}
+
+function discountRow(thresholdField, unitLabel, entry) {
+  return `
+    <div class="rule-row" data-rule-row>
+      <label class="field"><span>От</span>
+        <input data-rule-field="${thresholdField}" type="number" min="2" step="1" value="${Number(entry?.[thresholdField]) || ""}"></label>
+      <span class="rule-unit">${unitLabel}</span>
+      <label class="field"><span>Скидка</span>
+        <input data-rule-field="percent" type="number" min="1" max="100" step="1" value="${Number(entry?.percent) || ""}"></label>
+      <span class="rule-unit">%</span>
+      <button type="button" class="icon-button danger" data-remove-rule aria-label="Удалить скидку">${icon("i-trash")}</button>
+    </div>`;
+}
+
+/** Read the editor back into the shape the pricing module stores. */
+function collectRateRules() {
+  // Read row by row rather than zipping two filtered lists, which pairs the wrong threshold with
+  // the wrong percentage as soon as one row is half-filled.
+  const discounts = (root, field) => $$("[data-rule-row]", root).map((row) => ({
+    [field]: Number($(`[data-rule-field="${field}"]`, row)?.value),
+    percent: Number($(`[data-rule-field="percent"]`, row)?.value),
+  })).filter((entry) => Number.isFinite(entry[field]) && entry[field] >= 2
+    && Number.isFinite(entry.percent) && entry.percent > 0);
+
+  const seasons = $$("[data-rule-row]", $("#seasonRows")).map((row) => ({
+    name: $(`[data-rule-field="name"]`, row)?.value.trim() || "",
+    from: $(`[data-rule-field="from"]`, row)?.value || "",
+    to: $(`[data-rule-field="to"]`, row)?.value || "",
+    nightlyRateMinor: decimalToMinor($(`[data-rule-field="nightlyRateMinor"]`, row)?.value || "0"),
+  })).filter((season) => season.from || season.to || season.nightlyRateMinor > 0);
+
+  return {
+    version: 1,
+    seasons,
+    stayDiscounts: discounts($("#stayDiscountRows"), "minimumNights"),
+    tenancyDiscounts: discounts($("#tenancyDiscountRows"), "minimumMonths"),
+  };
 }
 
 async function submitProperty(event) {
@@ -1345,6 +1663,9 @@ async function submitProperty(event) {
     basePriceMinor: decimalToMinor(form.elements.basePrice.value),
     // 0 means "not offered for rent", which is how the Rentals page decides what to list.
     monthlyRateMinor: decimalToMinor(form.elements.monthlyRate.value),
+    // The unit's seasons and length discounts. Sent as a structure and validated in the main
+    // process, which owns the pricing rules — the renderer must not decide what is priceable.
+    rateRules: collectRateRules(),
     depositMinor: decimalToMinor(form.elements.deposit.value),
     checkInTime: form.elements.checkInTime.value,
     checkOutTime: form.elements.checkOutTime.value,
@@ -1410,6 +1731,12 @@ async function submitReservation(event) {
   const payload = {
     bookingKind: form.elements.bookingKind?.value === "rental" ? "rental" : "stay",
     propertyId: form.elements.propertyId.value,
+    // Sent only when the owner typed an amount. The field always DISPLAYS the computed price, so
+    // sending it unconditionally would turn every booking into a negotiated one and freeze the
+    // figure against later rule changes — which is the opposite of what the rules are for.
+    ...(state.accommodationManual
+      ? { accommodationMinor: decimalToMinor(form.elements.accommodation.value) }
+      : {}),
     checkInDate: form.elements.checkInDate.value,
     checkOutDate: form.elements.checkOutDate.value,
     guestName: form.elements.guestName.value,
@@ -1696,6 +2023,17 @@ function bindEvents() {
         },
       });
     }
+    if (target.dataset.documentsReservation) {
+      openDocumentsDialog(target.dataset.documentsReservation);
+    }
+    if (target.dataset.contractRental) {
+      createDocument(target.dataset.contractRental, "contract")
+        .catch((error) => toast(error.message, "error"));
+    }
+    if (target.dataset.invoiceRental) {
+      createDocument(target.dataset.invoiceRental, "invoice")
+        .catch((error) => toast(error.message, "error"));
+    }
     if (target.dataset.deleteReservation) {
       const reservation = state.reservations.find((item) => item.id === target.dataset.deleteReservation);
       confirmAction({
@@ -1724,10 +2062,17 @@ function bindEvents() {
   $("#placeForm").elements.hasFoodService.addEventListener("change", togglePlaceFoodPrices);
   $("#reservationForm").addEventListener("submit", submitReservation);
   $("#earlyCheckoutForm").addEventListener("submit", submitEarlyCheckout);
+  // Changing what is being sold or when re-opens the question of price, so an amount typed for
+  // the previous dates stops applying. Nothing the owner typed is discarded silently: the reset
+  // button and the help text both say which mode the field is in.
+  const requote = () => {
+    state.accommodationManual = false;
+    recalculateReservationTotal();
+  };
   $("#reservationProperty").addEventListener("change", () => {
     applyPropertyDefaults();
     renderMealInputs();
-    recalculateReservationTotal();
+    requote();
   });
   ["checkInDate", "checkOutDate"].forEach((name) => {
     $("#reservationForm").elements[name].addEventListener("change", () => {
@@ -1741,11 +2086,25 @@ function bindEvents() {
       }
       updateReservationDateLimits();
       renderMealInputs();
-      recalculateReservationTotal();
+      requote();
     });
   });
   ["prepaid", "deposit"].forEach((name) => {
     $("#reservationForm").elements[name].addEventListener("input", renderReservationCalculation);
+  });
+  // Typing an amount for one booking is how an owner agrees a price the rules do not produce —
+  // a returning guest, a damaged week, a favour. It replaces the computed figure for THIS
+  // booking only; the unit's rules are untouched, and the button puts the calculation back.
+  $("#reservationForm").elements.accommodation.addEventListener("input", () => {
+    state.accommodationManual = true;
+    renderReservationCalculation();
+  });
+  $("#resetAccommodation").addEventListener("click", () => {
+    state.accommodationManual = false;
+    $("#reservationForm").elements.accommodation.value = state.quote
+      ? minorToDecimal(state.quote.totalMinor)
+      : "0.00";
+    renderReservationCalculation();
   });
   $("#earlyCheckoutForm").elements.actualCheckOutDate.addEventListener("change", renderEarlyCheckoutPreview);
   $$('input[name="billingPolicy"]', $("#earlyCheckoutForm")).forEach((input) => input.addEventListener("change", renderEarlyCheckoutPreview));
@@ -1760,8 +2119,49 @@ function bindEvents() {
     $$("[data-reservation-filter]").forEach((item) => item.classList.toggle("active", item === button));
     renderReservations();
   }));
+  // The rate-rule editor: add a row, remove a row. Delegated, because the rows are rebuilt from
+  // the stored rules every time the dialog opens and a listener bound to a row would be lost with
+  // it — the previous element is replaced, not edited.
+  $("#addStayDiscount").addEventListener("click", () => {
+    $("#stayDiscountRows").insertAdjacentHTML("beforeend", discountRow("minimumNights", "ночей", { minimumNights: 7, percent: 10 }));
+  });
+  $("#addTenancyDiscount").addEventListener("click", () => {
+    $("#tenancyDiscountRows").insertAdjacentHTML("beforeend", discountRow("minimumMonths", "месяцев", { minimumMonths: 12, percent: 10 }));
+  });
+  $("#addSeason").addEventListener("click", () => {
+    const today = state.systemInfo?.bookingPolicy?.today || new Date().toISOString().slice(0, 10);
+    $("#seasonRows").insertAdjacentHTML("beforeend", `
+      <div class="rule-row season-row" data-rule-row>
+        <label class="field"><span>Название</span><input data-rule-field="name" maxlength="80" placeholder="Новый год"></label>
+        <label class="field"><span>Первая ночь</span><input data-rule-field="from" type="date" value="${addDaysIso(today, 30)}"></label>
+        <label class="field"><span>Последняя ночь</span><input data-rule-field="to" type="date" value="${addDaysIso(today, 37)}"></label>
+        <label class="field"><span>Цена за ночь</span><div class="money-input"><input data-rule-field="nightlyRateMinor" type="number" min="0" step="0.01" value="0"><span>₼</span></div></label>
+        <button type="button" class="icon-button danger" data-remove-rule aria-label="Удалить сезон">${icon("i-trash")}</button>
+      </div>`);
+  });
+  $("#propertyForm").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-remove-rule]");
+    if (!button) return;
+    button.closest("[data-rule-row]")?.remove();
+  });
+
+  $$("[data-document-kind]").forEach((button) => button.addEventListener("click", () => {
+    const kind = button.dataset.documentKind;
+    const reservationId = state.documentsReservation;
+    if (!reservationId) return;
+    createDocument(reservationId, kind).catch((error) => showError($("#documentsError"), error));
+  }));
+  $("#openDocumentsFolder").addEventListener("click", () => {
+    unwrap(api.documents.openFolder()).catch((error) => toast(error.message, "error"));
+  });
+  $("#requisitesForm")?.addEventListener("submit", (event) => {
+    submitRequisites(event).catch((error) => toast(error.message, "error"));
+  });
   $("#createBackup").addEventListener("click", createBackup);
   $("#interfaceLanguage").addEventListener("change", changeInterfaceLanguage);
+  $("#textScale")?.addEventListener("change", (event) => {
+    event.currentTarget.value = applyTextScale(event.currentTarget.value);
+  });
   $("#openDatabaseFolder").addEventListener("click", () => {
     unwrap(api.system.openBackupDirectory()).catch((error) => toast(error.message, "error"));
   });
@@ -1970,6 +2370,13 @@ function bindAuthEvents() {
 async function boot() {
   bindEvents();
   bindAuthEvents();
+  // Before anything renders, so the login screen is already at the reader's chosen size.
+  applyTextScale(textScaleName());
+  // The controls that reflect a device preference are synced here rather than only in
+  // renderSettings(), which runs when the settings PAGE is opened. Otherwise the panel is stale
+  // until it has been visited once — the preference is in force while the control denies it.
+  const textScale = $("#textScale");
+  if (textScale) textScale.value = textScaleName();
   try {
     const systemInfo = await unwrap(api.system.info());
     window.i18n?.setLanguage(systemInfo.language || "ru");
@@ -2029,6 +2436,8 @@ function createBrowserDemoApi() {
   }
   const response = (data) => Promise.resolve({ ok: true, data });
   const error = (message) => Promise.resolve({ ok: false, error: message });
+  let requisites = {};
+  const documentPreviewHtml = () => "<!doctype html><p>Документ формируется в приложении для компьютера.</p>";
   const idOf = (value) => (value === null || value === undefined ? null : String(value));
   const findById = (list, id, key = "id") => list.find((item) => idOf(item[key]) === idOf(id));
   const normalizeIds = (list, keys = ["id", "place_id", "property_id", "reservation_id"]) => (list || []).map((item) => {
@@ -2163,6 +2572,19 @@ function createBrowserDemoApi() {
         return persistedResponse(interfaceLanguage);
       },
       openBackupDirectory: () => response(true),
+      setDocumentRequisites: (data) => {
+        requisites = { ...requisites, ...data };
+        return persistedResponse(requisites);
+      },
+    },
+    // The browser build has no Electron main process to render a PDF in, so a document is
+    // downloaded as an HTML file instead of silently doing nothing. The demo is a preview of the
+    // product, and a button that appears to work is more honest than one that is missing.
+    documents: {
+      html: (data) => response(documentPreviewHtml(data)),
+      create: () => error("PDF создаётся только в приложении для компьютера"),
+      folder: () => response("Browser downloads"),
+      openFolder: () => response("Browser downloads"),
     },
   };
 }

@@ -10,7 +10,7 @@
   <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
   <link rel="manifest" href="./manifest.webmanifest">
-  <link rel="stylesheet" href="./styles.css?v=20260801-6">
+  <link rel="stylesheet" href="./styles.css?v=20261015-9">
 </head>
 <body>
   <a class="skip-link" href="#main-content">Перейти к содержимому</a>
@@ -103,7 +103,15 @@
         <div><strong>RentKeeper</strong><span>desktop</span></div>
       </div>
 
-      <nav class="nav-list">
+      <!-- Two named groups, ordered by how often each is opened.
+           Long-term rent used to sit in the bottom group next to Settings, which read as an
+           afterthought even though it is a second revenue line with its own contracts. It now
+           follows Reservations: everything an owner touches during the working day is in
+           "Работа", and the group below is the one you visit when something is wrong or needs
+           configuring. The labels are what make the two groups read as sections instead of one
+           list broken by a gap. -->
+      <nav class="nav-list" aria-labelledby="navGroupWork">
+        <p class="nav-group-title" id="navGroupWork">Работа</p>
         <button class="nav-item active" data-page="dashboard">
           <svg><use href="#i-grid"/></svg><span>Сегодня</span>
         </button>
@@ -114,17 +122,18 @@
           <svg><use href="#i-book"/></svg><span>Бронирования</span>
           <span class="nav-badge" id="reservationBadge" hidden>0</span>
         </button>
+        <button class="nav-item" data-page="rentals">
+          <svg><use href="#i-key"/></svg><span>Аренда</span>
+          <span class="nav-badge" id="rentalBadge" hidden>0</span>
+        </button>
         <button class="nav-item" data-page="properties">
           <svg><use href="#i-house"/></svg><span>Объекты</span>
         </button>
       </nav>
 
       <div class="sidebar-spacer"></div>
-      <nav class="nav-list nav-secondary">
-        <button class="nav-item" data-page="rentals">
-          <svg><use href="#i-key"/></svg><span>Аренда</span>
-          <span class="nav-badge" id="rentalBadge" hidden>0</span>
-        </button>
+      <nav class="nav-list nav-secondary" aria-labelledby="navGroupSystem">
+        <p class="nav-group-title" id="navGroupSystem">Система</p>
         <button class="nav-item" data-page="conflicts">
           <svg><use href="#i-alert"/></svg><span>Конфликты</span>
           <span class="nav-badge" id="conflictBadge" hidden>0</span>
@@ -202,7 +211,7 @@
           <div class="panel table-panel">
             <div class="table-scroll">
               <table class="reservations-table">
-                <thead><tr><th>Гость</th><th>Дом</th><th>Даты</th><th>Статус</th><th>Оплата</th><th>Депозит</th><th><span class="sr-only">Действия</span></th></tr></thead>
+                <thead><tr><th>Гость</th><th>Дом</th><th>Даты</th><th>Статус</th><th class="num">Оплата</th><th class="num">Депозит</th><th class="num"><span class="sr-only">Действия</span></th></tr></thead>
                 <tbody id="reservationTableBody"></tbody>
               </table>
             </div>
@@ -267,7 +276,7 @@
           </div>
           <div class="settings-grid">
             <article class="panel language-panel">
-              <header class="panel-header"><div><p class="eyebrow">Интерфейс</p><h2>Язык приложения</h2></div></header>
+              <header class="panel-header"><div><p class="eyebrow">Интерфейс</p><h2>Язык и размер текста</h2></div></header>
               <div class="language-setting">
                 <label class="field" for="interfaceLanguage"><span>Язык приложения</span>
                   <select id="interfaceLanguage">
@@ -276,6 +285,14 @@
                     <option value="en">English</option>
                   </select>
                   <small>Язык меняется сразу и сохраняется для следующего запуска.</small>
+                </label>
+                <label class="field" for="textScale"><span>Размер текста</span>
+                  <select id="textScale">
+                    <option value="normal">Обычный</option>
+                    <option value="large">Крупный</option>
+                    <option value="xlarge">Очень крупный</option>
+                  </select>
+                  <small>Увеличивает весь текст приложения. Действует на этом устройстве.</small>
                 </label>
               </div>
             </article>
@@ -339,6 +356,43 @@
               <dl class="info-list" id="syncInfo"></dl>
               <button class="button secondary" id="syncNow"><svg><use href="#i-refresh"/></svg>Синхронизировать</button>
             </article>
+            <article class="panel" id="requisitesPanel">
+              <header class="panel-header">
+                <div><p class="eyebrow">Документы</p><h2>Реквизиты для договоров и счетов</h2></div>
+              </header>
+              <p class="muted">
+                Эти данные печатаются в договоре и в счёте. Без них документ всё равно создаётся,
+                но строки останутся пустыми — а счёт без реквизитов налоговая не примет.
+              </p>
+              <form id="requisitesForm" class="policy-form">
+                <label class="field" for="requisitesLessorName"><span>Наймодатель</span>
+                  <input id="requisitesLessorName" name="lessorName" maxlength="300" autocomplete="organization">
+                  <small>Организация или ФИО индивидуального предпринимателя.</small>
+                </label>
+                <label class="field" for="requisitesLessorTaxId"><span>ИНН / VÖEN</span>
+                  <input id="requisitesLessorTaxId" name="lessorTaxId" maxlength="300" autocomplete="off">
+                </label>
+                <label class="field" for="requisitesLessorAddress"><span>Адрес</span>
+                  <input id="requisitesLessorAddress" name="lessorAddress" maxlength="300" autocomplete="street-address">
+                </label>
+                <label class="field" for="requisitesLessorPhone"><span>Телефон</span>
+                  <input id="requisitesLessorPhone" name="lessorPhone" maxlength="300" autocomplete="tel">
+                </label>
+                <label class="field" for="requisitesBankDetails"><span>Банковские реквизиты</span>
+                  <input id="requisitesBankDetails" name="bankDetails" maxlength="300" autocomplete="off">
+                  <small>Банк, счёт. Печатается в счёте.</small>
+                </label>
+                <label class="field" for="requisitesSignatoryName"><span>Подписант</span>
+                  <input id="requisitesSignatoryName" name="signatoryName" maxlength="300" autocomplete="name">
+                  <small>Кто подписывает со стороны наймодателя.</small>
+                </label>
+                <label class="field" for="requisitesDocumentCity"><span>Город составления</span>
+                  <input id="requisitesDocumentCity" name="documentCity" maxlength="300" placeholder="Баку">
+                </label>
+                <p class="form-error" id="requisitesError" hidden></p>
+                <button class="button primary" type="submit" id="requisitesSubmit">Сохранить реквизиты</button>
+              </form>
+            </article>
             <article class="panel">
               <header class="panel-header"><div><p class="eyebrow">Backup</p><h2>Резервные копии</h2></div><button class="button primary compact" id="createBackup">Создать копию</button></header>
               <p class="muted">Сейчас копии создаются локально. Подключение зашифрованного S3-cloud backup — следующий этап.</p>
@@ -371,6 +425,37 @@
           <label class="field"><span>Заезд</span><input name="checkInTime" type="time" value="15:00"></label>
           <label class="field"><span>Выезд</span><input name="checkOutTime" type="time" value="11:00"></label>
           <label class="field span-2"><span>Заметки</span><textarea name="notes" maxlength="2000" rows="3" placeholder="Правила, особенности, инструкции администратору"></textarea></label>
+        </div>
+
+        <!-- Seasons and length discounts.
+             The nightly rate above is what a night costs by default; anything here adjusts it for
+             a period, or for a booking long enough to earn a discount. It lives in the unit's own
+             dialog because a price belongs to the thing being sold — a separate "prices" screen
+             would let an owner change a rate without ever seeing the unit it applies to. -->
+        <div class="form-section rules-section">
+          <h3><span>2</span>Цены по сезонам и скидки</h3>
+          <p class="section-help">Необязательно. Без этих правил цена за ночь действует круглый год.</p>
+
+          <div class="rule-block">
+            <h4>Скидка за длительное проживание</h4>
+            <p class="rule-hint">Например: от 7 ночей — 10%. Применяется самая выгодная для гостя из подходящих, скидки не складываются.</p>
+            <div class="rule-rows" id="stayDiscountRows"></div>
+            <button type="button" class="text-button" id="addStayDiscount">Добавить скидку</button>
+          </div>
+
+          <div class="rule-block">
+            <h4>Скидка на длительную аренду</h4>
+            <p class="rule-hint">Например: от 12 месяцев — 10%. Так долгосрочная аренда выходит дешевле посуточной.</p>
+            <div class="rule-rows" id="tenancyDiscountRows"></div>
+            <button type="button" class="text-button" id="addTenancyDiscount">Добавить скидку</button>
+          </div>
+
+          <div class="rule-block">
+            <h4>Сезоны</h4>
+            <p class="rule-hint">Цена за ночь на выбранные ночи — например, новогодняя неделя дороже. Периоды не должны пересекаться.</p>
+            <div class="rule-rows" id="seasonRows"></div>
+            <button type="button" class="text-button" id="addSeason">Добавить сезон</button>
+          </div>
         </div>
         <div class="form-error" id="propertyFormError" role="alert" hidden></div>
       </div>
@@ -445,7 +530,7 @@
         <div class="form-section">
           <h3><span>4</span>Деньги и статус</h3>
           <div class="form-grid">
-            <label class="field"><span>Проживание</span><div class="money-input"><input name="accommodation" type="number" min="0" step="0.01" value="0" readonly><span>₼</span></div><small>Считается автоматически по ночам.</small></label>
+            <label class="field"><span>Проживание</span><div class="money-input"><input name="accommodation" type="number" min="0" step="0.01" value="0"><span>₼</span></div><small id="accommodationHelp">Считается автоматически: ночи, сезоны и скидка за длительность.</small></label>
             <label class="field"><span>Предоплата за бронь</span><div class="money-input"><input name="prepaid" type="number" min="0" step="0.01" value="0"><span>₼</span></div><small>Уменьшает остаток к оплате.</small></label>
             <label class="field"><span>Возвратный залог</span><div class="money-input"><input name="deposit" type="number" min="0" step="0.01" value="0"><span>₼</span></div><small>Считается отдельно и не является оплатой.</small></label>
             <label class="field"><span>Статус депозита</span><select name="depositStatus"><option value="none">Не требуется</option><option value="due">Ожидается</option><option value="received">Получен</option><option value="returned">Возвращён</option><option value="partially_withheld">Частично удержан</option><option value="withheld">Удержан</option></select></label>
@@ -454,14 +539,18 @@
           </div>
           <div class="reservation-calculation" role="status" aria-live="polite">
             <div class="calculation-heading">
-              <span><strong id="calculationNights">0 ночей</strong><small id="calculationFormula">Выберите корректные даты</small></span>
+              <span><strong id="calculationNights">0 ночей</strong><small id="calculationFormula">Выберите корректные даты</small><span class="calculation-lines" id="calculationLines"></span></span>
               <span><small>Проживание + питание</small><strong id="calculationTotal">0 ₼</strong></span>
             </div>
             <div class="calculation-breakdown">
               <span><small>Питание</small><strong id="calculationServices">0 ₼</strong></span>
+              <span id="calculationDiscountRow" hidden><small>Скидка</small><strong id="calculationDiscount">0 ₼</strong></span>
               <span><small>Получено</small><strong id="calculationPrepaid">0 ₼</strong></span>
               <span class="calculation-balance"><small>Осталось получить</small><strong id="calculationBalance">0 ₼</strong></span>
               <span><small>Залог отдельно</small><strong id="calculationDeposit">0 ₼</strong></span>
+            </div>
+            <div class="calculation-reset">
+              <button type="button" class="text-button" id="resetAccommodation" hidden>Вернуть расчёт по правилам объекта</button>
             </div>
           </div>
         </div>
@@ -501,6 +590,36 @@
     </form>
   </dialog>
 
+  <dialog id="documentsDialog" class="modal">
+    <form method="dialog" class="modal-card">
+      <header class="modal-header">
+        <div><p class="eyebrow">Печатные документы</p><h2 id="documentsDialogTitle">Документы по брони</h2></div>
+        <button class="icon-button" type="button" data-close-dialog aria-label="Закрыть"><svg><use href="#i-close"/></svg></button>
+      </header>
+      <div class="modal-body">
+        <p class="section-help" id="documentsIntro">Файлы сохраняются в папку документов приложения в формате PDF.</p>
+        <div class="document-choices">
+          <button type="button" class="document-choice" data-document-kind="contract" id="documentContract">
+            <span class="document-choice-icon"><svg><use href="#i-book"/></svg></span>
+            <span><strong>Договор найма</strong><small>Срок, плата, депозит и подписи сторон. Для долгосрочной аренды.</small></span>
+            <svg><use href="#i-arrow"/></svg>
+          </button>
+          <button type="button" class="document-choice" data-document-kind="invoice" id="documentInvoice">
+            <span class="document-choice-icon"><svg><use href="#i-database"/></svg></span>
+            <span><strong>Счёт и акт</strong><small>Что начислено, скидка, что получено и что осталось. Для бухгалтерии и налоговой.</small></span>
+            <svg><use href="#i-arrow"/></svg>
+          </button>
+        </div>
+        <label class="toggle-row documents-choose"><input type="checkbox" id="documentsChoosePath"><span>Спросить, куда сохранить</span></label>
+        <div class="form-error" id="documentsError" role="alert" hidden></div>
+      </div>
+      <footer class="modal-footer">
+        <button class="button ghost" type="button" id="openDocumentsFolder"><svg><use href="#i-database"/></svg>Открыть папку документов</button>
+        <button class="button secondary" type="button" data-close-dialog>Закрыть</button>
+      </footer>
+    </form>
+  </dialog>
+
   <dialog id="confirmDialog" class="modal confirm-modal">
     <form method="dialog" class="modal-card">
       <div class="modal-body">
@@ -521,6 +640,6 @@
   <script src="./i18n/az.js"></script>
   <script src="./i18n/en.js"></script>
   <script src="./i18n/i18n.js"></script>
-  <script src="./app.js?v=20260801-6"></script>
+  <script src="./app.js?v=20261015-9"></script>
 </body>
 </html>
