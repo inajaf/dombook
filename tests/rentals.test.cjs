@@ -327,7 +327,7 @@ test("an ordinary stay also queues its nights", async (t) => {
 
 const { toRemote } = require("../src/main/sync.cjs");
 
-test("a boolean column is sent as a boolean, not as SQLite's 0/1", async (t) => {
+test("a boolean column is sent as a boolean, not as SQLite's 0/1", async () => {
   // SQLite has no boolean type, so has_food_service is an integer locally. The server's column
   // is a real boolean and pgx encodes a Go int as int8: the parameter cannot be converted, the
   // whole batch is refused, and the outbox never drains. A numeric cast in SQL does not help,

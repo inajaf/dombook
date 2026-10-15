@@ -201,7 +201,7 @@ export function monthLabel(months) {
  * It is the answer to "why is it this much?", which is the question a season raises: a stay whose
  * nights are not all the same price cannot be summarised as a rate times a count.
  */
-export function formulaLabel(quote, property, currency) {
+export function formulaLabel(quote, property) {
   if (!quote) return "Выберите корректные даты";
   if (quote.kind === "rental") {
     const base = `${quote.months} × ${money(quote.monthlyRateMinor, property?.currency)}`;

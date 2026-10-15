@@ -6,7 +6,7 @@
  * where it went.
  */
 
-import { $, icon } from "./dom.js";
+import { $ } from "./dom.js";
 
 /**
  * A short message, optionally with one thing to do about it.

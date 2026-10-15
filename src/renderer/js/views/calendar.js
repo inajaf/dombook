@@ -18,7 +18,7 @@
  * default and wrong the moment it is not.
  */
 
-import { $, escapeHtml, icon } from "../dom.js";
+import { $, escapeHtml } from "../dom.js";
 import { state } from "../store.js";
 import { guestCountLabel, interfaceLocale, money, nightsBetween, shortDate } from "../formatters.js";
 
@@ -34,9 +34,6 @@ const STATUS_LABELS = {
   no_show: "Не приехал",
   conflict: "Конфликт",
 };
-
-const dayMs = 86_400_000;
-const addDays = (iso, days) => new Date(new Date(`${iso}T00:00:00Z`).getTime() + days * dayMs).toISOString().slice(0, 10);
 
 /**
  * Group a property's occupied nights into the runs a guest actually occupies.

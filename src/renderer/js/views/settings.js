@@ -12,7 +12,7 @@ import { runtime } from "../runtime.js";
 import { toast } from "../toast.js";
 import { api, unwrap } from "../api.js";
 import { refreshConflicts } from "./conflicts.js";
-import { ROLE_LABELS, formatBytes, interfaceLanguage, interfaceLocale, money, privateStorageLabel } from "../formatters.js";
+import { ROLE_LABELS, formatBytes, interfaceLocale, privateStorageLabel } from "../formatters.js";
 import { textScaleName } from "../theme.js";
 
 export function renderSettings() {
@@ -367,7 +367,7 @@ export async function syncNow() {
     toast(`Синхронизировано: отправлено ${result.pushed || 0}, получено ${result.applied || 0}`);
   }
   await refreshSyncStatus();
-  await refreshCore();
+  await runtime.refresh();
   await refreshConflicts();
 }
 

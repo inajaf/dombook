@@ -914,7 +914,7 @@ class RentKeeperDatabase {
   }
 
   recordSyncFailure(entry, message) {
-    return recordFailure(this, entry, message, nowIso);
+    return recordFailure(this, entry, message);
   }
 
   // Bring an existing outbox up to date. A database created before the revision column

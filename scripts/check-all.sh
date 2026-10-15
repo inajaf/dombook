@@ -55,6 +55,7 @@ else
 fi
 
 # --- Desktop -------------------------------------------------------------------
+run "linter" npx eslint .
 run "desktop unit tests" npm test
 run "desktop smoke test" npm run test:smoke
 

@@ -7,7 +7,7 @@
 
 import { $, escapeHtml } from "../dom.js";
 import { state } from "../store.js";
-import { guestCountLabel, money, shortDate } from "../formatters.js";
+import { guestCountLabel, money } from "../formatters.js";
 
 export function renderDashboard() {
   const data = state.dashboard || {};

@@ -8,7 +8,7 @@
 
 import { $, escapeHtml, icon } from "../dom.js";
 import { state } from "../store.js";
-import { STATUS_LABELS, DEPOSIT_LABELS, balanceLabel, money, shortDate, reservationStatusLabel } from "../formatters.js";
+import { STATUS_LABELS, DEPOSIT_LABELS, balanceLabel, money, shortDate } from "../formatters.js";
 
 function filteredReservations() {
   const query = state.search.toLocaleLowerCase("ru");

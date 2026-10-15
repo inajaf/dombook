@@ -11,7 +11,7 @@ import { state } from "../store.js";
 import { runtime } from "../runtime.js";
 import { toast } from "../toast.js";
 import { api, unwrap } from "../api.js";
-import { capacityLabel, decimalToMinor, money, objectCountLabel, shortDate, minorToDecimal } from "../formatters.js";
+import { capacityLabel, decimalToMinor, money, objectCountLabel, minorToDecimal } from "../formatters.js";
 
 function filteredProperties() {
   const showArchived = $("#showArchived").checked;

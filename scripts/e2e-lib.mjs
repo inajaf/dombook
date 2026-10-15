@@ -170,7 +170,7 @@ export const wait = (ms) => new Promise((r) => setTimeout(r, ms));
  *
  * Call it before signing up, never in the middle of a run.
  */
-export async function resetAuthState({ app = null } = {}) {
+export async function resetAuthState() {
   const { execFileSync } = createRequire(import.meta.url)("node:child_process");
   const env = psqlEnv();
   // TRUNCATE ... CASCADE reaches the tenant tables through their account foreign key, so the
@@ -197,7 +197,6 @@ export async function resetAuthState({ app = null } = {}) {
   }
 
   // The local profile, so the outbox and cached session start empty too.
-  const os = createRequire(import.meta.url)("node:os");
   const fsSync = createRequire(import.meta.url)("node:fs");
   for (const name of PROFILE_NAMES) fsSync.rmSync(userDataDir(name), { recursive: true, force: true });
 }
@@ -282,7 +281,7 @@ export function reporter(title) {
  * silently test the OLD database.
  */
 export async function restartApp(previous = null) {
-  const { spawn, execFileSync } = createRequire(import.meta.url)("node:child_process");
+  const { spawn } = createRequire(import.meta.url)("node:child_process");
   const fsSync = createRequire(import.meta.url)("node:fs");
   const root = process.env.RENTKEEPER_ROOT || process.env.DOMBOOK_ROOT || process.cwd();
   const port = process.env.RENTKEEPER_E2E_PORT || "8787";

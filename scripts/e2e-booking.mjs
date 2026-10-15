@@ -7,7 +7,7 @@
 // double-sold). Driving it through the UI is the only way to see whether the form, the
 // validation and the database agree.
 
-import {addDays, connect, freshStart, reporter, resetAuthState, restartApp, wait} from "./e2e-lib.mjs";
+import { addDays, connect, freshStart, reporter, wait } from "./e2e-lib.mjs";
 
 let app = await connect();
 const { check, finish } = reporter("Booking trip");
@@ -138,6 +138,27 @@ const crowded = await app.evaluate(`
   return r;
 `);
 check(crowded.ok === false, "more guests than the unit holds is refused", `error=${crowded.error}`);
+
+// --- The rental contract dialog opens ---------------------------------------
+// This is the check that would have caught a shipped `ReferenceError`: `openRentalDialog` called
+// `openReservationDialog` as a bare name, and that function exists only inside the shell, so the
+// button on the Аренда page threw and the dialog never appeared. Nothing noticed, because a
+// broken feature is silent when no test clicks it. The linter found it; this keeps it found.
+await go("rentals");
+await app.evaluate(`
+  const dialog = document.getElementById('reservationDialog');
+  if (dialog.open) dialog.close();
+  document.getElementById('newRental').click();
+  return 'ok';
+`);
+await wait(900);
+const rentalDialog = await app.evaluate(`
+  const dialog = document.getElementById('reservationDialog');
+  const form = document.getElementById('reservationForm');
+  return { open: dialog.open, kind: form.elements.bookingKind?.value || null };
+`);
+check(rentalDialog.open, "the Аренда page opens a contract dialog", JSON.stringify(rentalDialog));
+check(rentalDialog.kind === "rental", "and it opens as a tenancy, not as a nightly stay", `kind=${rentalDialog.kind}`);
 
 const ok = finish();
 console.log(ok ? "BOOKING OK" : "BOOKING FAILED");

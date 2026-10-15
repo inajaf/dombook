@@ -9,7 +9,6 @@ import { $, escapeHtml } from "../dom.js";
 import { state } from "../store.js";
 import { runtime } from "../runtime.js";
 import { toast } from "../toast.js";
-import { api, unwrap } from "../api.js";
 
 export function renderConflicts() {
   const list = $("#conflictList");
@@ -105,8 +104,8 @@ export async function resolveConflict(reservationId, action) {
   if (action === "reschedule") {
     // Hand off to the existing editor: the operator picks free dates there, which is the
     // same validation every other booking goes through.
-    navigate("reservations");
-    openReservationDialog(conflict);
+    runtime.navigate("reservations");
+    runtime.openReservation(conflict);
     toast("Выберите свободные даты и сохраните бронь");
     return;
   }
@@ -119,7 +118,7 @@ export async function resolveConflict(reservationId, action) {
     return;
   }
   toast("Бронь отменена, даты освобождены");
-  await refreshCore();
+  await runtime.refresh();
   await refreshConflicts();
 }
 

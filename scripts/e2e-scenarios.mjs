@@ -6,7 +6,7 @@
 // exercise the assembled product — renderer, IPC, main process, PostgreSQL, sync engine —
 // rather than any layer in isolation.
 
-import {addDays, addMonths, connect, freshStart, reporter, resetAuthState, restartApp, wait} from "./e2e-lib.mjs";
+import { connect, freshStart, reporter, wait } from "./e2e-lib.mjs";
 
 let app = await connect();
 const { check, finish } = reporter("Scenarios");
