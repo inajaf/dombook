@@ -18,6 +18,13 @@ const {
   wholeMonthsBetween,
   todayInTimeZone,
 } = require("./domain/booking/booking-policy.cjs");
+const {
+  parseRateRules,
+  quoteReservation,
+  quoteTenancy,
+  serializeRateRules,
+  validateRateRules,
+} = require("./domain/booking/pricing.cjs");
 
 /**
  * Settings that belong to one installation and must never replicate.
@@ -89,6 +96,11 @@ const SCHEMA_TABLES = {
     capacity INTEGER NOT NULL CHECK(capacity > 0),
     base_price_minor INTEGER NOT NULL DEFAULT 0 CHECK(base_price_minor >= 0),
     monthly_rate_minor INTEGER NOT NULL DEFAULT 0 CHECK(monthly_rate_minor >= 0),
+    -- Seasons and length discounts. TEXT rather than columns because the seasons are a list an
+    -- owner edits per unit: a schema with season1_from / season2_rate would cap it and need a
+    -- migration for every extra one. The shape is owned by src/domain/booking/pricing.cjs,
+    -- which also tolerates a value it cannot read.
+    rate_rules TEXT NOT NULL DEFAULT '{}',
     deposit_minor INTEGER NOT NULL DEFAULT 0 CHECK(deposit_minor >= 0),
     currency TEXT NOT NULL DEFAULT 'AZN',
     check_in_time TEXT NOT NULL DEFAULT '15:00',
@@ -124,6 +136,11 @@ const SCHEMA_TABLES = {
     booking_kind TEXT NOT NULL DEFAULT 'stay' CHECK(booking_kind IN ('stay','rental')),
     monthly_rate_minor INTEGER NOT NULL DEFAULT 0 CHECK(monthly_rate_minor >= 0),
     meter_readings TEXT NOT NULL DEFAULT '{}',
+    -- How the accommodation amount was arrived at: the nights, the season rates that applied,
+    -- and the discount. Stored rather than recomputed because the unit's rules can change after
+    -- the booking, and an invoice or a tax receipt that re-derives a different breakdown from
+    -- the amount actually charged is worse than no breakdown at all.
+    rate_breakdown TEXT NOT NULL DEFAULT '{}',
     nightly_rate_minor INTEGER NOT NULL DEFAULT 0 CHECK(nightly_rate_minor >= 0),
     accommodation_minor INTEGER NOT NULL DEFAULT 0 CHECK(accommodation_minor >= 0),
     services_minor INTEGER NOT NULL DEFAULT 0 CHECK(services_minor >= 0),
@@ -394,9 +411,13 @@ class RentKeeperDatabase {
       // an installed app must gain the rental fields without a rebuild that would lose
       // local data.
       this.ensureColumn("properties", "monthly_rate_minor", "INTEGER NOT NULL DEFAULT 0 CHECK(monthly_rate_minor >= 0)");
+      // Seasons and length discounts. An installed app must gain them in place: a booking made
+      // after the upgrade is priced by the rule set, and a missing column would refuse the save.
+      this.ensureColumn("properties", "rate_rules", "TEXT NOT NULL DEFAULT '{}'");
       this.ensureColumn("reservations", "booking_kind", "TEXT NOT NULL DEFAULT 'stay'");
       this.ensureColumn("reservations", "monthly_rate_minor", "INTEGER NOT NULL DEFAULT 0 CHECK(monthly_rate_minor >= 0)");
       this.ensureColumn("reservations", "meter_readings", "TEXT NOT NULL DEFAULT '{}'");
+      this.ensureColumn("reservations", "rate_breakdown", "TEXT NOT NULL DEFAULT '{}'");
       // SQLite cannot alter a CHECK constraint, so a database created before the conflict
       // status existed rejects the value with "CHECK constraint failed" — and every pull
       // carries conflict rows, so its sync fails forever. The table has to be rebuilt.
@@ -1148,6 +1169,12 @@ class RentKeeperDatabase {
       // rent — which is how the Rentals screen decides what to list, rather than a separate
       // availability flag that could disagree with the price.
       monthlyRateMinor: money(input.monthlyRateMinor ?? 0, "Месячная ставка"),
+      // Seasons and length discounts, as the unit's own pricing rules.
+      //
+      // Refused on WRITE when two seasons overlap, because the price would then depend on the
+      // order of a list nobody can see in the editor. Read back tolerantly (parseRateRules),
+      // because a row written by an older client must still be bookable at its base rate.
+      rateRules: this.validatePropertyRateRules(input.rateRules),
       depositMinor: money(input.depositMinor, "Депозит"),
       currency: requiredText(input.currency || "AZN", "Валюта", 3).toUpperCase(),
       checkInTime: requiredText(input.checkInTime || "15:00", "Время заезда", 5),
@@ -1155,6 +1182,32 @@ class RentKeeperDatabase {
       notes: optionalText(input.notes, 2000),
       status: input.status === "archived" ? "archived" : "active",
     };
+  }
+
+  /**
+   * Store a unit's pricing rules as JSON text, refusing one that could not be priced.
+   *
+   * `validateRateRules` answers in stable codes so the rule stays testable, and the codes are
+   * turned into prose here — the one place that owns the wording.
+   */
+  validatePropertyRateRules(input) {
+    if (input === undefined || input === null || input === "") return "{}";
+    const raw = typeof input === "string" ? input : JSON.stringify(input);
+    const codes = validateRateRules(raw);
+    if (codes.length) {
+      const messages = {
+        rate_rules_unreadable: "Правила цен заполнены неверно",
+        seasons_overlap: "Сезоны пересекаются по датам — оставьте непересекающиеся периоды",
+        season_range_inverted: "У сезона дата окончания раньше даты начала",
+        season_rate_missing: "У сезона не указана цена за ночь",
+        stay_discount_threshold_too_low: "Скидка за длительность действует от двух ночей",
+        stay_discount_percent_missing: "У скидки за длительность не указан процент",
+        tenancy_discount_threshold_too_low: "Скидка на аренду действует от двух месяцев",
+        tenancy_discount_percent_missing: "У скидки на аренду не указан процент",
+      };
+      throw new Error(messages[codes[0]] || "Правила цен заполнены неверно");
+    }
+    return serializeRateRules(parseRateRules(raw));
   }
 
   createProperty(input, options = {}) {
@@ -1169,12 +1222,12 @@ class RentKeeperDatabase {
       this.run(
         `INSERT INTO properties(
           id, place_id, kind, name, location, capacity, base_price_minor, monthly_rate_minor,
-          deposit_minor, currency,
+          rate_rules, deposit_minor, currency,
           check_in_time, check_out_time, status, notes, created_at, updated_at, version, last_writer
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
         [
           id, data.placeId, data.kind, data.name, data.location, data.capacity, data.basePriceMinor,
-          data.monthlyRateMinor, data.depositMinor,
+          data.monthlyRateMinor, data.rateRules, data.depositMinor,
           data.currency, data.checkInTime, data.checkOutTime, data.status, data.notes,
           timestamp, timestamp, this.writerId,
         ],
@@ -1199,13 +1252,13 @@ class RentKeeperDatabase {
       this.run(
         `UPDATE properties SET
           place_id = ?, kind = ?, name = ?, location = ?, capacity = ?, base_price_minor = ?,
-          monthly_rate_minor = ?, deposit_minor = ?,
+          monthly_rate_minor = ?, rate_rules = ?, deposit_minor = ?,
           currency = ?, check_in_time = ?, check_out_time = ?, status = ?, notes = ?,
           updated_at = ?, version = version + 1, last_writer = ?
         WHERE id = ?`,
         [
           data.placeId, data.kind, data.name, data.location, data.capacity, data.basePriceMinor,
-          data.monthlyRateMinor, data.depositMinor,
+          data.monthlyRateMinor, data.rateRules, data.depositMinor,
           data.currency, data.checkInTime, data.checkOutTime, data.status, data.notes,
           nowIso(), this.writerId, propertyId,
         ],
@@ -1315,11 +1368,12 @@ class RentKeeperDatabase {
     if (actualCheckOutDate && (actualCheckOutDate < checkInDate || actualCheckOutDate >= checkOutDate)) {
       throw new Error("После досрочного выезда даты проживания нельзя сдвинуть за фактическую дату выезда");
     }
-    // Pricing branches on the kind. A tenancy is rent for whole calendar months; a stay is
-    // nights x nightly rate. They must not share an arithmetic path — multiplying a nightly
-    // rate by 365 produces a number that looks like a year's rent and is not one. The month
-    // count comes from the same helper the server uses, pinned in both languages by
-    // fixtures/rental-terms-cases.json.
+    // Pricing. A tenancy is rent for whole calendar months; a stay is the nights it occupies.
+    // They must not share an arithmetic path — multiplying a nightly rate by 365 produces a
+    // number that looks like a year's rent and is not one — and both now go through the shared
+    // quote, which also applies the unit's seasons and length discounts. The arithmetic itself
+    // lives in src/domain/booking/pricing.cjs and is mirrored in Go, pinned by
+    // fixtures/pricing-cases.json.
     const nightlyRateMinor = existing && existing.property_id === propertyId
       ? existing.nightly_rate_minor
       : property.base_price_minor;
@@ -1334,25 +1388,48 @@ class RentKeeperDatabase {
       && input.accommodationMinor !== null
       && input.accommodationMinor !== "";
 
+    // The unit's seasons and length discounts, as stored. A unit with none prices exactly as it
+    // did before they existed, which is what lets this ship without repricing existing units.
+    const quote = quoteReservation({
+      kind: bookingKind,
+      checkInDate,
+      checkOutDate,
+      baseNightlyRateMinor: nightlyRateMinor,
+      monthlyRateMinor,
+      rateRules: property.rate_rules,
+    });
+
     let accommodationMinor;
     if (hasNegotiated) {
       accommodationMinor = money(input.accommodationMinor, "Сумма проживания");
     } else if (bookingKind === "rental") {
-      const months = wholeMonthsBetween(checkInDate, checkOutDate);
-      if (months < 1) {
+      if (quote.months < 1) {
         // Zero whole months would price the let at nothing, silently.
         throw new Error("Аренда не может быть короче одного календарного месяца");
       }
       if (!monthlyRateMinor) {
         throw new Error("Для аренды укажите месячную ставку объекта или сумму вручную");
       }
-      accommodationMinor = months * monthlyRateMinor;
+      accommodationMinor = quote.totalMinor;
     } else {
-      accommodationMinor = nightlyRateMinor * nights.length;
+      accommodationMinor = quote.totalMinor;
     }
-
+    // The working behind the amount, stored with the booking.
+    //
+    // It travels WITH the money rather than being recomputed on read: the unit's rules and rates
+    // can change after the booking, and an invoice that re-derives a breakdown from today's
+    // prices while showing the amount actually charged is worse than showing no breakdown.
+    //
+    //   - A stay cut short keeps the amount AND the breakdown it was invoiced at. Repricing to
+    //     the nights kept is the early-checkout screen's job, not this one's.
+    //   - A negotiated amount has no breakdown to store. Recording the computed one would put
+    //     an arithmetic explanation next to a figure that was agreed, not calculated.
+    let rateBreakdown = "{}";
     if (actualCheckOutDate) {
       accommodationMinor = existing.accommodation_minor;
+      rateBreakdown = existing.rate_breakdown || "{}";
+    } else if (!hasNegotiated) {
+      rateBreakdown = JSON.stringify(quote);
     }
     const place = property.place_id ? this.getPlace(property.place_id) : null;
     if (!Array.isArray(input.mealItems ?? [])) {
@@ -1409,6 +1486,7 @@ class RentKeeperDatabase {
       meterReadings: normalizeMeterReadings(input.meterReadings),
       nightlyRateMinor,
       accommodationMinor,
+      rateBreakdown,
       meals,
       servicesMinor,
       totalMinor,
@@ -1483,15 +1561,15 @@ class RentKeeperDatabase {
         `INSERT INTO reservations(
           id, property_id, guest_name, guest_phone, guest_email, check_in_date, check_out_date,
           adults, children, status, booking_kind, monthly_rate_minor, meter_readings,
-          nightly_rate_minor, accommodation_minor, services_minor,
+          nightly_rate_minor, accommodation_minor, rate_breakdown, services_minor,
           total_minor, prepaid_minor, deposit_minor, deposit_status, notes, created_at, updated_at,
           version, last_writer
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
         [
           id, data.propertyId, data.guestName, data.guestPhone, data.guestEmail,
           data.checkInDate, data.checkOutDate, data.adults, data.children, data.status,
           data.bookingKind, data.monthlyRateMinor, data.meterReadings,
-          data.nightlyRateMinor, data.accommodationMinor, data.servicesMinor,
+          data.nightlyRateMinor, data.accommodationMinor, data.rateBreakdown, data.servicesMinor,
           data.totalMinor, data.prepaidMinor, data.depositMinor, data.depositStatus,
           data.notes, timestamp, timestamp, this.writerId,
         ],
@@ -1514,7 +1592,7 @@ class RentKeeperDatabase {
         `UPDATE reservations SET
           property_id = ?, guest_name = ?, guest_phone = ?, guest_email = ?,
           check_in_date = ?, check_out_date = ?, adults = ?, children = ?, status = ?,
-          nightly_rate_minor = ?, accommodation_minor = ?, services_minor = ?,
+          nightly_rate_minor = ?, accommodation_minor = ?, rate_breakdown = ?, services_minor = ?,
           total_minor = ?, prepaid_minor = ?, deposit_minor = ?, deposit_status = ?,
           actual_check_out_date = ?,
           notes = ?, updated_at = ?, version = version + 1, last_writer = ?
@@ -1522,7 +1600,7 @@ class RentKeeperDatabase {
         [
           data.propertyId, data.guestName, data.guestPhone, data.guestEmail,
           data.checkInDate, data.checkOutDate, data.adults, data.children, data.status,
-          data.nightlyRateMinor, data.accommodationMinor, data.servicesMinor,
+          data.nightlyRateMinor, data.accommodationMinor, data.rateBreakdown, data.servicesMinor,
           data.totalMinor, data.prepaidMinor, data.depositMinor, data.depositStatus,
           data.actualCheckOutDate, data.notes, nowIso(), this.writerId, reservationId,
         ],
@@ -1591,9 +1669,29 @@ class RentKeeperDatabase {
     return this.transaction(() => {
       this.run("DELETE FROM reservation_nights WHERE reservation_id = ? AND night_date >= ?", [reservationId, actualDate]);
       this.run("DELETE FROM reservation_meals WHERE reservation_id = ? AND meal_date >= ?", [reservationId, actualDate]);
-      const accommodationMinor = recalculate
-        ? reservation.nightly_rate_minor * usedNights
-        : reservation.accommodation_minor;
+      // Repriced through the same quote the booking was created with, so a stay that ends early
+      // is charged the seasons and discounts its shortened dates actually earn — nights x rate
+      // ignored both, and charged a peak-week rate for a week the guest did not stay.
+      //
+      // A TENANCY is repriced by whole months elapsed rather than by nights: multiplying a
+      // monthly rate by a night count produces a number that looks like rent and is not one.
+      // The elapsed count floors at one month, because a tenancy that has begun has begun.
+      const property = this.getProperty(reservation.property_id);
+      const shortened = reservation.booking_kind === "rental"
+        ? quoteTenancy({
+          months: Math.max(1, wholeMonthsBetween(reservation.check_in_date, actualDate)),
+          monthlyRateMinor: reservation.monthly_rate_minor,
+          rateRules: property?.rate_rules,
+        })
+        : quoteReservation({
+          kind: "stay",
+          checkInDate: reservation.check_in_date,
+          checkOutDate: actualDate,
+          baseNightlyRateMinor: reservation.nightly_rate_minor,
+          rateRules: property?.rate_rules,
+        });
+      const accommodationMinor = recalculate ? shortened.totalMinor : reservation.accommodation_minor;
+      const rateBreakdown = recalculate ? JSON.stringify(shortened) : (reservation.rate_breakdown || "{}");
       const servicesMinor = Number(this.scalar(
         "SELECT COALESCE(SUM(amount_minor), 0) FROM reservation_meals WHERE reservation_id = ?",
         [reservationId],
@@ -1601,9 +1699,9 @@ class RentKeeperDatabase {
       const totalMinor = accommodationMinor + servicesMinor;
       this.run(
         `UPDATE reservations SET status = 'checked_out', actual_check_out_date = ?,
-          accommodation_minor = ?, services_minor = ?, total_minor = ?,
+          accommodation_minor = ?, rate_breakdown = ?, services_minor = ?, total_minor = ?,
           updated_at = ?, version = version + 1, last_writer = ? WHERE id = ?`,
-        [actualDate, accommodationMinor, servicesMinor, totalMinor, nowIso(), this.writerId, reservationId],
+        [actualDate, accommodationMinor, rateBreakdown, servicesMinor, totalMinor, nowIso(), this.writerId, reservationId],
       );
       this.audit("reservation", reservationId, "early_checkout", {
         actualCheckOutDate: actualDate,

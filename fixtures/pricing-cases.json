@@ -1,0 +1,248 @@
+{
+  "$comment": "What a booking costs. Mirrors src/domain/booking/pricing.cjs and the Go port (server/internal/domain/pricing.go). Money is integer minor units; no case reads the clock or a locale. A season is a range of NIGHTS: `to` is the check-in date of its last night, so a stay checking out on the morning after `to` still paid the season rate for that night.",
+  "op": "quoteReservation",
+  "baseNightlyRateMinor": 24000,
+  "monthlyRateMinor": 480000,
+  "rules": {
+    "stayDiscounts": [
+      { "minimumNights": 7, "percent": 10 },
+      { "minimumNights": 28, "percent": 20 }
+    ],
+    "tenancyDiscounts": [
+      { "minimumMonths": 12, "percent": 10 }
+    ],
+    "seasons": [
+      { "name": "Новый год", "from": "2026-12-25", "to": "2027-01-10", "nightlyRateMinor": 48000 }
+    ]
+  },
+  "quotes": [
+    {
+      "name": "a stay with no rules pays the base rate for every night",
+      "input": { "kind": "stay", "checkInDate": "2026-11-02", "checkOutDate": "2026-11-05", "rateRules": null },
+      "expect": {
+        "nights": 3,
+        "lines": [{ "label": "", "nightlyRateMinor": 24000, "nights": 3, "amountMinor": 72000 }],
+        "grossMinor": 72000,
+        "discountPercent": 0,
+        "discountMinor": 0,
+        "totalMinor": 72000
+      }
+    },
+    {
+      "name": "a season prices only the nights that fall inside it",
+      "input": { "kind": "stay", "checkInDate": "2026-12-23", "checkOutDate": "2026-12-28" },
+      "expect": {
+        "nights": 5,
+        "lines": [
+          { "label": "", "nightlyRateMinor": 24000, "nights": 2, "amountMinor": 48000 },
+          { "label": "Новый год", "nightlyRateMinor": 48000, "nights": 3, "amountMinor": 144000 }
+        ],
+        "grossMinor": 192000,
+        "discountPercent": 0,
+        "discountMinor": 0,
+        "totalMinor": 192000
+      }
+    },
+    {
+      "name": "a season covers the night of its last date and not the next one",
+      "input": { "kind": "stay", "checkInDate": "2027-01-10", "checkOutDate": "2027-01-12" },
+      "expect": {
+        "nights": 2,
+        "lines": [
+          { "label": "Новый год", "nightlyRateMinor": 48000, "nights": 1, "amountMinor": 48000 },
+          { "label": "", "nightlyRateMinor": 24000, "nights": 1, "amountMinor": 24000 }
+        ],
+        "grossMinor": 72000,
+        "discountPercent": 0,
+        "discountMinor": 0,
+        "totalMinor": 72000
+      }
+    },
+    {
+      "name": "a stay discount applies from its threshold",
+      "input": { "kind": "stay", "checkInDate": "2027-03-01", "checkOutDate": "2027-03-08" },
+      "expect": {
+        "nights": 7,
+        "lines": [{ "label": "", "nightlyRateMinor": 24000, "nights": 7, "amountMinor": 168000 }],
+        "grossMinor": 168000,
+        "discountPercent": 10,
+        "discountMinor": 16800,
+        "totalMinor": 151200
+      }
+    },
+    {
+      "name": "a stay one night short of the threshold pays full price",
+      "input": { "kind": "stay", "checkInDate": "2027-03-01", "checkOutDate": "2027-03-07" },
+      "expect": {
+        "nights": 6,
+        "lines": [{ "label": "", "nightlyRateMinor": 24000, "nights": 6, "amountMinor": 144000 }],
+        "grossMinor": 144000,
+        "discountPercent": 0,
+        "discountMinor": 0,
+        "totalMinor": 144000
+      }
+    },
+    {
+      "name": "the largest threshold reached wins, and thresholds do not stack",
+      "input": { "kind": "stay", "checkInDate": "2027-03-01", "checkOutDate": "2027-03-31" },
+      "expect": {
+        "nights": 30,
+        "lines": [{ "label": "", "nightlyRateMinor": 24000, "nights": 30, "amountMinor": 720000 }],
+        "grossMinor": 720000,
+        "discountPercent": 20,
+        "discountMinor": 144000,
+        "totalMinor": 576000
+      }
+    },
+    {
+      "name": "a discount that lands on half a minor unit rounds up",
+      "input": {
+        "kind": "stay",
+        "checkInDate": "2027-05-01",
+        "checkOutDate": "2027-05-03",
+        "baseNightlyRateMinor": 505,
+        "rateRules": { "stayDiscounts": [{ "minimumNights": 2, "percent": 15 }] }
+      },
+      "expect": {
+        "nights": 2,
+        "lines": [{ "label": "", "nightlyRateMinor": 505, "nights": 2, "amountMinor": 1010 }],
+        "grossMinor": 1010,
+        "discountPercent": 15,
+        "discountMinor": 152,
+        "totalMinor": 858
+      }
+    },
+    {
+      "name": "a tenancy is priced by whole months, never by nights",
+      "input": { "kind": "rental", "checkInDate": "2026-01-15", "checkOutDate": "2026-04-15" },
+      "expect": {
+        "months": 3,
+        "monthlyRateMinor": 480000,
+        "effectiveMonthlyMinor": 480000,
+        "grossMinor": 1440000,
+        "discountPercent": 0,
+        "discountMinor": 0,
+        "totalMinor": 1440000
+      }
+    },
+    {
+      "name": "a tenancy reaching the long-term threshold is discounted, and the saving is visible per month",
+      "input": { "kind": "rental", "checkInDate": "2026-01-31", "checkOutDate": "2027-01-31" },
+      "expect": {
+        "months": 12,
+        "monthlyRateMinor": 480000,
+        "effectiveMonthlyMinor": 432000,
+        "grossMinor": 5760000,
+        "discountPercent": 10,
+        "discountMinor": 576000,
+        "totalMinor": 5184000
+      }
+    },
+    {
+      "name": "a tenancy a day short of the threshold pays the full monthly rate",
+      "input": { "kind": "rental", "checkInDate": "2026-01-31", "checkOutDate": "2027-01-30" },
+      "expect": {
+        "months": 11,
+        "monthlyRateMinor": 480000,
+        "effectiveMonthlyMinor": 480000,
+        "grossMinor": 5280000,
+        "discountPercent": 0,
+        "discountMinor": 0,
+        "totalMinor": 5280000
+      }
+    },
+    {
+      "name": "a rule set that cannot be read falls back to the base rate rather than refusing the booking",
+      "input": { "kind": "stay", "checkInDate": "2026-11-02", "checkOutDate": "2026-11-04", "rateRules": "{ this is not json" },
+      "expect": {
+        "nights": 2,
+        "lines": [{ "label": "", "nightlyRateMinor": 24000, "nights": 2, "amountMinor": 48000 }],
+        "grossMinor": 48000,
+        "discountPercent": 0,
+        "discountMinor": 0,
+        "totalMinor": 48000
+      }
+    },
+    {
+      "name": "a season whose range runs backwards is dropped, not applied",
+      "input": {
+        "kind": "stay",
+        "checkInDate": "2027-02-05",
+        "checkOutDate": "2027-02-07",
+        "rateRules": { "seasons": [{ "name": "Сломанный", "from": "2027-02-10", "to": "2027-02-01", "nightlyRateMinor": 99999 }] }
+      },
+      "expect": {
+        "nights": 2,
+        "lines": [{ "label": "", "nightlyRateMinor": 24000, "nights": 2, "amountMinor": 48000 }],
+        "grossMinor": 48000,
+        "discountPercent": 0,
+        "discountMinor": 0,
+        "totalMinor": 48000
+      }
+    },
+    {
+      "name": "a season without a rate is dropped, because a free peak week is not a discount",
+      "input": {
+        "kind": "stay",
+        "checkInDate": "2027-02-05",
+        "checkOutDate": "2027-02-07",
+        "rateRules": { "seasons": [{ "name": "Пустой", "from": "2027-02-01", "to": "2027-02-28", "nightlyRateMinor": 0 }] }
+      },
+      "expect": {
+        "nights": 2,
+        "lines": [{ "label": "", "nightlyRateMinor": 24000, "nights": 2, "amountMinor": 48000 }],
+        "grossMinor": 48000,
+        "discountPercent": 0,
+        "discountMinor": 0,
+        "totalMinor": 48000
+      }
+    }
+  ],
+  "validation": [
+    {
+      "name": "an empty rule set is valid",
+      "rules": {},
+      "expect": []
+    },
+    {
+      "name": "a plain season is valid",
+      "rules": { "seasons": [{ "from": "2026-12-25", "to": "2027-01-10", "nightlyRateMinor": 48000 }] },
+      "expect": []
+    },
+    {
+      "name": "seasons that overlap are refused, because the price would depend on list order",
+      "rules": {
+        "seasons": [
+          { "from": "2026-12-25", "to": "2027-01-10", "nightlyRateMinor": 48000 },
+          { "from": "2027-01-05", "to": "2027-01-20", "nightlyRateMinor": 52000 }
+        ]
+      },
+      "expect": ["seasons_overlap"]
+    },
+    {
+      "name": "a season whose range runs backwards is refused",
+      "rules": { "seasons": [{ "from": "2027-02-10", "to": "2027-02-01", "nightlyRateMinor": 48000 }] },
+      "expect": ["season_range_inverted"]
+    },
+    {
+      "name": "a season without a rate is refused",
+      "rules": { "seasons": [{ "from": "2027-02-01", "to": "2027-02-10", "nightlyRateMinor": 0 }] },
+      "expect": ["season_rate_missing"]
+    },
+    {
+      "name": "a stay discount below two nights is refused, because a single night is not a long stay",
+      "rules": { "stayDiscounts": [{ "minimumNights": 1, "percent": 10 }] },
+      "expect": ["stay_discount_threshold_too_low"]
+    },
+    {
+      "name": "a tenancy discount below two months is refused",
+      "rules": { "tenancyDiscounts": [{ "minimumMonths": 1, "percent": 10 }] },
+      "expect": ["tenancy_discount_threshold_too_low"]
+    },
+    {
+      "name": "a discount without a percentage is refused",
+      "rules": { "stayDiscounts": [{ "minimumNights": 7, "percent": 0 }] },
+      "expect": ["stay_discount_percent_missing"]
+    }
+  ]
+}
