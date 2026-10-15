@@ -54,10 +54,20 @@ await app.evaluate(`
 const MEASURE = `
   const srgb = (c) => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
   const luminance = ([r, g, b]) => 0.2126 * srgb(r) + 0.7152 * srgb(g) + 0.0722 * srgb(b);
+  // color-mix() computes to color(srgb r g b / a), and a parser that reads only rgb()/rgba()
+  // does not FAIL on it — it returns null and the node is skipped. A colour this pass cannot read
+  // is a colour that passes every check there is, which is how near-white text on a white field
+  // stayed green. Both forms are read.
   const parse = (value) => {
-    const m = String(value).match(/rgba?\\(([^)]+)\\)/);
+    const text = String(value);
+    const srgb = text.match(/color\(srgb\s+([^)]+)\)/);
+    if (srgb) {
+      const parts = srgb[1].split(/[\s/]+/).filter(Boolean).map(Number);
+      return { rgb: parts.slice(0, 3).map((v) => Math.round(v * 255)), a: parts.length > 3 ? parts[3] : 1 };
+    }
+    const m = text.match(/rgba?\(([^)]+)\)/);
     if (!m) return null;
-    const parts = m[1].split(/[,\\s/]+/).filter(Boolean).map(Number);
+    const parts = m[1].split(/[,\s/]+/).filter(Boolean).map(Number);
     return { rgb: parts.slice(0, 3), a: parts.length > 3 ? parts[3] : 1 };
   };
   const blend = (fg, fa, bg) => fg.map((c, i) => c * fa + bg[i] * (1 - fa));
@@ -104,6 +114,27 @@ const MEASURE = `
     if (value < required - 0.02) lowContrast.push(Math.round(value * 100) / 100 + ':1 (needs ' + required + ') ' + size + 'px "' + text.slice(0, 40) + '"');
   }
 
+  // A FIELD'S OWN TEXT, which the pass above cannot see.
+  //
+  // The contrast check walks text NODES, and an empty <input> has none — its value is a property,
+  // not a child node, and its placeholder is a pseudo-element. So a field painted white in the
+  // dark theme reported nothing at all while showing near-white text on white to anyone who
+  // typed in it. This measures the element itself: its own colour against its own
+  // background, which is the same floor the body text is held to.
+  const deadFields = [];
+  for (const el of document.querySelectorAll('input:not([type=hidden]):not([type=checkbox]):not([type=radio]), select, textarea')) {
+    if (!visible(el)) continue;
+    const s = getComputedStyle(el);
+    const fg = parse(s.color);
+    if (!fg) continue;
+    const own = parse(s.backgroundColor);
+    const bg = own && own.a >= 0.999 ? own.rgb : effectiveBackground(el);
+    const value = ratio(fg.a >= 0.999 ? fg.rgb : blend(fg.rgb, fg.a, bg), bg);
+    if (value < 4.5 - 0.02) {
+      deadFields.push(Math.round(value * 100) / 100 + ':1 on ' + s.backgroundColor + ' — ' + (el.tagName.toLowerCase() + (el.type ? '[' + el.type + ']' : '')) + ' "' + (el.name || el.id || '') + '"');
+    }
+  }
+
   const tiny = [];
   for (const el of document.querySelectorAll('button, a[href], select, input:not([type=hidden]), textarea, summary, [role=button]')) {
     if (!visible(el)) continue;
@@ -116,7 +147,7 @@ const MEASURE = `
       tiny.push(Math.round(r.width) + 'x' + Math.round(r.height) + ' "' + (el.innerText || el.getAttribute('aria-label') || el.type || '').trim().slice(0, 30) + '"');
     }
   }
-  return { tooSmall, lowContrast, tiny };
+  return { tooSmall, lowContrast, tiny, deadFields };
 `;
 
 const PAGES = ["dashboard", "calendar", "reservations", "properties", "rentals", "conflicts", "settings"];
@@ -149,7 +180,7 @@ check(JSON.stringify(groupLabels) === JSON.stringify(["Работа", "Сист�
 // walks every screen twice, once per theme: the same floor applies to both, and the theme is
 // switched through the control the owner uses rather than by setting an attribute behind the UI.
 async function measureEveryScreen(themeName) {
-  const problems = { tooSmall: [], lowContrast: [], tiny: [] };
+  const problems = { tooSmall: [], lowContrast: [], tiny: [], deadFields: [] };
   for (const page of PAGES) {
     await app.evaluate(`document.querySelector('.nav-item[data-page="${page}"]').click(); return 'ok';`);
     await wait(700);
@@ -190,7 +221,7 @@ const darkDialog = await measureBookingDialog("dark");
 // both themes, because it is drawn after the theme pass and would otherwise be measured in
 // whichever one happened to be left on.
 async function measureBookingDialog(themeName) {
-  const found = { tooSmall: [], lowContrast: [], tiny: [] };
+  const found = { tooSmall: [], lowContrast: [], tiny: [], deadFields: [] };
   await app.evaluate(`document.querySelector('.nav-item[data-page="reservations"]').click(); return 'ok';`);
   await wait(500);
   await app.evaluate(`document.getElementById('primaryAction').click(); return 'ok';`);
@@ -219,6 +250,11 @@ check(bothThemes("lowContrast").length === 0,
 check(bothThemes("tiny").length === 0,
   "no control is smaller than the 24px minimum target, in either theme",
   bothThemes("tiny").slice(0, 6).join(" | "));
+// A form field is where a person types, and near-white text on a white field is invisible exactly
+// while it matters. An empty input has no text node, so this is measured on the ELEMENT.
+check(bothThemes("deadFields").length === 0,
+  "every form field's own text is readable against its own background, in either theme",
+  bothThemes("deadFields").slice(0, 6).join(" | "));
 
 // The switch has to survive a restart, and it has to be applied BEFORE the first paint — a window
 // that paints light and turns dark reads as a fault rather than as a preference.
