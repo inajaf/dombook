@@ -7,6 +7,8 @@
 
 import fs from "node:fs";
 import { createRequire } from "node:module";
+import { PROFILE_NAMES, userDataDir } from "./lib/profile.mjs";
+
 
 const PORT = process.env.CDP_PORT || "9555";
 
@@ -197,8 +199,7 @@ export async function resetAuthState({ app = null } = {}) {
   // The local profile, so the outbox and cached session start empty too.
   const os = createRequire(import.meta.url)("node:os");
   const fsSync = createRequire(import.meta.url)("node:fs");
-  fsSync.rmSync(`${os.homedir()}/Library/Application Support/rentkeeper-desktop`, { recursive: true, force: true });
-  fsSync.rmSync(`${os.homedir()}/Library/Application Support/dombook-desktop`, { recursive: true, force: true });
+  for (const name of PROFILE_NAMES) fsSync.rmSync(userDataDir(name), { recursive: true, force: true });
 }
 
 /** Stop every Electron process and wait until the CDP port is actually free. */
