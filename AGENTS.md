@@ -463,31 +463,6 @@ The `vision_*` tools (`vision_glance`, `vision_ground`, `vision_detect`, `vision
 The older `dsh-glance` / `dsh-ground` / `dsh-detect` / `dsh-crop` shell commands are gone: they
 wrapped a different, now-removed plugin. Use the `vision_*` tools.
 
-### How to actually look at the app
-
-The `vision_*` tools (`vision_glance`, `vision_ground`, `vision_detect`, `vision_crop`,
-`vision_trace`, `vision_pixel_diff`, `vision_long_screenshot_ocr`, `vision_extract_foreground`,
-`vision_dominant_colors`, `vision_html_screenshot`) come from the DSH plugin
-`@anionex/dsh-vision-toolkit`. Call `vision_toolkit_activate` once to expose them.
-
-- **Coordinates are ORIGINAL image pixels**, so a `vision_ground` box feeds straight into
-  `vision_crop` with no scaling in between.
-- **Artifacts are written into the session workspace** under `.dsh-vision-toolkit/`, which is
-  gitignored. Deleting that directory is always safe.
-- **The provider is DeepSeek** (`deepseek-flash`, the only vision-capable model on that key),
-  configured in `~/.dsh/profiles/web/cordis.patch.yml`, with the key held as the DSH credential
-  `VISION_API_KEY`. The plugin's own default is a free public endpoint that answers HTTP 429
-  under any real use, so if vision starts failing with a rate limit, that default is back —
-  meaning the profile config was lost.
-- **The plugin is version-exempt, and the exemption is keyed to the exact DSH version.** It is
-  published for DSH `<0.2.0` while this machine runs a 0.2.x alpha, so DSH loads it only
-  because an explicit exemption was granted. **A DSH upgrade invalidates it** and the tools
-  stop loading. Repair with `~/.dsh/vision-setup.sh` (`--status` to check only; idempotent),
-  then restart DSH.
-
-The older `dsh-glance` / `dsh-ground` / `dsh-detect` / `dsh-crop` shell commands are gone: they
-wrapped a different, now-removed plugin. Use the `vision_*` tools.
-
 ## Long-term rentals
 
 A tenancy is a reservation with `booking_kind = 'rental'` and a long date range, so the one
