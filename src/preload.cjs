@@ -80,7 +80,7 @@ contextBridge.exposeInMainWorld("domBook", {
     status: () => invoke("auth:status"),
     send: (email) => invoke("auth:send", { email }),
     setup: (email) => invoke("auth:setup", { email }),
-    verify: (email, code) => invoke("auth:verify", { email, code }),
+    verify: (email, code, accountCreated = false) => invoke("auth:verify", { email, code, accountCreated }),
     setPlan: (plan) => invoke("auth:setPlan", { plan }),
     checkout: (plan) => invoke("auth:checkout", { plan }),
     logout: () => invoke("auth:logout"),
