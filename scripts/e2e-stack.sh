@@ -117,6 +117,15 @@ start_app() {
   echo "app did not expose CDP; see /tmp/e2e-app.log" >&2; tail -5 /tmp/e2e-app.log >&2; return 1
 }
 
+# A verification owns the machine while it runs: it uses these ports and this database, and two
+# stacks on one host produce results nobody can trust. Refusing is the only useful behaviour.
+VERIFY_LOCK="${ROOT}/artifacts/.verifying"
+if [ -f "$VERIFY_LOCK" ] && [ "${1:-up}" != "down" ]; then
+  echo "идёт независимая проверка ($(cat "$VERIFY_LOCK" 2>/dev/null)) — стек занят" >&2
+  echo "  дождитесь её окончания или удалите ${VERIFY_LOCK}, если процесс уже не идёт" >&2
+  exit 2
+fi
+
 case "${1:-up}" in
   up)
     stop_app; stop_api
