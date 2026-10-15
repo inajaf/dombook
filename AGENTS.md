@@ -516,6 +516,27 @@ only place that would have noticed the browser build being broken — `npm test`
   `--no-sandbox`: the checkerout's `chrome-sandbox` is not setuid, so Electron aborts with
   *"The SUID sandbox helper binary was found, but is not configured correctly"*.
 
+### A colour this suite cannot read is a colour that passes
+
+The contrast pass reads TEXT NODES, so a field's own colour is not in it: an empty `<input>` has no
+child node, its value is a property and its placeholder is a pseudo-element. A form painted
+`background: white` therefore reported nothing at all while showing near-white text on white to
+anyone who typed in it — in the dark theme, which is where it was noticed.
+
+Two gaps, both closed:
+
+- **Form fields are measured on the ELEMENT** now (`deadFields`): its own colour against its own
+  background, the same 4.5:1 floor as body text.
+- **`parse()` reads `color(srgb …)` as well as `rgb()`/`rgba()`.** `color-mix()` computes to the
+  former, and a parser that does not know it does not fail — it returns null and the node is
+  SKIPPED. So a text colour written with `color-mix()` was invisible to the whole pass.
+
+The lesson is the general one: a measurement that silently skips what it cannot parse is worse than
+no measurement, because it reports a pass. `tests/styles.test.cjs` catches the same class in a
+second — no hex literal and no colour KEYWORD outside the two token blocks — and it found two more
+real ones the moment it existed (a skip link whose label was white on a background that is light in
+the dark theme, and a focus ring that mixed a literal white into the accent).
+
 ### Finding dead CSS tokens
 
 ```bash
