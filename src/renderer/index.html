@@ -10,7 +10,7 @@
   <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
   <link rel="manifest" href="./manifest.webmanifest">
-  <link rel="stylesheet" href="./styles.css?v=20261015-9">
+  <link rel="stylesheet" href="./styles.css?v=20261015-10">
 </head>
 <body>
   <a class="skip-link" href="#main-content">Перейти к содержимому</a>
@@ -610,7 +610,10 @@
             <svg><use href="#i-arrow"/></svg>
           </button>
         </div>
+        <div class="documents-generated" id="documentsGenerated"></div>
+        <label class="toggle-row documents-choose"><input type="checkbox" id="documentsOpenAfter" checked><span>Открывать документ после создания</span></label>
         <label class="toggle-row documents-choose"><input type="checkbox" id="documentsChoosePath"><span>Спросить, куда сохранить</span></label>
+        <p class="rule-hint documents-folder">Папка документов: <span data-i18n-ignore id="documentsFolderPath"></span></p>
         <div class="form-error" id="documentsError" role="alert" hidden></div>
       </div>
       <footer class="modal-footer">
@@ -640,6 +643,6 @@
   <script src="./i18n/az.js"></script>
   <script src="./i18n/en.js"></script>
   <script src="./i18n/i18n.js"></script>
-  <script src="./app.js?v=20261015-9"></script>
+  <script src="./app.js?v=20261015-12"></script>
 </body>
 </html>

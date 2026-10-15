@@ -42,8 +42,9 @@ const state = {
   quoteRequest: 0,
   // True once the owner types an amount: the computed figure stops replacing it.
   accommodationManual: false,
-  // The booking the documents dialog is currently about.
+  // The booking the documents dialog is currently about, and where generated documents live.
   documentsReservation: null,
+  documentsFolder: "",
   reservationFilter: "all",
   search: "",
   expandedGroups: new Set(),
@@ -229,13 +230,36 @@ async function unwrap(promise) {
   return result.data;
 }
 
-function toast(message, type = "success") {
+/**
+ * A short message, optionally with one thing to do about it.
+ *
+ * The action exists for the case that produced it: a generated document announced itself and then
+ * left the owner to find `~/Library/Application Support` — a directory Finder hides by default —
+ * to look at the file they had just made. A message that says "the document is ready" without a
+ * way to open it is only half an answer.
+ */
+function toast(message, type = "success", action = null) {
   const element = document.createElement("div");
   element.className = `toast ${type === "error" ? "error" : ""}`;
-  element.textContent = message;
+  const text = document.createElement("span");
+  text.textContent = message;
+  element.append(text);
+  if (action) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "toast-action";
+    button.textContent = action.label;
+    button.addEventListener("click", () => {
+      element.remove();
+      action.run();
+    });
+    element.append(button);
+  }
   $("#toastRegion").append(element);
-  setTimeout(() => element.classList.add("is-leaving"), 3700);
-  setTimeout(() => element.remove(), 3900);
+  // A toast with an action stays long enough to be read and clicked; both disappear together.
+  const lifetime = action ? 9000 : 3700;
+  setTimeout(() => element.classList.add("is-leaving"), lifetime);
+  setTimeout(() => element.remove(), lifetime + 200);
 }
 
 function showError(target, error) {
@@ -1036,15 +1060,79 @@ function openDocumentsDialog(reservationId) {
   // The contract is offered for a tenancy only: printing a "договор найма" for two nights would
   // produce a document with a monthly rent and a term that do not exist.
   $("#documentContract").hidden = !isRental;
+  // Refresh if it is not known yet; the dialog is opened from a live session, so this succeeds
+  // even when the workspace was entered before the folder could be resolved.
+  loadDocumentsFolder();
+  renderGeneratedDocuments(reservationId);
   $("#documentsDialog").showModal();
+}
+
+async function loadDocumentsFolder() {
+  try {
+    state.documentsFolder = await unwrap(api.documents.folder());
+  } catch {
+    // A folder that cannot be resolved only costs the path line in the dialog.
+    state.documentsFolder = "";
+  }
+  const target = $("#documentsFolderPath");
+  if (target) {
+    target.textContent = state.documentsFolder;
+    target.hidden = !state.documentsFolder;
+  }
+  return state.documentsFolder;
 }
 
 async function createDocument(reservationId, kind) {
   const choose = $("#documentsChoosePath")?.checked === true;
+  const openAfter = $("#documentsOpenAfter")?.checked !== false;
   const result = await unwrap(api.documents.create({ reservationId, kind, choose }));
   if (result?.canceled) return;
-  toast(`Документ сохранён: ${result.fileName}`);
+  // Opened straight away by default: the owner asked for a document in order to look at it, print
+  // it, or send it. The checkbox is there for someone producing a batch of them.
+  if (openAfter) await openDocumentFile(result.path);
+  toast(`Документ сохранён: ${result.fileName}`, "success", {
+    label: "Открыть",
+    run: () => openDocumentFile(result.path),
+  });
+  renderGeneratedDocuments(reservationId);
   return result;
+}
+
+/** Hand a file to the system's own viewer. The main process decides what it will open. */
+async function openDocumentFile(filePath) {
+  try {
+    await unwrap(api.documents.open({ filePath }));
+  } catch (error) {
+    toast(`Не удалось открыть файл: ${error.message}`, "error");
+  }
+}
+
+/**
+ * The documents already produced for this booking.
+ *
+ * Regenerating is not the only way to look at a contract: the file from last week is still in the
+ * folder, and until this list existed the only route back to it was knowing that folder's path.
+ */
+async function renderGeneratedDocuments(reservationId) {
+  const container = $("#documentsGenerated");
+  if (!container) return;
+  try {
+    const files = await unwrap(api.documents.list({ reservationId }));
+    container.innerHTML = files.length
+      ? `<p class="rule-hint">Уже созданы:</p>${files.map((file) => `
+          <div class="document-file">
+            <span>${icon("i-book")}</span>
+            <span><strong data-i18n-ignore>${escapeHtml(file.name)}</strong>
+              <small>${escapeHtml(formatBytes(file.size))} · ${escapeHtml(new Date(file.modifiedAt).toLocaleString(interfaceLocale()))}</small></span>
+            <button type="button" class="button secondary compact" data-open-document="${escapeHtml(file.path)}">Открыть</button>
+            <button type="button" class="button ghost compact" data-reveal-document="${escapeHtml(file.path)}">Показать в папке</button>
+          </div>`).join("")}`
+      : "";
+  } catch (error) {
+    // A listing failure must not make the dialog look broken; the generate buttons still work.
+    container.innerHTML = "";
+    console.warn("Document list failed", error);
+  }
 }
 
 function renderSettings() {
@@ -2154,6 +2242,19 @@ function bindEvents() {
   $("#openDocumentsFolder").addEventListener("click", () => {
     unwrap(api.documents.openFolder()).catch((error) => toast(error.message, "error"));
   });
+  // Delegated: the rows are rebuilt every time a document is produced.
+  $("#documentsGenerated").addEventListener("click", (event) => {
+    const open = event.target.closest("[data-open-document]");
+    if (open) {
+      openDocumentFile(open.dataset.openDocument);
+      return;
+    }
+    const reveal = event.target.closest("[data-reveal-document]");
+    if (reveal) {
+      unwrap(api.documents.reveal({ filePath: reveal.dataset.revealDocument }))
+        .catch((error) => toast(error.message, "error"));
+    }
+  });
   $("#requisitesForm")?.addEventListener("submit", (event) => {
     submitRequisites(event).catch((error) => toast(error.message, "error"));
   });
@@ -2228,10 +2329,39 @@ function clearSessionUI() {
   $("#cloudAccount").innerHTML = "";
 }
 
+/**
+ * Pull once, quietly, right after the workspace opens.
+ *
+ * This was missing, and its absence is the worst first impression the product can make: the local
+ * database is what the screen reads, so on a fresh install — or any device whose profile has just
+ * been created — an owner signs in successfully and sees an EMPTY workspace. Their bookings exist;
+ * they are on the server, and the only thing that would have fetched them was a 60-second timer or
+ * a button hidden in Settings. "I logged in and everything is gone" is what that looks like.
+ *
+ * Silent, unlike the Settings button: nobody asked for this, so it must not toast on success. A
+ * failure is also silent and simply leaves the local data on screen, because being offline is a
+ * supported state rather than an error.
+ */
+async function syncAfterLogin() {
+  try {
+    const response = await window.domBook.sync.now();
+    if (!response?.ok || response.data?.ok === false) return;
+    if ((response.data?.applied || 0) > 0 || (response.data?.pushed || 0) > 0) {
+      await refreshCore();
+    }
+  } catch {
+    // Offline is a normal state; the periodic sync will catch up.
+  }
+}
+
 async function enterApp() {
   try {
     await refreshCore();
     navigate("dashboard");
+    // Resolved here rather than at boot: `documents:folder` needs a session, and boot runs at the
+    // login screen where there is none — which left the dialog's path line permanently empty.
+    loadDocumentsFolder();
+    syncAfterLogin();
   } catch (error) {
     toast(`Не удалось загрузить базу: ${error.message}`, "error");
   }

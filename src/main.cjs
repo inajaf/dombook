@@ -325,6 +325,53 @@ function registerIpc() {
       return folder;
     });
 
+    /**
+     * Hand a generated document to the system's viewer.
+     *
+     * The path is REFUSED unless it is inside the documents folder. The renderer is sandboxed and
+     * this is the one channel that takes a path from it, so without the check a compromised view
+     * would have a general "open any file on this machine" primitive. The folder is the only place
+     * this app writes documents, so nothing legitimate is excluded by the restriction.
+     */
+    handle("documents:open", async (payload) => {
+      const target = await resolveDocumentPath(payload?.filePath);
+      const error = await shell.openPath(target);
+      if (error) throw new Error(error);
+      return target;
+    });
+
+    handle("documents:reveal", async (payload) => {
+      const target = await resolveDocumentPath(payload?.filePath);
+      shell.showItemInFolder(target);
+      return target;
+    });
+
+    // What has already been produced for a booking, so a document from last week is reachable
+    // without knowing where the folder is. Filtered by the document number, which is derived from
+    // the booking — the same number that is in the file name.
+    handle("documents:list", async (payload) => {
+      const folder = path.join(app.getPath("userData"), "documents");
+      const reservation = database.getReservation(payload?.reservationId);
+      const number = reservation ? documentFileName("invoice", reservation).split("-").slice(1, 3).join("-") : "";
+      let names = [];
+      try {
+        names = await fs.readdir(folder);
+      } catch {
+        // No folder yet simply means nothing has been produced.
+        return [];
+      }
+      const files = [];
+      for (const name of names) {
+        if (!name.toLowerCase().endsWith(".pdf")) continue;
+        if (number && !name.includes(number)) continue;
+        const filePath = path.join(folder, name);
+        const stat = await fs.stat(filePath).catch(() => null);
+        if (!stat) continue;
+        files.push({ name, path: filePath, size: stat.size, modifiedAt: stat.mtime.toISOString() });
+      }
+      return files.sort((a, b) => (a.modifiedAt < b.modifiedAt ? 1 : -1));
+    });
+
     // The document, built but not written. Kept separate from the save so the wording and the
     // arithmetic can be asserted without producing a file, and so a preview is possible.
     handle("documents:html", (payload) => {
@@ -397,6 +444,22 @@ function registerIpc() {
    */
   function documentDate() {
     return database.systemInfo().bookingPolicy.today;
+  }
+
+  /**
+   * A path the renderer asked us to open, confirmed to be a document this app produced.
+   *
+   * `path.resolve` first, so `..` segments are collapsed before the prefix test — comparing the
+   * raw string would accept `<documents>/../../.ssh/id_rsa`.
+   */
+  async function resolveDocumentPath(filePath) {
+    const folder = path.join(app.getPath("userData"), "documents");
+    const resolved = path.resolve(String(filePath || ""));
+    if (!resolved.startsWith(path.resolve(folder) + path.sep)) {
+      throw new Error("Можно открыть только документы, созданные приложением");
+    }
+    await fs.access(resolved);
+    return resolved;
   }
 
   function documentContext(reservationId) {

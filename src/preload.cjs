@@ -30,6 +30,9 @@ contextBridge.exposeInMainWorld("domBook", {
     create: (data) => invoke("documents:create", data),
     folder: () => invoke("documents:folder"),
     openFolder: () => invoke("documents:openFolder"),
+    list: (data) => invoke("documents:list", data),
+    open: (data) => invoke("documents:open", data),
+    reveal: (data) => invoke("documents:reveal", data),
   },
   // A price for a booking that has not been saved. Computed in the main process, which owns the
   // pricing rules — see src/domain/booking/pricing.cjs.
