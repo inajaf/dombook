@@ -18,6 +18,7 @@ import { toast } from "./toast.js";
 import { confirmAction } from "./modal.js";
 import { PAGE_META, state } from "./store.js";
 import { api, unwrap } from "./api.js";
+import { renderCalendar, showCalendarPopover, hideCalendarPopover, CALENDAR_RANGES } from "./views/calendar.js";
 
 async function refreshCore() {
   const [places, properties, reservations, dashboard, calendar, systemInfo] = await Promise.all([
@@ -25,7 +26,7 @@ async function refreshCore() {
     unwrap(api.properties.list({ includeArchived: true })),
     unwrap(api.reservations.list()),
     unwrap(api.dashboard.get()),
-    unwrap(api.calendar.get(14)),
+    unwrap(api.calendar.get(state.calendarDays, state.calendarStart)),
     unwrap(api.system.info()),
   ]);
   Object.assign(state, { places, properties, reservations, dashboard, calendar, systemInfo });
@@ -149,54 +150,6 @@ function renderDashboard() {
         </div>
       `).join("")}</div>`
     : `<div class="empty-inline">На сегодня заездов и выездов нет. Можно спокойно проверить будущие брони.</div>`;
-}
-
-function renderCalendar() {
-  const data = state.calendar || { dates: [], properties: [], occupancy: [] };
-  const maximumCheckInDate = state.systemInfo?.bookingPolicy?.maximumCheckInDate;
-  const byKey = new Map(data.occupancy.map((item) => [`${item.property_id}:${item.night_date}`, item]));
-  if (!data.properties.length) {
-    $("#calendarContainer").innerHTML = `<div class="empty-state"><h3>Нет активных домов</h3><p>Добавьте или восстановите дом, чтобы увидеть календарь.</p></div>`;
-    return;
-  }
-  const headers = data.dates.map((date) => {
-    const parsed = new Date(`${date}T00:00:00`);
-    const weekday = new Intl.DateTimeFormat(interfaceLocale(), { weekday: "short" }).format(parsed);
-    return `<div class="calendar-cell calendar-head"><span><strong>${parsed.getDate()}</strong>${escapeHtml(weekday)}</span></div>`;
-  }).join("");
-  const rows = data.properties.map((property) => {
-    const propertyContext = property.place_name || property.location || "Отдельный дом";
-    return `
-    <div class="calendar-cell calendar-house">
-      <span class="calendar-house-copy">
-        <strong class="calendar-house-name" data-i18n-ignore title="${escapeHtml(property.name)}">${escapeHtml(property.name)}</strong>
-        <small class="calendar-house-context" ${property.place_name || property.location ? "data-i18n-ignore" : ""} title="${escapeHtml(propertyContext)}">${escapeHtml(propertyContext)}</small>
-      </span>
-    </div>
-    ${data.dates.map((date) => {
-      const booking = byKey.get(`${property.id}:${date}`);
-      const outsideBookingWindow = !booking && maximumCheckInDate && date > maximumCheckInDate;
-      const label = booking
-        ? `Открыть бронь ${booking.guest_name} на ${longDate(date)}`
-        : outsideBookingWindow
-          ? `Новая бронь на ${longDate(date)} недоступна: максимум 21 день вперёд`
-          : `Создать бронь для ${property.name} с ${longDate(date)}`;
-      return `<button type="button" class="calendar-cell calendar-night ${booking ? "is-booked" : outsideBookingWindow ? "is-outside-window" : "is-free"}"
-        data-calendar-property="${property.id}" data-calendar-date="${date}"
-        ${booking ? `data-calendar-reservation="${booking.reservation_id}"` : ""}
-        ${outsideBookingWindow ? "disabled" : ""}
-        aria-label="${escapeHtml(label)}">${booking
-        ? `<span class="calendar-booking ${booking.status}" data-i18n-ignore title="${escapeHtml(booking.guest_name)}">${escapeHtml(booking.guest_name)}</span>`
-        : outsideBookingWindow
-          ? `<span class="calendar-limit" aria-hidden="true">21+</span>`
-          : `<span class="calendar-free" aria-hidden="true">+</span>`}</button>`;
-    }).join("")}
-  `;
-  }).join("");
-  // --calendar-days tells the grid how wide to be. Without it the grid squeezed its day
-  // columns below their minimum and clipped the last one, half a date header and no way to
-  // reach the rest.
-  $("#calendarContainer").innerHTML = `<div class="calendar-scroll"><div class="calendar-grid" style="--calendar-days:${data.dates.length}"><div class="calendar-cell calendar-head calendar-house">Дом</div>${headers}${rows}</div></div>`;
 }
 
 function filteredReservations() {
@@ -1945,6 +1898,42 @@ function bindEvents() {
   $("#requisitesForm")?.addEventListener("submit", (event) => {
     submitRequisites(event).catch((error) => toast(error.message, "error"));
   });
+  // The calendar redraws its own markup on every refresh, so these are delegated: a listener on
+  // the buttons themselves would be thrown away with them.
+  $("#calendarContainer")?.addEventListener("click", (event) => {
+    const nav = event.target.closest("[data-calendar-nav]");
+    if (!nav) return;
+    const direction = nav.dataset.calendarNav;
+    // Paging by the window's own width, so a click always moves exactly one screenful.
+    if (direction === "today") {
+      state.calendarStart = null;
+    } else {
+      const from = state.calendar?.startDate || state.systemInfo?.bookingPolicy?.today;
+      if (from) state.calendarStart = addDaysIso(from, Number(direction) * state.calendarDays);
+    }
+    refreshCore().catch((error) => toast(error.message, "error"));
+  });
+  $("#calendarContainer")?.addEventListener("change", (event) => {
+    if (event.target.id !== "calendarRange") return;
+    const days = Number(event.target.value);
+    if (!CALENDAR_RANGES.includes(days)) return;
+    state.calendarDays = days;
+    // The window's START is kept, so changing the range widens the view around the same first day
+    // rather than jumping the owner somewhere else.
+    refreshCore().catch((error) => toast(error.message, "error"));
+  });
+  $("#calendarContainer")?.addEventListener("mouseover", (event) => {
+    const cell = event.target.closest("[data-calendar-reservation]");
+    if (cell) showCalendarPopover(cell);
+    else hideCalendarPopover();
+  });
+  $("#calendarContainer")?.addEventListener("mouseleave", hideCalendarPopover);
+  $("#calendarContainer")?.addEventListener("focusin", (event) => {
+    const cell = event.target.closest("[data-calendar-reservation]");
+    if (cell) showCalendarPopover(cell);
+  });
+  $("#calendarContainer")?.addEventListener("focusout", hideCalendarPopover);
+
   $("#inviteForm")?.addEventListener("submit", (event) => {
     submitInvite(event).catch((error) => toast(error.message, "error"));
   });

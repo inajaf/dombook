@@ -45,6 +45,7 @@ run "branding"  scripts/e2e-branding.mjs
 run "interface" scripts/e2e-interface.mjs
 run "pricing"   scripts/e2e-pricing.mjs
 run "documents" scripts/e2e-documents.mjs
+run "calendar"  scripts/e2e-calendar.mjs
 run "operations" scripts/e2e-operations.mjs
 run "security"  scripts/e2e-security.mjs
 run "sync"      scripts/e2e-sync.mjs

@@ -22,6 +22,10 @@ export const state = {
   reservations: [],
   dashboard: null,
   calendar: null,
+  // Which window the calendar covers. Part of the STATE rather than of the view because a redraw
+  // must not silently reset it — the owner pages back, saves a booking, and stays where they were.
+  calendarDays: 14,
+  calendarStart: null,
   backups: [],
   systemInfo: null,
   // The price of the booking being edited, as computed by the main process. Null until the

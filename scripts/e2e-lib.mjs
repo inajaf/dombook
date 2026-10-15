@@ -115,7 +115,21 @@ export async function connect() {
         // not be mistaken for a lost promise — the old code's retry hid exactly this too.
         throw new Error("the page navigated while a block was running: " + error.message);
       }
-      if (slot === null) throw new Error("the page reloaded while a block was running");
+      if (slot === null) {
+        // A missing slot is NOT proof of a reload: a block with a syntax error never assigns one.
+        // Saying "the page reloaded" there sends the reader looking for a navigation that never
+        // happened, so the page is asked whether it is still the same document.
+        let alive = true;
+        try {
+          const probe = await send("Runtime.evaluate", { expression: "1 + 1", returnByValue: true });
+          alive = probe?.result?.value === 2;
+        } catch {
+          alive = false;
+        }
+        throw new Error(alive
+          ? "the block did not start — most likely a syntax error in it (check escapes inside the template literal): " + expression.trim().split("\n")[0].slice(0, 60)
+          : "the page reloaded while a block was running");
+      }
       if (slot.done) {
         // The slot is dropped so a long run does not accumulate renderer-side state.
         await send("Runtime.evaluate", { expression: `delete window[${JSON.stringify(token)}]`, returnByValue: true });

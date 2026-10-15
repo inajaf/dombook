@@ -285,6 +285,9 @@ because every serious bug in this project was invisible to both unit suites:
   keeping the values it does not show.
 - **`e2e-documents.mjs`** — a contract and an invoice written as real PDF files, checked for a
   PDF header, a plausible size and a PAGE COUNT, plus the requisites they print.
+- **`e2e-calendar.mjs`** — the timeline: one bar per stay spanning the nights it holds, a window
+  that pages, the 14/21/30 range actually resizing the grid, the hover card, and a booking started
+  by clicking a free night.
 - **`e2e-operations.mjs`** — check-in, early checkout, cancel, delete, archive/restore, backup.
 - **`e2e-security.mjs`** — two tenants; neither can read, write or book into the other's data,
   and the signed-out bridge refuses everything.
@@ -433,6 +436,35 @@ baseline it was written against, and what it reads now:
   screenshot or measurement harness must neutralise animation first — otherwise every
   `animation-fill-mode: both` element is rasterised in its FROM state and the capture shows a
   blank title. A capture artefact, not what a user with a visible window sees.
+
+### The timeline calendar
+
+`src/renderer/js/views/calendar.js` draws the occupancy grid. A booking is **one bar spanning its
+nights**, placed on the day cells' own CSS grid by explicit row and column, with
+`pointer-events: none` so the CELL keeps the click. The earlier version repeated the guest's name
+in every night cell, which made a fortnight look like fourteen separate bookings and hid where each
+stay began and ended.
+
+- **Placement goes through the CSSOM, never a `style="…"` attribute.** The page's CSP is
+  `style-src 'self'`, which does not include `'unsafe-inline'`, so a style ATTRIBUTE is parsed into
+  the DOM and then ignored: `getAttribute('style')` shows it while `getComputedStyle` reports
+  `auto`. A bar without placement is laid out on a row of its own — still visible, still wrong —
+  and `--calendar-days` set that way left the grid 14 columns wide for EVERY range, which is
+  invisible while 14 is the default and wrong the moment it is not. `e2e-calendar.mjs` checks the
+  computed placement and the column count for all three ranges.
+- **The window is a date, not an offset.** `state.calendarStart` is an ISO day and
+  `database.calendar(days, startDate)` bounds the occupancy query by it, so paging forward shows
+  the next period's bookings rather than redrawing the same fortnight.
+- **A stay the window cuts in half is drawn cut** (`is-cut-start` / `is-cut-end`), not as a booking
+  that begins or ends at the edge.
+- **The card counts the stay, not the slice of it on screen**: the nights come from the
+  reservation's own dates, so a booking the window clips still reads "3 ночи" beside its real
+  dates rather than the one night visible.
+- **Inside a template literal, `\n` is a newline and `\D` is `D`.** Two e2e blocks were written
+  with single backslashes and neither failed where you would look: `/\D/g` stripped the letter D
+  out of "Dev-режим" so the login code never matched, and `/\n+/g` became a regex containing a
+  literal newline — a syntax error that left the harness reporting "the page reloaded". It now says
+  the block never started and points at the escapes.
 
 ### Finding dead CSS tokens
 

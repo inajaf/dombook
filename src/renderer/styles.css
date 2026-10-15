@@ -370,6 +370,16 @@ main { padding: clamp(24px, 3vw, 44px); }
 .legend-dot.hold { background: var(--accent); }
 .legend-dot.free { background: var(--surface-3); border: 1px solid var(--line-strong); }
 .calendar-panel { overflow: hidden; }
+/* The timeline's own controls: which fortnight, and how wide.
+ *
+ * Above the grid rather than in the topbar, because they act on THIS view — and a control that
+ * moves the calendar away from the calendar is one the owner has to find first. */
+.calendar-nav { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 20px 14px; }
+.calendar-nav-group { display: flex; align-items: center; gap: 6px; }
+.calendar-nav-range { color: var(--muted); font-size: var(--text-sm); font-weight: 650; font-variant-numeric: tabular-nums; }
+.calendar-nav-range-picker { margin-left: auto; }
+.calendar-nav-range-picker select { min-height: 40px; }
+
 .calendar-scroll { overflow: auto; scrollbar-gutter: stable; }
 /* The grid is as wide as its CONTENT, not as wide as its container.
  *
@@ -408,6 +418,54 @@ main { padding: clamp(24px, 3vw, 44px); }
 .calendar-night:hover .calendar-booking { transform: translateY(-2px); box-shadow: 0 6px 12px rgb(23 33 28 / 10%); }
 .calendar-booking.confirmed, .calendar-booking.checked_in, .calendar-booking.checked_out { background: var(--primary-soft); color: var(--primary-strong); }
 .calendar-booking.hold { background: var(--accent-soft); color: var(--accent-ink); }
+/* One bar per stay, drawn OVER the cells it covers.
+ *
+ * `pointer-events: none` is the whole trick: the day cells underneath keep the click, so opening a
+ * booking and creating one stay the same gestures, and the bar is only what you see. The bar is
+ * placed by grid row and column, so a ten-night stay is one element rather than ten. */
+.timeline-bar {
+  pointer-events: none;
+  z-index: 1;
+  margin: 7px 2px;
+  border-radius: 10px;
+  padding: 8px 11px;
+  display: flex; flex-direction: column; justify-content: center; gap: 2px;
+  overflow: hidden;
+  border-left: 3px solid transparent;
+  box-shadow: 0 1px 2px rgb(23 33 28 / 6%);
+  transition: transform var(--motion-fast) var(--ease-out), box-shadow var(--motion-fast) ease;
+}
+/* A booking the window cuts in half must not look like one that starts here. */
+.timeline-bar.is-cut-start { border-top-left-radius: 2px; border-bottom-left-radius: 2px; }
+.timeline-bar.is-cut-end { border-top-right-radius: 2px; border-bottom-right-radius: 2px; }
+.timeline-bar-guest { font-size: var(--text-xs); font-weight: 700; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.timeline-bar-status { font-size: var(--text-xs); opacity: .85; line-height: 1.2; }
+.timeline-bar.confirmed, .timeline-bar.checked_out { background: var(--primary-soft); color: var(--primary-strong); border-left-color: var(--primary); }
+.timeline-bar.checked_in { background: var(--primary); color: var(--on-primary); border-left-color: var(--primary-strong); }
+.timeline-bar.hold { background: var(--accent-soft); color: var(--accent-ink); border-left-color: var(--accent); }
+.timeline-bar.conflict { background: var(--danger-soft); color: var(--danger-ink); border-left-color: var(--danger); }
+.calendar-night:hover ~ .timeline-bar,
+.calendar-grid:has(.calendar-night[data-calendar-reservation]:hover) .timeline-bar { box-shadow: 0 6px 14px rgb(23 33 28 / 12%); }
+
+/* The hover card.
+ *
+ * Positioned from the bar's own box, not from the pointer: a card that runs away from the cursor
+ * is harder to read than one that sits still next to what it describes. */
+.calendar-popover {
+  position: absolute; z-index: 30; width: min(330px, calc(100% - 24px));
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow-md); padding: 14px 16px; pointer-events: none;
+}
+.calendar-container { position: relative; }
+.calendar-popover-inner { display: grid; gap: 10px; }
+.calendar-popover-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.calendar-popover-head strong { font-size: var(--text-base); overflow-wrap: anywhere; }
+.calendar-popover-rows { display: grid; gap: 7px; margin: 0; }
+.calendar-popover-rows > div { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 8px; }
+.calendar-popover-rows dt { color: var(--muted); font-size: var(--text-xs); }
+.calendar-popover-rows dd { margin: 0; font-size: var(--text-sm); overflow-wrap: anywhere; }
+.calendar-popover-hint { margin: 0; color: var(--muted); font-size: var(--text-xs); }
+
 .calendar-free { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; background: var(--surface-2); color: var(--primary); font-size: 20px; font-weight: 650; transition: background var(--motion-fast) ease, color var(--motion-fast) ease, transform var(--motion-fast) var(--ease-out); }
 .calendar-night:hover .calendar-free { background: var(--primary); color: var(--on-primary); transform: translateY(-2px) scale(1.13); box-shadow: 0 6px 12px rgb(23 107 77 / 18%); }
 
