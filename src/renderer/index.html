@@ -10,7 +10,7 @@
   <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
   <link rel="manifest" href="./manifest.webmanifest">
-  <link rel="stylesheet" href="./styles.css?v=20260801-6">
+  <link rel="stylesheet" href="./styles.css?v=20261015-7">
 </head>
 <body>
   <a class="skip-link" href="#main-content">Перейти к содержимому</a>
@@ -103,7 +103,15 @@
         <div><strong>RentKeeper</strong><span>desktop</span></div>
       </div>
 
-      <nav class="nav-list">
+      <!-- Two named groups, ordered by how often each is opened.
+           Long-term rent used to sit in the bottom group next to Settings, which read as an
+           afterthought even though it is a second revenue line with its own contracts. It now
+           follows Reservations: everything an owner touches during the working day is in
+           "Работа", and the group below is the one you visit when something is wrong or needs
+           configuring. The labels are what make the two groups read as sections instead of one
+           list broken by a gap. -->
+      <nav class="nav-list" aria-labelledby="navGroupWork">
+        <p class="nav-group-title" id="navGroupWork">Работа</p>
         <button class="nav-item active" data-page="dashboard">
           <svg><use href="#i-grid"/></svg><span>Сегодня</span>
         </button>
@@ -114,17 +122,18 @@
           <svg><use href="#i-book"/></svg><span>Бронирования</span>
           <span class="nav-badge" id="reservationBadge" hidden>0</span>
         </button>
+        <button class="nav-item" data-page="rentals">
+          <svg><use href="#i-key"/></svg><span>Аренда</span>
+          <span class="nav-badge" id="rentalBadge" hidden>0</span>
+        </button>
         <button class="nav-item" data-page="properties">
           <svg><use href="#i-house"/></svg><span>Объекты</span>
         </button>
       </nav>
 
       <div class="sidebar-spacer"></div>
-      <nav class="nav-list nav-secondary">
-        <button class="nav-item" data-page="rentals">
-          <svg><use href="#i-key"/></svg><span>Аренда</span>
-          <span class="nav-badge" id="rentalBadge" hidden>0</span>
-        </button>
+      <nav class="nav-list nav-secondary" aria-labelledby="navGroupSystem">
+        <p class="nav-group-title" id="navGroupSystem">Система</p>
         <button class="nav-item" data-page="conflicts">
           <svg><use href="#i-alert"/></svg><span>Конфликты</span>
           <span class="nav-badge" id="conflictBadge" hidden>0</span>
@@ -202,7 +211,7 @@
           <div class="panel table-panel">
             <div class="table-scroll">
               <table class="reservations-table">
-                <thead><tr><th>Гость</th><th>Дом</th><th>Даты</th><th>Статус</th><th>Оплата</th><th>Депозит</th><th><span class="sr-only">Действия</span></th></tr></thead>
+                <thead><tr><th>Гость</th><th>Дом</th><th>Даты</th><th>Статус</th><th class="num">Оплата</th><th class="num">Депозит</th><th class="num"><span class="sr-only">Действия</span></th></tr></thead>
                 <tbody id="reservationTableBody"></tbody>
               </table>
             </div>
@@ -267,7 +276,7 @@
           </div>
           <div class="settings-grid">
             <article class="panel language-panel">
-              <header class="panel-header"><div><p class="eyebrow">Интерфейс</p><h2>Язык приложения</h2></div></header>
+              <header class="panel-header"><div><p class="eyebrow">Интерфейс</p><h2>Язык и размер текста</h2></div></header>
               <div class="language-setting">
                 <label class="field" for="interfaceLanguage"><span>Язык приложения</span>
                   <select id="interfaceLanguage">
@@ -276,6 +285,14 @@
                     <option value="en">English</option>
                   </select>
                   <small>Язык меняется сразу и сохраняется для следующего запуска.</small>
+                </label>
+                <label class="field" for="textScale"><span>Размер текста</span>
+                  <select id="textScale">
+                    <option value="normal">Обычный</option>
+                    <option value="large">Крупный</option>
+                    <option value="xlarge">Очень крупный</option>
+                  </select>
+                  <small>Увеличивает весь текст приложения. Действует на этом устройстве.</small>
                 </label>
               </div>
             </article>
@@ -521,6 +538,6 @@
   <script src="./i18n/az.js"></script>
   <script src="./i18n/en.js"></script>
   <script src="./i18n/i18n.js"></script>
-  <script src="./app.js?v=20260801-6"></script>
+  <script src="./app.js?v=20261015-7"></script>
 </body>
 </html>

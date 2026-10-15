@@ -62,6 +62,39 @@ const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const interfaceLocale = () => window.i18n?.locale || "ru-RU";
 const interfaceLanguage = () => window.i18n?.language || "ru";
 
+/**
+ * Interface text size.
+ *
+ * Everything in styles.css is sized from `--text-scale`, so this is the whole implementation of
+ * "make it readable" — one number. It is a property of the SCREEN rather than of the business:
+ * a 60-year-old owner on a laptop wants large type, the same account on a wall-mounted office
+ * display does not, and neither should sync the other's preference. That is why it lives in
+ * localStorage and not in app_settings, which the server replicates.
+ */
+const TEXT_SCALES = { normal: 1, large: 1.12, xlarge: 1.28 };
+const TEXT_SCALE_KEY = "rentkeeper.interface-scale";
+
+function textScaleName() {
+  try {
+    const stored = localStorage.getItem(TEXT_SCALE_KEY);
+    return stored in TEXT_SCALES ? stored : "normal";
+  } catch {
+    // Storage can be unavailable; the default is the same as a first run.
+    return "normal";
+  }
+}
+
+function applyTextScale(name) {
+  const resolved = name in TEXT_SCALES ? name : "normal";
+  document.documentElement.style.setProperty("--text-scale", String(TEXT_SCALES[resolved]));
+  try {
+    localStorage.setItem(TEXT_SCALE_KEY, resolved);
+  } catch {
+    // A device that refuses storage still gets the size for this session.
+  }
+  return resolved;
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -293,6 +326,12 @@ function navigate(page) {
   topbar.classList.remove("is-changing");
   void topbar.offsetWidth;
   topbar.classList.add("is-changing");
+  // The entrance animation is `fill-mode: both`, so the title and the primary action sit at
+  // opacity 0 for as long as the animation is pending. A renderer that is not compositing —
+  // an occluded or throttled window — never advances it, and the page title stays invisible.
+  // Dropping the class when the motion has played makes the resting state the visible one.
+  topbar.addEventListener("animationend", () => topbar.classList.remove("is-changing"), { once: true });
+  setTimeout(() => topbar.classList.remove("is-changing"), 700);
   $("#searchBox").hidden = !meta.search;
   if (!meta.search) {
     state.search = "";
@@ -410,8 +449,8 @@ function renderReservations() {
       <td class="primary-cell reservation-property-cell"><strong data-i18n-ignore title="${escapeHtml(reservation.property_name)}">${escapeHtml(reservation.property_name)}</strong><small ${reservation.place_name ? "data-i18n-ignore" : ""}>${escapeHtml(reservation.place_name || "Отдельный дом")}</small></td>
       <td class="date-range"><span>${shortDate(reservation.check_in_date)} → ${shortDate(reservation.actual_check_out_date || reservation.check_out_date)}</span>${reservation.actual_check_out_date ? "<small>досрочно</small>" : ""}</td>
       <td><span class="status-badge status-${reservation.status}">${STATUS_LABELS[reservation.status]}</span></td>
-      <td class="money-stack"><strong>${money(reservation.prepaid_minor, reservation.currency)}</strong><small>${balanceLabel(reservation)}</small></td>
-      <td class="money-stack"><strong>${money(reservation.deposit_minor, reservation.currency)}</strong><small>${DEPOSIT_LABELS[reservation.deposit_status]}</small></td>
+      <td class="money-stack num"><strong>${money(reservation.prepaid_minor, reservation.currency)}</strong><small>${balanceLabel(reservation)}</small></td>
+      <td class="money-stack num"><strong>${money(reservation.deposit_minor, reservation.currency)}</strong><small>${DEPOSIT_LABELS[reservation.deposit_status]}</small></td>
       <td><div class="row-actions">
         <button class="icon-button" data-edit-reservation="${reservation.id}" aria-label="Редактировать бронь ${escapeHtml(reservation.guest_name)}">${icon("i-edit")}</button>
         ${["hold", "confirmed", "checked_in"].includes(reservation.status) ? `<button class="button secondary row-text-action" data-early-checkout="${reservation.id}">Досрочный выезд</button>` : ""}
@@ -498,7 +537,7 @@ function renderRentals() {
           <span class="pill">${months} мес.</span>
         </header>
         <dl class="rental-terms">
-          <div><dt>Срок</dt><dd data-i18n-ignore>${escapeHtml(rental.check_in_date)} — ${escapeHtml(rental.check_out_date)}</dd></div>
+          <div><dt>Срок</dt><dd data-i18n-ignore>${escapeHtml(longDate(rental.check_in_date))} — ${escapeHtml(longDate(rental.check_out_date))}</dd></div>
           <div><dt>Аренда</dt><dd>${money(rental.accommodation_minor)}</dd></div>
           <div><dt>Депозит</dt><dd>${money(rental.deposit_minor)}</dd></div>
           <div><dt>Остаток</dt><dd>${money(Math.max((rental.total_minor || 0) - (rental.prepaid_minor || 0), 0))}</dd></div>
@@ -969,6 +1008,8 @@ async function refreshSyncStatus() {
 function renderSettings() {
   const info = state.systemInfo || {};
   $("#interfaceLanguage").value = info.language || window.i18n?.language || "ru";
+  const textScale = $("#textScale");
+  if (textScale) textScale.value = textScaleName();
   $("#systemInfo").innerHTML = `
     <div><dt>Файл базы</dt><dd data-i18n-ignore>${escapeHtml(privateStorageLabel(info.databasePath, "dombook.sqlite"))}</dd></div>
     <div><dt>Размер</dt><dd>${formatBytes(info.databaseSize || 0)}</dd></div>
@@ -1235,6 +1276,24 @@ function reservationMealDates() {
   return dates;
 }
 
+/**
+ * Number the booking form's sections 1, 2, 3 … as they are actually shown.
+ *
+ * The numbers are printed in the markup, and the food section is hidden for a place with no
+ * kitchen. An owner filling the form then read "1 Дом и даты, 2 Гость, 4 Деньги и статус" and
+ * had to work out that they had not skipped anything. The number is a position, so it has to be
+ * computed from what is on screen rather than typed into the markup.
+ */
+function renumberReservationSections() {
+  let shown = 0;
+  $$(".form-section", $("#reservationForm")).forEach((section) => {
+    if (section.hidden) return;
+    shown += 1;
+    const marker = $("h3 span", section);
+    if (marker) marker.textContent = String(shown);
+  });
+}
+
 function renderMealInputs(reservation = null) {
   const place = selectedPlace();
   const section = $("#reservationFoodSection");
@@ -1244,6 +1303,7 @@ function renderMealInputs(reservation = null) {
     draft.set(`${meal.meal_date}:${meal.meal_type}`, minorToDecimal(meal.amount_minor));
   });
   section.hidden = !place?.has_food_service;
+  renumberReservationSections();
   if (!place?.has_food_service) {
     container.innerHTML = "";
     renderReservationCalculation();
@@ -1762,6 +1822,9 @@ function bindEvents() {
   }));
   $("#createBackup").addEventListener("click", createBackup);
   $("#interfaceLanguage").addEventListener("change", changeInterfaceLanguage);
+  $("#textScale")?.addEventListener("change", (event) => {
+    event.currentTarget.value = applyTextScale(event.currentTarget.value);
+  });
   $("#openDatabaseFolder").addEventListener("click", () => {
     unwrap(api.system.openBackupDirectory()).catch((error) => toast(error.message, "error"));
   });
@@ -1970,6 +2033,13 @@ function bindAuthEvents() {
 async function boot() {
   bindEvents();
   bindAuthEvents();
+  // Before anything renders, so the login screen is already at the reader's chosen size.
+  applyTextScale(textScaleName());
+  // The controls that reflect a device preference are synced here rather than only in
+  // renderSettings(), which runs when the settings PAGE is opened. Otherwise the panel is stale
+  // until it has been visited once — the preference is in force while the control denies it.
+  const textScale = $("#textScale");
+  if (textScale) textScale.value = textScaleName();
   try {
     const systemInfo = await unwrap(api.system.info());
     window.i18n?.setLanguage(systemInfo.language || "ru");
