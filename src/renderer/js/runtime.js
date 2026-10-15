@@ -17,6 +17,15 @@ export const runtime = {
   navigate: () => {},
   /** Say something to the owner. */
   toast: () => {},
+  /**
+   * Open the booking dialog, optionally as something other than a nightly stay.
+   *
+   * Two views called this as a bare name and it does not exist outside the shell, so both threw
+   * `ReferenceError` at the moment the user clicked: the rental contract dialog never opened, and
+   * resolving a conflict by rescheduling did nothing at all. The linter found it, which is the
+   * first thing this project's new linter found.
+   */
+  openReservation: () => {},
 };
 
 /** Filled by the shell before anything is drawn. */

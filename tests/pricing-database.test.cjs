@@ -11,7 +11,6 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const initSqlJs = require("sql.js");
 const { RentKeeperDatabase } = require("../src/database.cjs");
 
 async function createTestDatabase(t, today = "2026-07-29") {

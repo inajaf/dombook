@@ -130,7 +130,7 @@ function acknowledge(db, entries) {
 }
 
 /** Record a failed attempt so the UI can explain why a change is stuck. */
-function recordFailure(db, entry, message, nowIso) {
+function recordFailure(db, entry, message) {
   db.run(
     `UPDATE sync_outbox SET attempts = attempts + 1, last_error = ?
      WHERE table_name = ? AND row_id = ? AND revision = ?`,

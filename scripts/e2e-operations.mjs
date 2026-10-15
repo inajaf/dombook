@@ -7,7 +7,7 @@
 // something real: a cancelled booking that still blocks the calendar, an archived unit that
 // leaves phantom availability, a backup that cannot be found.
 
-import {addDays, addMonths, connect, freshStart, reporter, resetAuthState, restartApp, wait} from "./e2e-lib.mjs";
+import { addDays, connect, freshStart, reporter, wait } from "./e2e-lib.mjs";
 
 let app = await connect();
 const { check, finish } = reporter("Operations");

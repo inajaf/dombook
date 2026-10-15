@@ -225,7 +225,6 @@ function createSyncEngine({ db, transport, nowIso, deviceId, onStateChange }) {
       // Set when the server refuses a row that may succeed later; blocks the pull below.
       let unconfirmed = 0;
       // Rows the server will never accept. Reported, left queued, but they do not block.
-      let permanentFailures = 0;
 
       // --- push ---
       const entries = pending(db);
@@ -299,11 +298,10 @@ function createSyncEngine({ db, transport, nowIso, deviceId, onStateChange }) {
             if (accepted.has(key)) {
               toAcknowledge.push(entry);
             } else if (permanent.has(key)) {
-              permanentFailures += 1;
-              recordFailure(db, entry, "сервер отклонил запись (нельзя исправить повтором)", nowIso);
+              recordFailure(db, entry, "сервер отклонил запись (нельзя исправить повтором)");
             } else {
               unconfirmed += 1;
-              recordFailure(db, entry, "сервер не подтвердил запись", nowIso);
+              recordFailure(db, entry, "сервер не подтвердил запись");
             }
           }
           acknowledge(db, toAcknowledge);

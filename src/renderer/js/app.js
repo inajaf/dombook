@@ -12,7 +12,7 @@
  */
 
 import { $, $$, escapeHtml, icon, setBusy, showError } from "./dom.js";
-import { todayLabel, interfaceLocale, interfaceLanguage, money, objectCountLabel, guestCountLabel, capacityLabel, bookingWindowHelp, maximumCheckoutHelp, maximumStayHelp, balanceLabel, shortDate, longDate, decimalToMinor, minorToDecimal, addDaysIso, nightsBetween, addCalendarMonthsIso, nightLabel, monthLabel, formulaLabel, privateStorageLabel, formatBytes, reservationStatusLabel, ROLE_LABELS, STATUS_LABELS, DEPOSIT_LABELS } from "./formatters.js";
+import { todayLabel, interfaceLocale, interfaceLanguage, money, capacityLabel, bookingWindowHelp, maximumCheckoutHelp, maximumStayHelp, shortDate, longDate, decimalToMinor, minorToDecimal, addDaysIso, nightsBetween, addCalendarMonthsIso, nightLabel, monthLabel, formulaLabel, formatBytes } from "./formatters.js";
 import { themeChoice, applyTheme, textScaleName, applyTextScale } from "./theme.js";
 import { toast } from "./toast.js";
 import { confirmAction } from "./modal.js";
@@ -25,7 +25,7 @@ import { renderRentals, applyKindToDialog, openRentalDialog } from "./views/rent
 import { renderConflicts, refreshConflicts, updateConflictBadge, resolveConflict } from "./views/conflicts.js";
 import { renderDashboard } from "./views/dashboard.js";
 import { renderReservations } from "./views/reservations.js";
-import { activeProperties, renderProperties, readMeterReadings, openPropertyDialog, openPlaceDialog, submitProperty, submitPlace, togglePlaceFoodPrices, discountRow } from "./views/properties.js";
+import { activeProperties, renderProperties, openPropertyDialog, openPlaceDialog, submitProperty, submitPlace, togglePlaceFoodPrices, discountRow } from "./views/properties.js";
 
 async function refreshCore() {
   const [places, properties, reservations, dashboard, calendar, systemInfo] = await Promise.all([
@@ -1364,7 +1364,7 @@ function bindAuthEvents() {
 
 async function boot() {
   // Before anything is bound or drawn: a view that calls a shell callback has to find one there.
-  connectShell({ refresh: refreshCore, navigate, toast });
+  connectShell({ refresh: refreshCore, navigate, toast, openReservation: openReservationDialog });
   bindEvents();
   bindAuthEvents();
   // Before anything renders, so the login screen is already at the reader's chosen size.

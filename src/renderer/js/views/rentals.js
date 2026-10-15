@@ -5,10 +5,11 @@
  * a month count, no nights — and keeping that beside the list is what stops the two drifting.
  */
 
-import { $, escapeHtml, $$ } from "../dom.js";
+import { $, escapeHtml } from "../dom.js";
 import { state } from "../store.js";
+import { runtime } from "../runtime.js";
 import { readMeterReadings } from "./properties.js";
-import { longDate, money, reservationStatusLabel, addCalendarMonthsIso, minorToDecimal } from "../formatters.js";
+import { longDate, money, reservationStatusLabel } from "../formatters.js";
 
 export function renderRentals() {
   const list = $("#rentalList");
@@ -105,5 +106,5 @@ export function applyKindToDialog(kind) {
 export function openRentalDialog(rental = null) {
   // Rentals are reservations, so this is the ordinary dialog with the kind preset. A second
   // dialog would be a second place for validation to diverge.
-  openReservationDialog(rental, { bookingKind: "rental" });
+  runtime.openReservation(rental, { bookingKind: "rental" });
 }

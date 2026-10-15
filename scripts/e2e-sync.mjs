@@ -18,7 +18,7 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
-import {addDays, connect, freshStart, killApp, psqlArgs, psqlEnv, reporter, resetAuthState, restartApp, wait} from "./e2e-lib.mjs";
+import { connect, freshStart, killApp, psqlArgs, psqlEnv, reporter, restartApp, wait } from "./e2e-lib.mjs";
 
 let app = await connect();
 const { check, finish } = reporter("Sync");

@@ -7,7 +7,7 @@
 // not be able to read or write the other's data, and an unsigned window must not reach either.
 
 import { createRequire } from "node:module";
-import {connect, freshStart, psqlArgs, psqlEnv, reporter, resetAuthState, wait} from "./e2e-lib.mjs";
+import { freshStart, psqlArgs, psqlEnv, reporter, resetAuthState, wait } from "./e2e-lib.mjs";
 
 const API = process.env.RENTKEEPER_E2E_URL || "http://127.0.0.1:8787";
 const { check, finish } = reporter("Security");

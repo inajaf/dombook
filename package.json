@@ -28,14 +28,18 @@
     "check:web": "node scripts/build-web.cjs && node scripts/check-web.mjs",
     "postinstall": "bash scripts/install-hooks.sh || true",
     "verify": "bash scripts/verify-branch.sh",
-    "merge:verified": "bash scripts/merge-verified.sh"
+    "merge:verified": "bash scripts/merge-verified.sh",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
   },
   "dependencies": {
     "sql.js": "1.14.1"
   },
   "devDependencies": {
     "electron": "43.2.0",
-    "electron-builder": "26.15.3"
+    "electron-builder": "26.15.3",
+    "eslint": "^10.12.0",
+    "globals": "^17.13.0"
   },
   "build": {
     "appId": "com.rentkeeper.desktop",

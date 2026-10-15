@@ -6,7 +6,7 @@
 // not what the source says — a missed translation key shows the raw Russian source string, so
 // asserting on the DOM catches it.
 
-import {connect, freshStart, reporter, resetAuthState, restartApp, wait} from "./e2e-lib.mjs";
+import { connect, freshStart, reporter, wait } from "./e2e-lib.mjs";
 
 let app = await connect();
 const { check, finish } = reporter("Branding");
