@@ -7,7 +7,7 @@ contextBridge.exposeInMainWorld("domBook", {
     get: () => invoke("dashboard:get"),
   },
   calendar: {
-    get: (days) => invoke("calendar:get", { days }),
+    get: (days, startDate) => invoke("calendar:get", { days, startDate }),
   },
   places: {
     list: (options) => invoke("places:list", options),

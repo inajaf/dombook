@@ -983,3 +983,56 @@ test("свежее устройство, не обменивавшееся с с
   );
   assert.equal(database.hasNeverSynced(), false, "курсор больше нуля — устройство уже получало данные");
 });
+
+test("календарь показывает запрошенный период, а не всегда сегодняшний", async (t) => {
+  // Without a start date the window always began today, so paging BACK through the calendar could
+  // only ever have redrawn the same two weeks. The date is what the owner navigates by; the days
+  // are how wide they opened the window.
+  const { database } = await createTestDatabase(t, "2026-07-29");
+
+  const fromToday = database.calendar(14);
+  assert.equal(fromToday.dates[0], "2026-07-29", "без даты окно начинается сегодня");
+  assert.equal(fromToday.dates.length, 14);
+  assert.equal(fromToday.startDate, "2026-07-29", "окно сообщает, какие даты оно вернуло");
+
+  const backwards = database.calendar(14, "2026-07-15");
+  assert.equal(backwards.dates[0], "2026-07-15");
+  assert.equal(backwards.dates[13], "2026-07-28");
+  assert.equal(backwards.dates.length, 14);
+
+  const wider = database.calendar(30, "2026-07-15");
+  assert.equal(wider.dates.length, 30);
+  assert.equal(wider.dates[29], "2026-08-13", "месяц перелистывается, а не обрезается");
+
+  // The window is what the OCCUPANCY is read for, and it has to be read in BOTH directions:
+  // paging back must show the past, and paging forward must stop showing it. Both windows start
+  // from a date the caller chose, so neither is anchored to "today".
+  const house = database.createProperty({ name: "Дом", capacity: 4, basePriceMinor: 10000, depositMinor: 0, monthlyRateMinor: 0, currency: "AZN", checkInTime: "15:00", checkOutTime: "11:00", location: "Баку", notes: "", kind: "house", status: "active" });
+  database.createPlace({ name: "База", address: "", hasFoodService: false });
+  const booking = (guest, checkInDate, checkOutDate) => database.createReservation({
+    propertyId: house.id, guestName: guest, checkInDate, checkOutDate,
+    guestsCount: 2, status: "confirmed", bookingKind: "stay", channel: "direct",
+    totalMinor: 20000, prepaidMinor: 0, depositMinor: 0, depositStatus: "none",
+  });
+  booking("Ранний гость", "2026-07-30", "2026-08-01");
+  booking("Поздний гость", "2026-08-06", "2026-08-08");
+
+  const firstWindow = database.calendar(14);
+  const firstGuests = firstWindow.occupancy.map((row) => row.guest_name);
+  assert.ok(firstGuests.includes("Ранний гость"), "ночи в начале окна видны");
+  assert.ok(firstGuests.includes("Поздний гость"), "ночи в конце окна видны");
+
+  const laterWindow = database.calendar(14, "2026-08-05");
+  const laterGuests = laterWindow.occupancy.map((row) => row.guest_name);
+  assert.ok(laterGuests.includes("Поздний гость"), "сдвинутое окно показывает свои ночи");
+  assert.ok(!laterGuests.includes("Ранний гость"), "ночи до начала окна не подмешиваются");
+});
+
+test("календарь отказывает в неверной дате вместо тихой подстановки", async (t) => {
+  // A silently-corrected date is a calendar that shows a different fortnight than the one asked
+  // for, and the owner has no way to tell.
+  const { database } = await createTestDatabase(t, "2026-07-29");
+  assert.throws(() => database.calendar(14, "2026-02-30"), /неверная дата/);
+  assert.throws(() => database.calendar(14, "15.07.2026"), /неверная дата/);
+  assert.throws(() => database.calendar(2), /Период календаря/);
+});

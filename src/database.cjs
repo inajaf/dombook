@@ -1797,9 +1797,23 @@ class RentKeeperDatabase {
     return { today, activeProperties, activeReservations, expectedMinor, refundsDueMinor, depositsHeldMinor, arrivals, departures };
   }
 
-  calendar(days = 14) {
+  /**
+   * The occupancy grid for a window of days.
+   *
+   * `startDate` is what makes the calendar navigable: without it the window always began today,
+   * so "previous period" could only ever have shown the same two weeks. It is an ISO date rather
+   * than an offset so that a window means the same dates on every device and in a bookmark,
+   * instead of shifting with whatever "today" happens to be when it is read.
+   *
+   * Defaults to today, which keeps every existing caller — and anything holding a stored window —
+   * working unchanged.
+   */
+  calendar(days = 14, startDate = null) {
     const safeDays = integer(days, "Период календаря", 7, 60);
-    const start = new Date(`${todayIso()}T00:00:00Z`);
+    // `this.todayProvider`, not the module clock: the account's time zone (and a test's idea of
+    // today) decide the window, the same way they decide every other date in the domain.
+    const from = startDate ? validDate(startDate, "Начало периода") : this.todayProvider();
+    const start = new Date(`${from}T00:00:00Z`);
     const dates = Array.from({ length: safeDays }, (_, index) =>
       new Date(start.getTime() + index * 86_400_000).toISOString().slice(0, 10),
     );
@@ -1812,7 +1826,9 @@ class RentKeeperDatabase {
        ORDER BY rn.night_date`,
       [dates[0], new Date(start.getTime() + safeDays * 86_400_000).toISOString().slice(0, 10)],
     );
-    return { dates, properties, occupancy };
+    // `startDate` is echoed back: the renderer asked for a window and gets to know which one it
+    // received, rather than recomputing it and drifting a day on a timezone boundary.
+    return { dates, startDate: dates[0], properties, occupancy };
   }
 
   createBackup() {
