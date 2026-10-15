@@ -10,15 +10,29 @@
 // Chromium comes from Electron, which is already a dependency. A second browser would be a second
 // download for one check.
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
+import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const WEB = path.join(ROOT, "release", "web");
-const ELECTRON = path.join(ROOT, "node_modules", "electron", "dist", "Electron.app", "Contents", "MacOS", "Electron");
+// The path is asked of the package rather than assembled: it differs per platform
+// (`Electron.app/Contents/MacOS/Electron` here, `electron` there) and a hardcoded one failed CI
+// on Linux with ENOENT the first time this ran.
+const ELECTRON = createRequire(import.meta.url)("electron");
+// A GUI process on a headless machine is not a failing check, it is a check that cannot run —
+// and this is the only step in check-all.sh that needs a display. CI has xvfb; a container may not.
+const needsXvfb = process.platform === "linux" && !process.env.DISPLAY;
+const hasXvfb = needsXvfb && spawnSync("which", ["xvfb-run"], { stdio: "pipe" }).status === 0;
+if (needsXvfb && !hasXvfb) {
+  console.log("\n=== Web build ===");
+  console.log("  SKIP  нет дисплея и нет xvfb-run — проверить веб-сборку здесь нечем");
+  console.log("\nWEB SKIPPED");
+  process.exit(0);
+}
 
 if (!fs.existsSync(path.join(WEB, "index.html"))) {
   console.error("Нет сборки: сначала npm run build:web");
@@ -70,7 +84,9 @@ app.whenReady().then(async () => {
 });
 `);
 
-const child = spawn(ELECTRON, [driver], { env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined } });
+const command = hasXvfb ? "xvfb-run" : ELECTRON;
+const args = hasXvfb ? ["-a", ELECTRON, driver] : [driver];
+const child = spawn(command, args, { env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined } });
 let output = "";
 child.stdout.on("data", (chunk) => { output += chunk; });
 child.stderr.on("data", (chunk) => { output += chunk; });

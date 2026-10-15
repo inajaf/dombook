@@ -466,6 +466,18 @@ stay began and ended.
   literal newline — a syntax error that left the harness reporting "the page reloaded". It now says
   the block never started and points at the escapes.
 
+### The web build
+
+`npm run check:web` builds `release/web`, serves it, boots it in a real Chromium (Electron is
+already a dependency) and fails on any console error. It runs inside `check-all.sh`, which is the
+only place that would have noticed the browser build being broken — `npm test` never loads a page.
+
+- **It is the only step in `check-all.sh` that needs a DISPLAY**, and CI is headless. The Electron
+  path comes from `require("electron")` rather than being assembled: a hardcoded
+  `Electron.app/Contents/MacOS/Electron` failed CI on Linux with ENOENT. On Linux the check runs
+  under `xvfb-run` when it is available, and otherwise reports **SKIP** and exits 0 — a check that
+  cannot run must say so, not fail the build and not claim a pass.
+
 ### Finding dead CSS tokens
 
 ```bash
