@@ -759,6 +759,40 @@ decides them.
 - Desktop: `npm start`, but **clear `ELECTRON_RUN_AS_NODE` first** (`env -u ELECTRON_RUN_AS_NODE npm start`). VS Code and other Electron-based terminals export `ELECTRON_RUN_AS_NODE=1`, which makes `require("electron")` return its path string instead of the API, so `src/main.cjs` dies at `app.setName(...)` with `Cannot read properties of undefined`.
 - `/auth/setup` bootstraps the first owner account only while zero users exist; afterwards it needs `SETUP_TOKEN`. A local DB with a test user therefore cannot be re-bootstrapped — clear the `users` table to re-open setup.
 
+## How agents work here (the four conditions)
+
+`docs/agent-workflow.md` is the full protocol. The parts that are rules rather than advice:
+
+1. **Runtime verification, not a report.** Ten e2e suites build, install, launch and drive the real
+   app over the DevTools Protocol. A claim with no command, log, screenshot or count behind it is
+   not a result. Every serious defect in this project's history was invisible to the unit suites
+   and visible here.
+2. **Two loops.** The inner loop is the author with `scripts/check-all.sh`. The outer loop is
+   coordination plus independent audit — `scripts/verify-branch.sh` and
+   `scripts/merge-verified.sh`. A writer does not verify their own work.
+3. **The codebase is the memory.** A repeated mistake becomes a check in the repository, in the
+   same commit that fixes it — never a line in a document somebody has to remember. The table in
+   `docs/agent-workflow.md` lists what each past defect became.
+4. **The author does not merge their own pull request.** Verification runs in a CLEAN worktree of
+   the commit, the verdict is a file bound to that sha, and the merge gate refuses without one.
+
+```bash
+scripts/check-all.sh --e2e          # inner loop: this working tree
+scripts/verify-branch.sh <sha>      # outer loop: a clean copy, produces artifacts/verdict-<sha>.json
+scripts/merge-verified.sh <pr>      # refuses without a passing verdict for the PR's exact sha
+```
+
+- **A commit on `main` is refused by `.githooks/pre-commit`.** Committing to main happened twice
+  here — once by a person, once by an agent that had just merged and did not check where it was
+  standing — and both times the work had to be moved afterwards, through a `reset` that could have
+  taken uncommitted changes with it. `npm install` installs the hook (`postinstall`); the override
+  is `RENTKEEPER_ALLOW_MAIN_COMMIT=1`, which is deliberately verbose.
+- **Do not run `git reset --hard` with uncommitted work.** It destroyed an afternoon of this
+  session's changes once, and the recovery was luck: `npm run build:web` had copied the renderer
+  into `release/web` minutes earlier.
+- `tests/agent-workflow.test.cjs` runs the hook and the merge gate in a throwaway repository, so
+  the guards cannot rot into decoration.
+
 ## How to work in this repository without being asked twice
 
 The instruction is a task or a feature, not a procedure. Everything below is expected to be
