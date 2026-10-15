@@ -98,6 +98,46 @@ check(unit?.base_price_minor === 12000, "the nightly price is stored in minor un
 check(unit?.monthly_rate_minor === 150000, "the monthly price is stored", `monthly=${unit?.monthly_rate_minor}`);
 check(unit?.deposit_minor === 20000, "the deposit is stored", `deposit=${unit?.deposit_minor}`);
 
+// --- Scenario 4: signing in again is not signing up ----------------------
+// The plan picker used to be shown to anyone whose plan read "free", which is every account that
+// has not bought the paid tier — so a returning owner was asked to choose a tariff on every single
+// sign-in, and a colleague who had just accepted an invitation was asked on their first. The
+// question had already been answered, and a screen that asks it again reads as a gate.
+await go("settings");
+await app.evaluate(`document.getElementById('logoutButton').click(); return 'ok';`);
+await wait(2500);
+
+const signOut = await app.evaluate(`
+  return { loginVisible: !document.getElementById('loginScreen').classList.contains('is-hidden'),
+    step: ['loginStepEmail','loginStepCode','loginStepPlan'].find((id) => !document.getElementById(id).hidden) || null };
+`);
+check(signOut.loginVisible && signOut.step === "loginStepEmail", "signing out returns to the start of the flow", JSON.stringify(signOut));
+
+await app.evaluate(`
+  const f = document.getElementById('loginEmailForm');
+  f.elements.loginEmail.value = ${JSON.stringify(email)};
+  f.querySelector('button[type=submit]').click();
+  return 'ok';
+`);
+await wait(3500);
+const secondCode = await app.evaluate(`
+  const h = document.getElementById('loginCodeHint');
+  return h && !h.hidden ? h.textContent.replace(/\\D/g, '') : '';
+`);
+check(secondCode.length === 6, "the code arrives for a second sign-in", `code=${secondCode}`);
+
+await app.evaluate(`document.getElementById('loginCodeForm').elements.loginCode.value = ${JSON.stringify(secondCode)}; return 'ok';`);
+await submit("loginCodeForm");
+// Long enough for the plan step to have appeared if it were going to: it renders in the same tick
+// as the session is applied.
+await wait(4000);
+const secondEntry = await app.evaluate(`
+  return { planShown: !document.getElementById('loginStepPlan').hidden,
+    workspace: document.getElementById('loginScreen').classList.contains('is-hidden') };
+`);
+check(!secondEntry.planShown, "an existing account is NOT asked to choose a plan again", JSON.stringify(secondEntry));
+check(secondEntry.workspace, "and it goes straight into the app", JSON.stringify(secondEntry));
+
 const ok = finish();
 console.log(ok ? "SCENARIOS OK" : "SCENARIOS FAILED");
 app.close();
