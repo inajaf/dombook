@@ -1807,7 +1807,59 @@ class RentKeeperDatabase {
       // Reported from the cached server policy so the UI shows the account's real window.
       bookingPolicy: bookingLimits(null, this.todayProvider(), this.bookingPolicy()),
       language: this.getLanguage(),
+      documentRequisites: this.documentRequisites(),
     };
+  }
+
+  /**
+   * The details a contract or an invoice has to carry to be worth anything to an accountant.
+   *
+   * Stored as one JSON blob in app_settings rather than as columns on an `accounts` row: the set
+   * of requisites a jurisdiction wants varies (VÖEN here, ИНН and КПП a border away), and a schema
+   * with one column per field would need a migration for every country the product is sold in.
+   * app_settings already replicates, so the details reach every device the owner signs in on.
+   *
+   * Read tolerantly: a half-filled or unreadable value must degrade to "not filled in yet" so the
+   * document can still be produced with blank lines, rather than failing the generation.
+   */
+  documentRequisites() {
+    const fallback = {
+      lessorName: "",
+      lessorTaxId: "",
+      lessorAddress: "",
+      lessorPhone: "",
+      bankDetails: "",
+      signatoryName: "",
+      documentCity: "",
+    };
+    const stored = this.scalar(
+      "SELECT setting_value FROM app_settings WHERE setting_key = 'document_requisites'",
+    );
+    if (!stored) return fallback;
+    try {
+      const parsed = JSON.parse(stored);
+      if (!parsed || typeof parsed !== "object") return fallback;
+      return Object.fromEntries(Object.entries(fallback).map(([key, value]) => [
+        key,
+        typeof parsed[key] === "string" ? parsed[key].trim().slice(0, 300) : value,
+      ]));
+    } catch {
+      return fallback;
+    }
+  }
+
+  setDocumentRequisites(input) {
+    const current = this.documentRequisites();
+    const next = Object.fromEntries(Object.entries(current).map(([key, value]) => [
+      key,
+      typeof input?.[key] === "string" ? input[key].trim().slice(0, 300) : value,
+    ]));
+    this.upsertSetting("document_requisites", JSON.stringify(next));
+    // Persisted here for the same reason setBookingPolicy does it: upsertSetting only writes to
+    // the in-memory database, and requisites that vanish on restart would have to be retyped
+    // before every contract.
+    this.persist();
+    return next;
   }
 
   getLanguage() {

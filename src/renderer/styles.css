@@ -523,6 +523,25 @@ tbody tr:last-child td { border-bottom: 0; }
 .confirm-modal p { margin: 0; color: var(--muted); }
 .confirm-icon { width: 58px; height: 58px; border-radius: 18px; display: grid; place-items: center; margin: auto; background: var(--danger-soft); color: var(--danger); }
 .confirm-icon svg { width: 27px; height: 27px; }
+/* Choosing which document to print. Two cards, because a contract and an invoice go to different
+ * readers and a person about to hand paperwork to a tax office should not have to guess which
+ * button produces which. */
+.document-choices { display: grid; gap: 10px; margin: 16px 0; }
+.document-choice {
+  display: grid; grid-template-columns: 46px minmax(0, 1fr) 20px; align-items: center; gap: 13px;
+  min-height: 76px; padding: 13px 15px; text-align: left; cursor: pointer;
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
+  transition: border-color var(--motion-fast) ease, background var(--motion-fast) ease, transform var(--motion-fast) var(--ease-out);
+}
+.document-choice:hover { border-color: var(--primary); background: var(--primary-soft); transform: translateX(3px); }
+.document-choice:active { transform: translateX(1px) scale(.99); }
+.document-choice > span:nth-child(2) { min-width: 0; }
+.document-choice strong, .document-choice small { display: block; }
+.document-choice small { margin-top: 3px; color: var(--muted); font-size: var(--text-sm); line-height: 1.45; }
+.document-choice-icon { width: 46px; height: 46px; border-radius: 13px; display: grid; place-items: center; background: var(--primary-soft); color: var(--primary); }
+.document-choice > svg:last-child { width: 18px; color: var(--muted); }
+.documents-choose { margin-top: 6px; }
+
 .toast-region { position: fixed; z-index: 300; right: 20px; bottom: 20px; display: grid; gap: 8px; }
 .toast { min-width: min(280px, calc(100vw - 40px)); max-width: min(420px, calc(100vw - 40px)); padding: 13px 16px; border-radius: 13px; background: #17211c; color: white; box-shadow: var(--shadow-md); overflow-wrap: anywhere; animation: toast-in var(--motion-slow) var(--ease-out); transition: opacity 180ms ease-in, transform 180ms ease-in; }
 .toast.error { background: var(--danger); }

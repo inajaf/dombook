@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, shell, safeStorage } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, Menu, shell, safeStorage } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs/promises");
 // The synchronous API, needed for the one-time data migration below: it must finish before
@@ -11,6 +11,8 @@ const { createSyncEngine } = require("./main/sync.cjs");
 const { wholeMonthsBetween } = require("./domain/booking/booking-policy.cjs");
 const { quoteReservation } = require("./domain/booking/pricing.cjs");
 const { nowIso } = require("./database.cjs");
+const { DOCUMENT_KINDS, documentFileName } = require("./main/documents.cjs");
+const { renderHtmlToPdf } = require("./main/pdf.cjs");
 
 let mainWindow;
 let database;
@@ -303,6 +305,66 @@ function registerIpc() {
     handle("reservations:delete", (payload) => database.deleteReservation(payload.id));
     handle("reservations:earlyCheckout", (payload) => database.earlyCheckout(payload.id, payload.data));
 
+    // Where generated contracts and invoices are kept.
+    //
+    // A folder inside the app's own data directory rather than a file dialog every time: an owner
+    // producing a contract for a guest standing in front of them should not have to navigate a
+    // filesystem to do it, and the folder is one click away in Settings. "Сохранить как…" is
+    // still offered for the times the document has to land somewhere specific.
+    handle("documents:folder", async () => {
+      const folder = path.join(app.getPath("userData"), "documents");
+      await fs.mkdir(folder, { recursive: true });
+      return folder;
+    });
+
+    handle("documents:openFolder", async () => {
+      const folder = path.join(app.getPath("userData"), "documents");
+      await fs.mkdir(folder, { recursive: true });
+      const error = await shell.openPath(folder);
+      if (error) throw new Error(error);
+      return folder;
+    });
+
+    // The document, built but not written. Kept separate from the save so the wording and the
+    // arithmetic can be asserted without producing a file, and so a preview is possible.
+    handle("documents:html", (payload) => {
+      const { reservation, unit, place } = documentContext(payload?.reservationId);
+      const kind = DOCUMENT_KINDS[payload?.kind] ? payload.kind : "invoice";
+      return DOCUMENT_KINDS[kind].build({
+        reservation,
+        unit,
+        place,
+        requisites: database.documentRequisites(),
+        generatedAt: documentDate(),
+      });
+    });
+
+    handle("documents:create", async (payload) => {
+      const { reservation, unit, place } = documentContext(payload?.reservationId);
+      const kind = DOCUMENT_KINDS[payload?.kind] ? payload.kind : "invoice";
+      const fileName = documentFileName(kind, reservation);
+      const html = DOCUMENT_KINDS[kind].build({
+        reservation,
+        unit,
+        place,
+        requisites: database.documentRequisites(),
+        generatedAt: documentDate(),
+      });
+
+      let target = path.join(app.getPath("userData"), "documents", fileName);
+      if (payload?.choose) {
+        const picked = await dialog.showSaveDialog(mainWindow, {
+          title: DOCUMENT_KINDS[kind].label,
+          defaultPath: target,
+          filters: [{ name: "PDF", extensions: ["pdf"] }],
+        });
+        if (picked.canceled || !picked.filePath) return { canceled: true };
+        target = picked.filePath;
+      }
+      await renderHtmlToPdf(html, target);
+      return { canceled: false, path: target, fileName: path.basename(target), folder: path.dirname(target) };
+    });
+
     handle("backups:list", () => database.listBackups());
     handle("backups:create", () => database.createBackup());
     handle("system:info", () => database.systemInfo());
@@ -311,11 +373,38 @@ function registerIpc() {
       createMenu(language);
       return language;
     });
+    handle("system:setDocumentRequisites", (payload) => database.setDocumentRequisites(payload));
     handle("system:openBackupDirectory", async () => {
       const error = await shell.openPath(database.systemInfo().backupDir);
       if (error) throw new Error(error);
       return true;
     });
+  }
+
+  /**
+   * The rows a document is built from.
+   *
+   * Loaded here rather than passed in from the renderer: a document states what the account's own
+   * records say, and a view that could hand in its own figures could produce a contract the
+   * database does not agree with.
+   */
+  /**
+   * Today, in the account's own time zone.
+   *
+   * The same value the booking window is judged against, taken from the same place: a contract
+   * dated by the machine's clock rather than the account's would be dated a day out for anyone
+   * signing it in the evening on the other side of a border.
+   */
+  function documentDate() {
+    return database.systemInfo().bookingPolicy.today;
+  }
+
+  function documentContext(reservationId) {
+    const reservation = database.getReservation(reservationId);
+    if (!reservation) throw new Error("Бронь не найдена");
+    const unit = database.getProperty(reservation.property_id);
+    const place = unit?.place_id ? database.getPlace(unit.place_id) : null;
+    return { reservation, unit, place };
   }
 
   function createWindow() {

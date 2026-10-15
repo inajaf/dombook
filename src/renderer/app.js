@@ -42,6 +42,8 @@ const state = {
   quoteRequest: 0,
   // True once the owner types an amount: the computed figure stops replacing it.
   accommodationManual: false,
+  // The booking the documents dialog is currently about.
+  documentsReservation: null,
   reservationFilter: "all",
   search: "",
   expandedGroups: new Set(),
@@ -461,6 +463,7 @@ function renderReservations() {
       <td><div class="row-actions">
         <button class="icon-button" data-edit-reservation="${reservation.id}" aria-label="Редактировать бронь ${escapeHtml(reservation.guest_name)}">${icon("i-edit")}</button>
         ${["hold", "confirmed", "checked_in"].includes(reservation.status) ? `<button class="button secondary row-text-action" data-early-checkout="${reservation.id}">Досрочный выезд</button>` : ""}
+        <button class="icon-button" data-documents-reservation="${reservation.id}" aria-label="Документы по брони ${escapeHtml(reservation.guest_name)}">${icon("i-book")}</button>
         ${["cancelled", "checked_out", "no_show"].includes(reservation.status) ? "" : `<button class="icon-button danger" data-cancel-reservation="${reservation.id}" aria-label="Отменить бронь ${escapeHtml(reservation.guest_name)}">${icon("i-close")}</button>`}
         ${["cancelled", "checked_out", "no_show"].includes(reservation.status) ? `<button class="icon-button danger" data-delete-reservation="${reservation.id}" aria-label="Удалить бронь ${escapeHtml(reservation.guest_name)} навсегда">${icon("i-trash")}</button>` : ""}
       </div></td>
@@ -552,6 +555,8 @@ function renderRentals() {
         ${readingsText ? `<p class="muted rental-readings">Показания: <span data-i18n-ignore>${readingsText}</span></p>` : ""}
         <footer class="rental-actions">
           <button class="button secondary compact" data-edit-rental="${escapeHtml(rental.id)}">Изменить</button>
+          <button class="button primary compact" data-contract-rental="${escapeHtml(rental.id)}">Договор PDF</button>
+          <button class="button secondary compact" data-invoice-rental="${escapeHtml(rental.id)}">Счёт PDF</button>
         </footer>
       </article>`;
   }).join("");
@@ -1012,11 +1017,42 @@ async function refreshSyncStatus() {
   renderSyncStatus();
 }
 
+/**
+ * The documents dialog for one booking.
+ *
+ * A dialog rather than another icon on the row: a contract and an invoice are different documents
+ * for different readers, and a tooltip is not enough to say which is which.
+ */
+function openDocumentsDialog(reservationId) {
+  const reservation = state.reservations.find((item) => item.id === reservationId);
+  if (!reservation) return;
+  const isRental = reservation.booking_kind === "rental";
+  state.documentsReservation = reservationId;
+  $("#documentsDialogTitle").textContent = `Документы: ${reservation.guest_name}`;
+  $("#documentsError").hidden = true;
+  $("#documentsIntro").textContent = isRental
+    ? "Договор найма — для подписания, счёт и акт — для бухгалтерии и налоговой. Файлы сохраняются в папку документов приложения."
+    : "Для посуточной брони договор найма не нужен, но счёт и акт по ней — тот документ, который просят для отчётности.";
+  // The contract is offered for a tenancy only: printing a "договор найма" for two nights would
+  // produce a document with a monthly rent and a term that do not exist.
+  $("#documentContract").hidden = !isRental;
+  $("#documentsDialog").showModal();
+}
+
+async function createDocument(reservationId, kind) {
+  const choose = $("#documentsChoosePath")?.checked === true;
+  const result = await unwrap(api.documents.create({ reservationId, kind, choose }));
+  if (result?.canceled) return;
+  toast(`Документ сохранён: ${result.fileName}`);
+  return result;
+}
+
 function renderSettings() {
   const info = state.systemInfo || {};
   $("#interfaceLanguage").value = info.language || window.i18n?.language || "ru";
   const textScale = $("#textScale");
   if (textScale) textScale.value = textScaleName();
+  renderRequisites();
   $("#systemInfo").innerHTML = `
     <div><dt>Файл базы</dt><dd data-i18n-ignore>${escapeHtml(privateStorageLabel(info.databasePath, "dombook.sqlite"))}</dd></div>
     <div><dt>Размер</dt><dd>${formatBytes(info.databaseSize || 0)}</dd></div>
@@ -1029,6 +1065,38 @@ function renderSettings() {
       <small>${formatBytes(backup.size)}</small>
     </div>
   `).join("") : `<div class="empty-inline">Копий пока нет. Создайте первую перед внесением реальных данных.</div>`;
+}
+
+/** The details a contract prints, kept in app_settings so they follow the owner between devices. */
+function renderRequisites() {
+  const form = $("#requisitesForm");
+  if (!form) return;
+  const requisites = state.systemInfo?.documentRequisites || {};
+  Object.entries(requisites).forEach(([key, value]) => {
+    if (form.elements[key]) form.elements[key].value = value || "";
+  });
+}
+
+async function submitRequisites(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const errorBox = $("#requisitesError");
+  errorBox.hidden = true;
+  const payload = Object.fromEntries(
+    ["lessorName", "lessorTaxId", "lessorAddress", "lessorPhone", "bankDetails", "signatoryName", "documentCity"]
+      .map((key) => [key, form.elements[key]?.value ?? ""]),
+  );
+  const submit = $("#requisitesSubmit");
+  try {
+    setBusy(submit, true);
+    const saved = await unwrap(api.system.setDocumentRequisites(payload));
+    state.systemInfo = { ...(state.systemInfo || {}), documentRequisites: saved };
+    toast("Реквизиты сохранены");
+  } catch (error) {
+    showError(errorBox, error);
+  } finally {
+    setBusy(submit, false);
+  }
 }
 
 function privateStorageLabel(value, fallback) {
@@ -1955,6 +2023,17 @@ function bindEvents() {
         },
       });
     }
+    if (target.dataset.documentsReservation) {
+      openDocumentsDialog(target.dataset.documentsReservation);
+    }
+    if (target.dataset.contractRental) {
+      createDocument(target.dataset.contractRental, "contract")
+        .catch((error) => toast(error.message, "error"));
+    }
+    if (target.dataset.invoiceRental) {
+      createDocument(target.dataset.invoiceRental, "invoice")
+        .catch((error) => toast(error.message, "error"));
+    }
     if (target.dataset.deleteReservation) {
       const reservation = state.reservations.find((item) => item.id === target.dataset.deleteReservation);
       confirmAction({
@@ -2066,6 +2145,18 @@ function bindEvents() {
     button.closest("[data-rule-row]")?.remove();
   });
 
+  $$("[data-document-kind]").forEach((button) => button.addEventListener("click", () => {
+    const kind = button.dataset.documentKind;
+    const reservationId = state.documentsReservation;
+    if (!reservationId) return;
+    createDocument(reservationId, kind).catch((error) => showError($("#documentsError"), error));
+  }));
+  $("#openDocumentsFolder").addEventListener("click", () => {
+    unwrap(api.documents.openFolder()).catch((error) => toast(error.message, "error"));
+  });
+  $("#requisitesForm")?.addEventListener("submit", (event) => {
+    submitRequisites(event).catch((error) => toast(error.message, "error"));
+  });
   $("#createBackup").addEventListener("click", createBackup);
   $("#interfaceLanguage").addEventListener("change", changeInterfaceLanguage);
   $("#textScale")?.addEventListener("change", (event) => {
@@ -2345,6 +2436,8 @@ function createBrowserDemoApi() {
   }
   const response = (data) => Promise.resolve({ ok: true, data });
   const error = (message) => Promise.resolve({ ok: false, error: message });
+  let requisites = {};
+  const documentPreviewHtml = () => "<!doctype html><p>Документ формируется в приложении для компьютера.</p>";
   const idOf = (value) => (value === null || value === undefined ? null : String(value));
   const findById = (list, id, key = "id") => list.find((item) => idOf(item[key]) === idOf(id));
   const normalizeIds = (list, keys = ["id", "place_id", "property_id", "reservation_id"]) => (list || []).map((item) => {
@@ -2479,6 +2572,19 @@ function createBrowserDemoApi() {
         return persistedResponse(interfaceLanguage);
       },
       openBackupDirectory: () => response(true),
+      setDocumentRequisites: (data) => {
+        requisites = { ...requisites, ...data };
+        return persistedResponse(requisites);
+      },
+    },
+    // The browser build has no Electron main process to render a PDF in, so a document is
+    // downloaded as an HTML file instead of silently doing nothing. The demo is a preview of the
+    // product, and a button that appears to work is more honest than one that is missing.
+    documents: {
+      html: (data) => response(documentPreviewHtml(data)),
+      create: () => error("PDF создаётся только в приложении для компьютера"),
+      folder: () => response("Browser downloads"),
+      openFolder: () => response("Browser downloads"),
     },
   };
 }

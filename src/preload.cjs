@@ -23,6 +23,14 @@ contextBridge.exposeInMainWorld("domBook", {
     archive: (id) => invoke("properties:archive", { id }),
     restore: (id) => invoke("properties:restore", { id }),
   },
+  // Contracts and invoices. The document is built in the main process from stored rows, so the
+  // renderer cannot produce paperwork the database does not agree with.
+  documents: {
+    html: (data) => invoke("documents:html", data),
+    create: (data) => invoke("documents:create", data),
+    folder: () => invoke("documents:folder"),
+    openFolder: () => invoke("documents:openFolder"),
+  },
   // A price for a booking that has not been saved. Computed in the main process, which owns the
   // pricing rules — see src/domain/booking/pricing.cjs.
   pricing: {
@@ -62,6 +70,7 @@ contextBridge.exposeInMainWorld("domBook", {
   system: {
     info: () => invoke("system:info"),
     setLanguage: (language) => invoke("system:setLanguage", { language }),
+    setDocumentRequisites: (data) => invoke("system:setDocumentRequisites", data),
     openBackupDirectory: () => invoke("system:openBackupDirectory"),
   },
   auth: {

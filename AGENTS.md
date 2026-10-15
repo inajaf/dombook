@@ -283,6 +283,8 @@ because every serious bug in this project was invisible to both unit suites:
 - **`e2e-pricing.mjs`** — a season and a discount reaching the dialog, the amount and its
   breakdown being stored, a negotiated amount overriding the calculation, and the unit dialog
   keeping the values it does not show.
+- **`e2e-documents.mjs`** — a contract and an invoice written as real PDF files, checked for a
+  PDF header, a plausible size and a PAGE COUNT, plus the requisites they print.
 - **`e2e-operations.mjs`** — check-in, early checkout, cancel, delete, archive/restore, backup.
 - **`e2e-security.mjs`** — two tenants; neither can read, write or book into the other's data,
   and the signed-out bridge refuses everything.
@@ -301,6 +303,14 @@ because every serious bug in this project was invisible to both unit suites:
 - **Never reuse fixed date offsets.** The operations suite derived `today+2..today+5`, and a
   leftover row from an earlier run made a correct booking look broken. It now picks the first
   free window from live occupancy and re-reads the booking's real dates for every later step.
+- **...including in the ASSERTION, not just in the setup.** The same suite picked its booking's
+  dates from live occupancy but then asserted occupancy over a fixed `today+2..today+5`. That
+  window is the booking's own only when the free-window search lands on offset 2; on a clean
+  database it lands on offset 1, and the check counted two of three nights and failed while the
+  behaviour it named was correct. It passed historically for a reason unrelated to what it
+  asserts — leftover nights from an earlier run pushed the search to a later offset. The check now
+  uses the booking's own dates. Deriving the fixture and hard-coding the expectation is not
+  deriving the fixture.
 - **Each suite creates its own place and unit, timestamped**, rather than sharing the demo seed.
 - **The renderer caches the unit list.** A unit created through the bridge is invisible to a
   dialog until `refreshCore()` runs, exactly as the app does after a form submit. Skipping it
@@ -523,6 +533,40 @@ rule set stored as JSON text on the unit row (`units.rate_rules` / `properties.r
 - **The REST unit endpoints do not expose the rules yet.** A unit created through them gets the
   empty rule set, and an update leaves the stored rules alone. The desktop is a sync client, so
   nothing in the product is affected; a future web client editing rules would need the plumbing.
+
+## Printed documents (contracts and invoices)
+
+`src/main/documents.cjs` builds the HTML for two documents; `src/main/pdf.cjs` renders it to PDF
+through an offscreen `BrowserWindow` and `printToPDF`; `src/main.cjs` owns the IPC. No PDF library
+is involved — the browser engine that ships with Electron lays the page out, so what the owner
+prints and what the file contains cannot drift apart.
+
+- **A contract and an invoice are different documents for different readers.** The contract states
+  the parties, the term, the rent, the deposit and the meter readings, and carries a signature
+  block. The invoice lists what was charged, the discount, what was received and what is
+  outstanding — the document an accountant or a tax inspection reads. A tenancy is offered both; a
+  nightly booking is offered the invoice only, because a "договор найма" for two nights would
+  state a monthly rent and a term that do not exist.
+- **The figures come from the stored row, never from today's rates.** A document that re-prices
+  last March's let with this year's season is the one failure a tax document cannot have. The
+  season lines and the discount come from `reservations.rate_breakdown`.
+- **`documentNumber` is DERIVED, not counted**: `<booking date>-<first 4 of the id>`. A counter has
+  to be persisted, and a number that changes when a document is regenerated — or that two devices
+  disagree about — is worse than a slightly ugly one.
+- **The requisites live in `app_settings` as one JSON blob** (`document_requisites`), not as
+  columns on an account: the set of details a jurisdiction wants varies, and a schema with one
+  column per field would need a migration per country. They are editable in Settings, and a
+  document is still produced without them — with blank lines rather than an error.
+- **The month count is derived from the dates** (`wholeMonthsBetween`). `rental_months` is attached
+  by the IPC layer when it LISTS reservations and is absent from a single fetched row, which is how
+  a twelve-month lease printed "(0 мес.)".
+- **`preferCSSPageSize` is left unset.** A two-page contract came out as a single page once, with
+  the clauses and the signature block simply absent, and the file was a valid PDF that opened
+  normally and ended mid-sentence. It has **not been reproduced** — 20 generations since, with and
+  without the flag, all produced two pages — so the 200 ms settle before `printToPDF` is a
+  mitigation for an unexplained truncation, not a fix for a diagnosed one.
+  **`scripts/e2e-documents.mjs` asserts a page count for exactly this reason**: a truncated PDF
+  passes every other check there is, including "the file is a PDF" and "it is not empty".
 
 ## Running locally
 
