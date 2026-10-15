@@ -7,6 +7,7 @@
  */
 
 import { $ } from "./dom.js";
+import { toast } from "./toast.js";
 
 export function confirmAction({ title, text, button = "Подтвердить", action }) {
   $("#confirmTitle").textContent = title;
