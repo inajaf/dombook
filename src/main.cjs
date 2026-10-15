@@ -155,6 +155,7 @@ function registerIpc() {
   handle("auth:status", async () => {
     try {
       const session = await authApi.restore();
+      await adoptAccount(session);
       return {
         authenticated: Boolean(session),
         session,
@@ -169,7 +170,13 @@ function registerIpc() {
   });
   handle("auth:send", (payload) => authApi.send(payload?.email));
   handle("auth:setup", (payload) => authApi.setup(payload?.email));
-  handle("auth:verify", (payload) => authApi.verify(payload?.email, payload?.code));
+  handle("auth:verify", async (payload) => {
+    const session = await authApi.verify(payload?.email, payload?.code);
+    const adopted = await adoptAccount(session);
+    // The renderer needs to say so when someone else's local data has just been removed: it is
+    // the one consequence of signing in that a user can lose work to.
+    return { ...session, accountSwitched: adopted.switched };
+  });
   handle("auth:setPlan", (payload) => authApi.setPlan(payload?.plan));
     handle("auth:checkout", async (payload) => {
       const checkout = await authApi.checkout(payload?.plan);
@@ -444,6 +451,55 @@ function registerIpc() {
    */
   function documentDate() {
     return database.systemInfo().bookingPolicy.today;
+  }
+
+  /**
+   * Which account this device's local database belongs to.
+   *
+   * A file rather than a row, deliberately: the local database is the thing being identified, so a
+   * marker inside it would be replaced along with it, and `app_settings` replicates to the very
+   * account we are trying to tell apart from the last one.
+   */
+  function accountMarkerPath() {
+    return path.join(app.getPath("userData"), "account.json");
+  }
+
+  function storedAccountId() {
+    try {
+      return JSON.parse(fsSync.readFileSync(accountMarkerPath(), "utf8")).accountId || "";
+    } catch {
+      return "";
+    }
+  }
+
+  /**
+   * Make the local database belong to the account that just signed in.
+   *
+   * The desktop is single-tenant: its database has no tenant column and no notion of an owner, so
+   * without this a second account signing in on the same device reads the first account's
+   * bookings and then fails to sync — the pull collides with rows that are already there
+   * ("UNIQUE constraint failed: places.name"), and any row still queued from the previous account
+   * is waiting to be pushed INTO the new one.
+   *
+   * No marker means an install that predates this check. Nothing is thrown away on a guess: it is
+   * adopted as-is, and the marker is written so the next switch is caught.
+   */
+  async function adoptAccount(session) {
+    const accountId = session?.accountId || "";
+    if (!accountId) return { switched: false };
+    const stored = storedAccountId();
+    const switched = Boolean(stored) && stored !== accountId;
+    if (switched) {
+      database.reset();
+    }
+    try {
+      fsSync.writeFileSync(accountMarkerPath(), JSON.stringify({ accountId, at: nowIso() }));
+    } catch (error) {
+      // Losing the marker costs the NEXT account switch, not this session; refusing the sign-in
+      // over it would be worse.
+      console.error("Could not record the account marker:", error);
+    }
+    return { switched };
   }
 
   /**

@@ -1008,6 +1008,29 @@ class RentKeeperDatabase {
     return result;
   }
 
+  /**
+   * Throw the local database away and start from an empty one.
+   *
+   * Called when a DIFFERENT account signs in on this device. The local database is a replica of
+   * one account's server state plus that account's unsent edits, and it has no tenant column —
+   * the desktop is single-tenant by design. Keeping it across a sign-in means the next account
+   * sees the previous one's bookings, and the pull that follows collides with what is already
+   * there: "UNIQUE constraint failed: places.name", a sync that never recovers, and queued rows
+   * belonging to someone else waiting to be pushed into the account that just signed in.
+   *
+   * No demo seed: this runs when a real account signs in, and sample data would be pushed into it.
+   */
+  reset() {
+    this.db.close();
+    fs.rmSync(this.filePath, { force: true });
+    this.db = new this.SQL.Database();
+    this.db.run("PRAGMA foreign_keys = ON");
+    this.migrate();
+    this.ensureDeviceId();
+    this.persist();
+    return this;
+  }
+
   persist() {
     const bytes = Buffer.from(this.db.export());
     const tempPath = `${this.filePath}.${crypto.randomUUID()}.tmp`;

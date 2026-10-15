@@ -942,3 +942,29 @@ test("повторное открытие мигрированной базы н
     reopened.close();
   }
 });
+
+test("сброс локальной базы оставляет пустую схему без демо-данных", async (t) => {
+  // The desktop is single-tenant: its database has no way to tell one account's rows from
+  // another's. When a second account signs in on the same device the only correct answer is to
+  // throw the local copy away — keeping it shows the previous account's bookings and makes every
+  // later pull collide ("UNIQUE constraint failed: places.name").
+  const { database } = await createTestDatabase(t);
+  const before = database.writerId;
+  database.createProperty(house({ name: "Чужой объект" }));
+  database.createPlace({ name: "Чужой дом отдыха", address: "", hasFoodService: false });
+  assert.equal(database.listProperties().length, 1);
+
+  database.reset();
+
+  assert.equal(database.listProperties().length, 0, "объекты предыдущего аккаунта удалены");
+  assert.equal(database.listPlaces().length, 0, "дом отдыха предыдущего аккаунта удалён");
+  assert.equal(database.listReservations().length, 0);
+  // The seed must NOT run: this database is about to receive a real account, and sample rows
+  // would be pushed into it.
+  assert.equal(database.listProperties().length, 0, "демо-данные не подставляются");
+  // The schema has to be usable straight away, or the first booking after the switch fails.
+  assert.doesNotThrow(() => database.createProperty(house({ name: "Новый объект" })));
+  // A NEW device identity: the old one's queued rows are gone, and reusing the id would let the
+  // server attribute the new account's writes to the previous device.
+  assert.notEqual(database.writerId, before);
+});
