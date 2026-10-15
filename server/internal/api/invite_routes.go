@@ -42,6 +42,15 @@ const inviteLifetime = 30 * 24 * time.Hour
 // nobody accepts it. This only catches obvious typos.
 var emailPattern = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
 
+type memberView struct {
+	ID        string `json:"id"`
+	Email     string `json:"email"`
+	Name      string `json:"name"`
+	Role      string `json:"role"`
+	CreatedAt string `json:"createdAt"`
+	IsSelf    bool   `json:"isSelf"`
+}
+
 type inviteView struct {
 	ID        string `json:"id"`
 	Email     string `json:"email"`
@@ -68,6 +77,31 @@ func toInviteView(invite store.Invite) inviteView {
 // administrative act rather than something every member may do.
 func registerInviteRoutes(router *httpapi.Router, deps Deps, resolver httpapi.TokenResolver) {
 	managers := httpapi.RequireRole("owner", "admin")
+
+	// Who is in this account. Visible to EVERY member, not just the managers: knowing who you
+	// work alongside is not an administrative act, and hiding it would make a shared account feel
+	// anonymous. Invitations themselves stay with owner and admin.
+	router.Handle(http.MethodGet, "/account/members",
+		httpapi.RequireAuth(resolver, func(ctx *httpapi.Context) error {
+			members, err := deps.Store.ListUsersForAccount(ctx.Request.Context(), ctx.AccountID)
+			if err != nil {
+				return err
+			}
+			views := make([]memberView, 0, len(members))
+			for _, member := range members {
+				views = append(views, memberView{
+					ID:        member.ID,
+					Email:     member.Email,
+					Name:      member.Name,
+					Role:      string(member.Role),
+					CreatedAt: member.CreatedAt.UTC().Format(time.RFC3339),
+					// The signed-in user, so the client can say "это вы" instead of offering to
+					// revoke the row the reader is standing on.
+					IsSelf: member.ID == ctx.UserID,
+				})
+			}
+			return httpapi.WriteJSONStatus(ctx, http.StatusOK, map[string]any{"members": views})
+		}))
 
 	router.Handle(http.MethodGet, "/auth/invites",
 		httpapi.RequireAuth(resolver, managers(func(ctx *httpapi.Context) error {

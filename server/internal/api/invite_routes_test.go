@@ -301,3 +301,62 @@ func uniqueInviteEmail(t *testing.T, index int) string {
 	t.Helper()
 	return "invite-" + string(rune('a'+index)) + "-" + uniqueEmail(t)
 }
+
+func TestMembersListShowsTheTeamAndOnlyTheTeam(t *testing.T) {
+	server, database := newDomainServerWithDatabase(t)
+	ownerToken, _ := login(t, server, bootstrap(t, server))
+	staffToken := addMemberAndLogin(t, server, database, ownerToken)
+
+	t.Run("an owner sees the people in the account", func(t *testing.T) {
+		status, body := getJSON(t, server, "/account/members", ownerToken)
+		if status != http.StatusOK {
+			t.Fatalf("GET /account/members returned %d: %v", status, body)
+		}
+		members, ok := body["members"].([]any)
+		if !ok || len(members) < 2 {
+			t.Fatalf("members = %v, want at least the owner and the invited colleague", body["members"])
+		}
+		roles := map[string]bool{}
+		selfSeen := 0
+		for _, raw := range members {
+			member := raw.(map[string]any)
+			roles[member["role"].(string)] = true
+			if member["isSelf"] == true {
+				selfSeen++
+			}
+			// The list is for people, not for credentials: no session or token material.
+			for _, forbidden := range []string{"token", "password", "session", "hash"} {
+				if _, present := member[forbidden]; present {
+					t.Errorf("member exposes %q: %v", forbidden, member)
+				}
+			}
+		}
+		if !roles["owner"] || !roles["staff"] {
+			t.Errorf("roles = %v, want the owner and the colleague", roles)
+		}
+		// Exactly one row is the reader: the client marks it, so it does not offer to remove
+		// the account's only owner.
+		if selfSeen != 1 {
+			t.Errorf("isSelf is set on %d rows, want exactly 1", selfSeen)
+		}
+	})
+
+	t.Run("a member sees the team too", func(t *testing.T) {
+		// Knowing who you work alongside is not administration; the invitation list is.
+		status, body := getJSON(t, server, "/account/members", staffToken)
+		if status != http.StatusOK {
+			t.Fatalf("a member reading the team returned %d, want 200: %v", status, body)
+		}
+		members := body["members"].([]any)
+		if len(members) < 2 {
+			t.Fatalf("a member sees %d people, want the whole team", len(members))
+		}
+	})
+
+	t.Run("an anonymous caller sees nothing", func(t *testing.T) {
+		status, _ := getJSON(t, server, "/account/members", "")
+		if status != http.StatusUnauthorized {
+			t.Fatalf("an unauthenticated read returned %d, want 401", status)
+		}
+	})
+}

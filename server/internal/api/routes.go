@@ -31,6 +31,7 @@ type Deps struct {
 // An interface rather than the concrete store so the routes can be tested with a fake, and so
 // it is obvious at a glance what these routes are allowed to touch.
 type InviteStore interface {
+	ListUsersForAccount(ctx context.Context, accountID string) ([]store.User, error)
 	ListInvites(ctx context.Context, tenantID string) ([]store.Invite, error)
 	FindPendingInvite(ctx context.Context, tenantID, email string) (*store.Invite, error)
 	CreateInvite(ctx context.Context, inviteID, accountID, email string, role store.UserRole, tokenHash, createdBy string, expiresAt time.Time) (*store.Invite, error)

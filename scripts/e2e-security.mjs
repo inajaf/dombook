@@ -28,6 +28,7 @@ async function api(method, path, { token, body, headers: extra } = {}) {
 /** Sign in an address that already exists, using the dev code echo. */
 async function signIn(email) {
   const send = await api("POST", "/auth/send", { body: { email } });
+  if (send.status !== 200) return { status: send.status, body: send.body };
   const verify = await api("POST", "/auth/verify", { body: { email, code: send.body.code } });
   return { email, token: verify.body?.token, accountId: verify.body?.accountId, loginable: send.body?.loginable };
 }
@@ -81,6 +82,7 @@ if (betaSetup.status === 201) {
   beta = await signIn(betaEmail);
 }
 check(Boolean(beta.token), "a second, separate business exists", `setupStatus=${betaSetup.status}`);
+
 check(Boolean(alpha.accountId) && Boolean(beta.accountId) && alpha.accountId !== beta.accountId,
   "they are different accounts", `${alpha.accountId?.slice(0, 8)} vs ${beta.accountId?.slice(0, 8)}`);
 
@@ -90,6 +92,64 @@ const alphaUnit = await api("POST", "/units", { token: alpha.token, body: {
   placeId: alphaPlace.body?.place?.id, name: "Alpha Коттедж", capacity: 4,
   basePriceMinor: 10000, depositMinor: 0, monthlyRateMinor: 0, currency: "AZN" } });
 check(Boolean(alphaUnit.body?.unit?.id), "alpha creates a unit");
+
+// --- Access is granted BY the account, and only there ---------------------
+//
+// The owner's requirement in one sentence: another account must not see this one's data unless
+// this account gives it access, from settings. Four assertions hold that up — no access before the
+// grant, access after it, no administrative rights with it, and no access once it is withdrawn.
+const colleagueEmail = `colleague-${Date.now()}@example.test`;
+
+// The block sits HERE, before the app half, for two reasons that cost real time to find: alpha's
+// token is fresh, and signing the app out later REVOKES every session for that user — so a token
+// taken from the creation above is dead by the time the bridge checks are done. Re-signing in
+// instead is not an option either: `/auth/send` is throttled per address, and a second request in
+// one run answers 429 with a window that outlasts a 45-second wait.
+const owner = alpha;
+
+const stranger = await api("POST", "/auth/send", { body: { email: `stranger-${Date.now()}@example.test` } });
+check(stranger.body?.loginable === false,
+  "an address nobody invited has no way in at all",
+  `loginable=${stranger.body?.loginable}`);
+
+const invited = await api("POST", "/auth/invites", {
+  token: owner.token,
+  body: { email: colleagueEmail, role: "staff" },
+});
+check(invited.status === 201, "the owner can invite a colleague from the account", `status=${invited.status}`);
+check(typeof invited.body?.inviteToken === "string" && invited.body.inviteToken.length > 20,
+  "the invitation returns a token exactly once, so a leaked row cannot be replayed");
+
+// The invite is what makes the address loginable; nothing else does.
+const colleague = await signIn(colleagueEmail);
+check(Boolean(colleague.token), "the invited colleague signs in with their own login");
+check(colleague.accountId === alpha.accountId,
+  "and lands in the account that invited them, not one of their own",
+  `${colleague.accountId} vs ${alpha.accountId}`);
+
+const seenByColleague = await api("GET", "/places", { token: colleague.token });
+const alphaPlaces = (seenByColleague.body?.places ?? []).map((place) => place.name);
+check(seenByColleague.status === 200 && alphaPlaces.includes("Alpha База"),
+  "the colleague can see the inviter's data — that is what the grant bought",
+  JSON.stringify(alphaPlaces));
+
+const colleagueInviting = await api("POST", "/auth/invites", {
+  token: colleague.token,
+  body: { email: `someone-${Date.now()}@example.test`, role: "staff" },
+});
+check(colleagueInviting.status === 403,
+  "but cannot hand that access on: inviting is owner and admin only",
+  `status=${colleagueInviting.status}`);
+
+// Revoked means closed: the address that was never granted access cannot get in.
+const withdrawnEmail = `withdrawn-${Date.now()}@example.test`;
+const withdrawn = await api("POST", "/auth/invites", { token: owner.token, body: { email: withdrawnEmail, role: "staff" } });
+const revoked = await api("POST", `/auth/invites/${withdrawn.body?.invite?.id}/revoke`, { token: owner.token });
+check(revoked.status === 200, "an invitation can be withdrawn before it is used", `status=${revoked.status}`);
+const afterRevoke = await api("POST", "/auth/send", { body: { email: withdrawnEmail } });
+check(afterRevoke.body?.loginable === false,
+  "and the withdrawn address is closed again",
+  `loginable=${afterRevoke.body?.loginable}`);
 
 // --- Beta must not see it ------------------------------------------------
 const betaUnits = await api("GET", "/units", { token: beta.token });

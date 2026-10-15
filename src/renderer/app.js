@@ -377,6 +377,7 @@ function navigate(page) {
     refreshSyncStatus().catch(() => {});
     refreshBookingPolicy().catch(() => {});
     refreshEntitlements().catch(() => {});
+    refreshTeam().catch(() => {});
   }
   if (page === "conflicts") refreshConflicts().catch((error) => toast(error.message, "error"));
   if (page === "rentals") renderRentals();
@@ -1155,6 +1156,80 @@ function renderSettings() {
       <small>${formatBytes(backup.size)}</small>
     </div>
   `).join("") : `<div class="empty-inline">Копий пока нет. Создайте первую перед внесением реальных данных.</div>`;
+}
+
+/**
+ * Who may sign in to this account, and who has been invited.
+ *
+ * Isolation between accounts is the default and is enforced on the server; this panel is the only
+ * place access is GRANTED. Two rules are the server's, and the panel states them rather than
+ * pretending otherwise: an invitation belongs to one email address, and it can never grant
+ * ownership.
+ */
+const ROLE_LABELS = {
+  owner: "Владелец",
+  admin: "Администратор",
+  staff: "Сотрудник",
+};
+
+async function refreshTeam() {
+  const list = $("#teamList");
+  if (!list) return;
+  try {
+    const [members, invites] = await Promise.all([
+      unwrap(api.team.members()),
+      // The invitation list is owner/admin only. A member who is refused still sees the team,
+      // so the panel does not disappear for them — it just drops the part they may not read.
+      unwrap(api.team.invites()).catch(() => null),
+    ]);
+    const team = members?.members || [];
+    $("#teamBadge").textContent = `${team.length} ${team.length === 1 ? "человек" : "человека"}`;
+    list.innerHTML = team.map((member) => `
+      <div class="team-row">
+        <span class="team-avatar">${escapeHtml((member.name || member.email || "?").trim().charAt(0).toUpperCase())}</span>
+        <span><strong data-i18n-ignore>${escapeHtml(member.name || member.email)}</strong>
+          <small data-i18n-ignore>${escapeHtml(member.email)}</small></span>
+        <span class="pill">${escapeHtml(ROLE_LABELS[member.role] || member.role)}${member.isSelf ? " · это вы" : ""}</span>
+      </div>`).join("");
+
+    const pending = (invites?.invites || []).filter((invite) => invite.status === "pending");
+    $("#inviteList").innerHTML = pending.length
+      ? `<h3 class="team-heading">Ожидают входа</h3>${pending.map((invite) => `
+          <div class="team-row">
+            <span class="team-avatar pending">${icon("i-key")}</span>
+            <span><strong data-i18n-ignore>${escapeHtml(invite.email)}</strong>
+              <small>приглашён ${escapeHtml(new Date(invite.createdAt).toLocaleDateString(interfaceLocale()))}, действует до ${escapeHtml(new Date(invite.expiresAt).toLocaleDateString(interfaceLocale()))}</small></span>
+            <span class="pill">${escapeHtml(ROLE_LABELS[invite.role] || invite.role)}</span>
+            <button type="button" class="button ghost compact" data-revoke-invite="${escapeHtml(invite.id)}">Отозвать</button>
+          </div>`).join("")}`
+      : "";
+    // Nothing to invite with, for someone who may not invite.
+    $("#inviteForm").hidden = invites === null;
+  } catch (error) {
+    list.innerHTML = `<p class="empty-inline">${escapeHtml(error.message)}</p>`;
+  }
+}
+
+async function submitInvite(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const errorBox = $("#inviteError");
+  const successBox = $("#inviteSuccess");
+  errorBox.hidden = true;
+  successBox.hidden = true;
+  const submit = $("#inviteSubmit");
+  try {
+    setBusy(submit, true);
+    await unwrap(api.team.invite(form.elements.email.value.trim(), form.elements.role.value));
+    successBox.textContent = "Приглашение создано. Человек войдёт с этого адреса и увидит данные аккаунта.";
+    successBox.hidden = false;
+    form.reset();
+    await refreshTeam();
+  } catch (error) {
+    showError(errorBox, error);
+  } finally {
+    setBusy(submit, false);
+  }
 }
 
 /** The details a contract prints, kept in app_settings so they follow the owner between devices. */
@@ -2259,6 +2334,19 @@ function bindEvents() {
   });
   $("#requisitesForm")?.addEventListener("submit", (event) => {
     submitRequisites(event).catch((error) => toast(error.message, "error"));
+  });
+  $("#inviteForm")?.addEventListener("submit", (event) => {
+    submitInvite(event).catch((error) => toast(error.message, "error"));
+  });
+  $("#inviteList")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-revoke-invite]");
+    if (!button) return;
+    unwrap(api.team.revokeInvite(button.dataset.revokeInvite))
+      .then(() => {
+        toast("Приглашение отозвано");
+        return refreshTeam();
+      })
+      .catch((error) => toast(error.message, "error"));
   });
   $("#createBackup").addEventListener("click", createBackup);
   $("#interfaceLanguage").addEventListener("change", changeInterfaceLanguage);
