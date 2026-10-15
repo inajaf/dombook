@@ -3,14 +3,15 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="color-scheme" content="light">
+  <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#18241e">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'">
   <title>RentKeeper</title>
   <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
   <link rel="manifest" href="./manifest.webmanifest">
-  <link rel="stylesheet" href="./styles.css?v=20261015-13">
+  <script src="./js/theme-boot.js?v=20261015-14"></script>
+  <link rel="stylesheet" href="./styles.css?v=20261015-14">
 </head>
 <body>
   <a class="skip-link" href="#main-content">Перейти к содержимому</a>
@@ -143,6 +144,10 @@
         </button>
       </nav>
       <div class="local-status"><span class="status-dot"></span><span>Локальная база</span></div>
+      <button class="theme-toggle" type="button" id="themeToggle" aria-label="Тема оформления">
+        <span class="theme-toggle-icon" id="themeToggleIcon" aria-hidden="true"></span>
+        <span class="theme-toggle-label" id="themeToggleLabel">Светлая</span>
+      </button>
       <div class="cloud-status" id="cloudStatus" hidden>
         <div class="cloud-account" id="cloudAccount"></div>
         <button class="logout-button" type="button" id="logoutButton">Выйти</button>
@@ -285,6 +290,14 @@
                     <option value="en">English</option>
                   </select>
                   <small>Язык меняется сразу и сохраняется для следующего запуска.</small>
+                </label>
+                <label class="field" for="themeSelect"><span>Тема оформления</span>
+                  <select id="themeSelect">
+                    <option value="auto">Как в системе</option>
+                    <option value="light">Светлая</option>
+                    <option value="dark">Тёмная</option>
+                  </select>
+                  <small>Тёмная тема для работы вечером. Действует на этом устройстве.</small>
                 </label>
                 <label class="field" for="textScale"><span>Размер текста</span>
                   <select id="textScale">
@@ -674,6 +687,6 @@
   <script src="./i18n/az.js"></script>
   <script src="./i18n/en.js"></script>
   <script src="./i18n/i18n.js"></script>
-  <script src="./app.js?v=20261015-13"></script>
+  <script src="./app.js?v=20261015-14"></script>
 </body>
 </html>

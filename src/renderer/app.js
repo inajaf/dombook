@@ -83,6 +83,47 @@ const interfaceLanguage = () => window.i18n?.language || "ru";
  * display does not, and neither should sync the other's preference. That is why it lives in
  * localStorage and not in app_settings, which the server replicates.
  */
+/**
+ * The theme switch.
+ *
+ * The choice is light/dark/auto; the DOCUMENT always carries a resolved light or dark, because the
+ * stylesheet has one dark block and a media-query copy would be a second palette to keep in step.
+ * The pre-paint bootstrap in js/theme-boot.js owns reading and applying it; this only drives the
+ * two controls and keeps them agreeing with each other.
+ *
+ * Like the text size, and for the same reason: it is a device preference, not account data.
+ * `app_settings` replicates, so syncing a theme would let one device repaint another.
+ */
+const THEME_NAMES = { auto: "Как в системе", light: "Светлая", dark: "Тёмная" };
+
+function themeChoice() {
+  return window.RentKeeperTheme?.read() || "auto";
+}
+
+/** The glyph shows what a click will SWITCH TO, which is what a toggle is for. */
+function themeIcon(resolved) {
+  return resolved === "dark"
+    ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2.2M12 19.2v2.2M4.2 12H2M22 12h-2.2M6.3 6.3 4.8 4.8M19.2 19.2l-1.5-1.5M17.7 6.3l1.5-1.5M4.8 19.2l1.5-1.5"/></svg>'
+    : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 14.6A8.6 8.6 0 1 1 9.4 3.5a6.9 6.9 0 0 0 11.1 11.1Z"/></svg>';
+}
+
+function applyTheme(choice) {
+  const resolved = window.RentKeeperTheme?.apply(choice) || "light";
+  const label = $("#themeToggleLabel");
+  const icon = $("#themeToggleIcon");
+  const select = $("#themeSelect");
+  if (label) label.textContent = THEME_NAMES[resolved];
+  if (icon) icon.innerHTML = themeIcon(resolved);
+  // The select shows the CHOICE, including "auto", while the button shows what is on screen.
+  if (select && select.value !== choice) select.value = choice;
+  const toggle = $("#themeToggle");
+  if (toggle) {
+    toggle.setAttribute("aria-label", `Тема: ${THEME_NAMES[resolved]}. Переключить`);
+    toggle.dataset.resolved = resolved;
+  }
+  return resolved;
+}
+
 const TEXT_SCALES = { normal: 1, large: 1.12, xlarge: 1.28 };
 const TEXT_SCALE_KEY = "rentkeeper.interface-scale";
 
@@ -2350,6 +2391,16 @@ function bindEvents() {
   });
   $("#createBackup").addEventListener("click", createBackup);
   $("#interfaceLanguage").addEventListener("change", changeInterfaceLanguage);
+  $("#themeToggle")?.addEventListener("click", () => {
+    // A toggle moves between the two STATES, and lands on an explicit choice: "auto" is offered in
+    // Settings, where it can be labelled, rather than being a third stop on a two-state control.
+    applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+  });
+  $("#themeSelect")?.addEventListener("change", (event) => applyTheme(event.target.value));
+  // A system change must move the window while "auto" is chosen — that is the whole promise of it.
+  window.matchMedia?.("(prefers-color-scheme: dark)")?.addEventListener?.("change", () => {
+    if (themeChoice() === "auto") applyTheme("auto");
+  });
   $("#textScale")?.addEventListener("change", (event) => {
     event.currentTarget.value = applyTextScale(event.currentTarget.value);
   });
@@ -2613,6 +2664,9 @@ async function boot() {
   bindAuthEvents();
   // Before anything renders, so the login screen is already at the reader's chosen size.
   applyTextScale(textScaleName());
+  // theme-boot.js already put the right palette on the document; this only syncs the two controls
+  // to it, so the button does not claim "Светлая" over a dark window.
+  applyTheme(themeChoice());
   // The controls that reflect a device preference are synced here rather than only in
   // renderSettings(), which runs when the settings PAGE is opened. Otherwise the panel is stale
   // until it has been visited once — the preference is in force while the control denies it.
