@@ -25,7 +25,10 @@
     "build:win": "electron-builder --win --x64 --publish never",
     "build:linux": "electron-builder --linux --x64 --publish never",
     "build:web": "node scripts/build-web.cjs",
-    "check:web": "node scripts/build-web.cjs && node scripts/check-web.mjs"
+    "check:web": "node scripts/build-web.cjs && node scripts/check-web.mjs",
+    "postinstall": "bash scripts/install-hooks.sh || true",
+    "verify": "bash scripts/verify-branch.sh",
+    "merge:verified": "bash scripts/merge-verified.sh"
   },
   "dependencies": {
     "sql.js": "1.14.1"

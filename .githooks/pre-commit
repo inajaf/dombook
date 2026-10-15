@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# A commit on main is refused.
+#
+# This is not policy for its own sake. Committing to main happened twice in this repository — once
+# by a person, once by an agent that had just finished a merge and did not check which branch it
+# was standing on — and both times the work had to be moved to a branch afterwards, with a reset
+# in between that could have taken uncommitted changes with it. A rule that lives in a document is
+# a rule somebody has to remember; a rule that lives here is one the repository enforces.
+#
+# Work on a branch and open a pull request. If a commit on main is genuinely what you need, the
+# override says so out loud, which is the point:
+#
+#   RENTKEEPER_ALLOW_MAIN_COMMIT=1 git commit ...
+set -u
+
+branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || echo "")"
+
+# Detached HEAD is how a verifier checks out a commit; it is not a person working on main.
+if [ -z "$branch" ]; then
+  exit 0
+fi
+
+if [ "$branch" != "main" ] && [ "$branch" != "master" ]; then
+  exit 0
+fi
+
+if [ "${RENTKEEPER_ALLOW_MAIN_COMMIT:-}" = "1" ]; then
+  echo "pre-commit: коммит в ${branch} разрешён через RENTKEEPER_ALLOW_MAIN_COMMIT" >&2
+  exit 0
+fi
+
+cat >&2 <<'MESSAGE'
+pre-commit: коммит в main запрещён.
+
+  Работа идёт в ветке, затем в pull request — так у неё есть независимый аудит
+  (Verifier Swarm) до слияния, и так main остаётся состоянием, которое кто-то
+  проверил, а не тем, что кто-то набрал.
+
+  Создайте ветку:      git switch -c feature/<короткое-имя>
+  Осознанное исключение: RENTKEEPER_ALLOW_MAIN_COMMIT=1 git commit ...
+MESSAGE
+exit 1
