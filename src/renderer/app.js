@@ -2431,6 +2431,7 @@ async function submitLoginCode() {
   try {
     const result = await unwrap(api.auth.verify(state.loginEmail, code));
     applySession(result);
+    reportAccountSwitch(result);
     // SessionView carries the account's plan, so an account that is already paid skips the
     // picker instead of being asked on every sign-in. A free account still sees it.
     if (result?.plan && result.plan !== "free") await enterAppAfterLogin();
@@ -2470,6 +2471,20 @@ async function submitPlanSelection() {
 async function enterAppAfterLogin() {
   hideLogin();
   await enterApp();
+}
+
+/**
+ * Say so when signing in removed another account's local data.
+ *
+ * The switch is correct — a device's local database holds one account — but it is also the only
+ * moment in the product where a sign-in can lose work, so it is never silent.
+ */
+function reportAccountSwitch(session) {
+  if (!session?.accountSwitched) return;
+  toast(
+    "Вы вошли в другой аккаунт. Данные предыдущего аккаунта удалены с этого устройства — они остались на сервере.",
+    "error",
+  );
 }
 
 function bindAuthEvents() {
