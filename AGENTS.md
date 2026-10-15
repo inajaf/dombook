@@ -341,7 +341,7 @@ candidate for any e2e failure in this project.
 
 ## Visual defects found by looking at the app
 
-Two layout faults that no assertion would have caught, both found by reading screenshots:
+Layout faults that no assertion would have caught, all found by reading screenshots:
 
 - **`.empty-state { display: grid }` beat the `hidden` attribute.** A UA `[hidden]` rule has no
   specificity over a class, so four elements stayed on screen while the renderer believed they
@@ -353,9 +353,76 @@ Two layout faults that no assertion would have caught, both found by reading scr
   container collapsed the day columns below their minimum and clipped the last one mid-header,
   with no way to reach it. The grid now sizes from `--calendar-days`, which the renderer sets,
   so it overflows into the scroll container instead. 15 header cells, all reachable.
+- **Two CSS custom properties were used but never defined.** `--border` (conflict and rental
+  cards) and `--text` (`.empty-state strong`). A custom property that does not exist makes the
+  whole declaration invalid at computed-value time, so `border: 1px solid var(--border)` silently
+  removed the border and every contract floated on the background as a loose white rectangle.
+  Both now use `--line`/`--ink`. **Grep for this class of bug** — the one-liner is below.
+- **`.empty-state` was declared twice**, and the second copy silently won the shared properties:
+  a 56px empty state was rendering at 44px. Merged into one block.
+- **An entrance animation can hide the content it was meant to decorate.**
+  `.topbar.is-changing h1 { animation: … both }` holds the element at `opacity: 0` for the whole
+  delay, and a renderer that never composites — an occluded or throttled window — leaves the page
+  title and the primary button invisible. The class is now removed on `animationend` (with a
+  timer fallback), so the resting state is the visible one. A new `fill-mode: both` entrance
+  needs the same treatment.
+- **The booking form numbered its sections in the markup.** The food section is hidden for a
+  place with no kitchen, so the owner read "1 Дом и даты, 2 Гость, **4** Деньги и статус" and
+  had to work out that nothing was missing. The number is a position and is now computed from
+  the visible sections (`renumberReservationSections`).
 
-Vision is worth running over the main screens after UI work; both of these were invisible to
-92 passing checks. (The suite is 93 now; both of these were found at the 92-check revision.)
+### Readability is measured, not asserted
+
+The pass for older users started from numbers rather than opinions, and the numbers are now a
+suite: **`scripts/e2e-interface.mjs`** (run by `e2e-all.sh` after `branding`). It measures the
+rendered page — text sizes, contrast against the *effective* background (walking up through
+translucent layers), and control sizes — across all seven pages plus the booking dialog. The
+baseline it was written against, and what it reads now:
+
+| | before | after |
+|---|---|---|
+| visible text below 12px | 198 of 502 nodes (39%) | 0 |
+| contrast failures | 9 | 0 |
+| controls under 24px | 5 | 0 |
+
+- **`--text-scale` is the whole type system.** Every size in `styles.css` is a `calc()` on it and
+  nothing is set in raw px below `--text-xs`. The Settings "Размер текста" control changes that
+  one value, and it lives in **localStorage, not `app_settings`**: screen size belongs to the
+  device, and the server replicates `app_settings`, so syncing it would let one device enlarge
+  another's interface.
+- **`<small>` needs its size named.** The UA sheet renders it at `smaller` (~0.83em), which put
+  every un-styled hint at 11.7px. One `small { font-size: var(--text-sm) }` covers the class.
+- **A control wrapped in its own `<label>` is hit through the label.** A 20px checkbox in a 44px
+  row is a 44px target; the suite measures the label, and a fix should too.
+- **The Electron window reports `document.visibilityState === "hidden"` when occluded**, so a
+  screenshot or measurement harness must neutralise animation first — otherwise every
+  `animation-fill-mode: both` element is rasterised in its FROM state and the capture shows a
+  blank title. A capture artefact, not what a user with a visible window sees.
+
+### Finding dead CSS tokens
+
+```bash
+grep -o "var(--[a-z0-9-]*" src/renderer/styles.css | sort -u | sed 's/var(//' > /tmp/used
+grep -o "^\s*--[a-z0-9-]*:" src/renderer/styles.css | tr -d ' :' | sort -u > /tmp/def
+comm -23 /tmp/used /tmp/def   # used but never defined
+```
+
+### The sidebar has two named groups
+
+Pages are ordered by how often they are opened, not by category: **Работа** (Сегодня, Календарь,
+Бронирования, **Аренда**, Объекты) then **Система** (Конфликты, Настройки). Long-term rent used
+to sit in the bottom group beside Settings, which made a second revenue line with its own
+contracts read as an afterthought. The placement is pinned by `e2e-interface.mjs`, so moving
+"Аренда" back down fails the suite.
+
+### Every label in the markup must exist in three languages
+
+The Russian source string IS the translation key, so a string with no entry does not fail — it
+silently stays Russian. `tests/i18n.test.cjs` extracts the text nodes and `placeholder` /
+`aria-label` / `title` attributes from `index.html` and asserts az and en cover them. Scope is
+the static markup only: `app.js` builds text at runtime from Russian literals, and guessing which
+of those is user-facing would be a guess, not a test. The suite found twelve strings that had
+never been translated, including every `<option>` label in the currency picker.
 
 ### How to actually look at the app
 

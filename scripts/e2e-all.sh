@@ -42,6 +42,7 @@ run() {
 run "scenarios" scripts/e2e-scenarios.mjs
 run "booking"   scripts/e2e-booking.mjs
 run "branding"  scripts/e2e-branding.mjs
+run "interface" scripts/e2e-interface.mjs
 run "operations" scripts/e2e-operations.mjs
 run "security"  scripts/e2e-security.mjs
 run "sync"      scripts/e2e-sync.mjs
