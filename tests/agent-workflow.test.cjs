@@ -150,13 +150,26 @@ test("расхождение между GitHub и origin слияние оста
   assert.equal(result.calls, "", "gh pr merge не должен вызываться");
 });
 
-test("пройденный вердикт для этого же коммита слияние разрешает", (t) => {
+test("быстрый вердикт без e2e слияние не разрешает", (t) => {
+  // A quick verdict runs the unit suites and skips the end-to-end ones: it says nothing about the
+  // product having been RUN, which is the first of the four conditions.
+  const sha = "a".repeat(40);
+  const result = runMergeGate(t, {
+    sha,
+    verdict: { sha, branch: "feature/x", status: "passed", exit: 0, mode: "quick", unitTestsPassed: "192", e2eSuitesPassed: "0" },
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /быстрый/);
+  assert.equal(result.calls, "", "gh pr merge не должен вызываться");
+});
+
+test("пройденный полный вердикт для этого же коммита слияние разрешает", (t) => {
   const sha = "d".repeat(40);
   const result = runMergeGate(t, {
     sha,
-    verdict: { sha, branch: "feature/x", status: "passed", exit: 0, unitTestsPassed: "185", e2eSuitesPassed: "10" },
+    verdict: { sha, branch: "feature/x", status: "passed", exit: 0, mode: "full", unitTestsPassed: "192", e2eSuitesPassed: "10" },
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /185/);
+  assert.match(result.stdout, /192/);
   assert.match(result.calls, /pr merge 7/);
 });

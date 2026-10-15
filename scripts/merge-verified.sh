@@ -75,7 +75,7 @@ MESSAGE
 fi
 
 python3 - "$VERDICT" "$SHA" <<'PY'
-import json, sys
+import json, os, sys
 verdict, want = sys.argv[1], sys.argv[2]
 data = json.load(open(verdict, encoding="utf-8"))
 if data.get("sha") != want:
@@ -85,6 +85,15 @@ if data.get("sha") != want:
     sys.exit(1)
 if data.get("status") != "passed":
     print(f"merge-verified: вердикт для {want[:7]} — {data.get('status')}. Слияние запрещено.", file=sys.stderr)
+    sys.exit(1)
+# A quick verdict runs the unit suites and skips the end-to-end ones — it says nothing about the
+# product having been RUN, which is the first of the four conditions. It is accepted only when
+# somebody says out loud that this change cannot affect behaviour.
+if data.get("mode") != "full" and os.environ.get("RENTKEEPER_ALLOW_QUICK_VERDICT") != "1":
+    print(f"merge-verified: вердикт для {want[:7]} — быстрый, без e2e-сьютов.", file=sys.stderr)
+    print("  Приложение не запускалось, значит о поведении он не говорит ничего. Прогоните полный:", file=sys.stderr)
+    print(f"  scripts/verify-branch.sh {want}", file=sys.stderr)
+    print("  Если изменение заведомо не влияет на поведение: RENTKEEPER_ALLOW_QUICK_VERDICT=1", file=sys.stderr)
     sys.exit(1)
 print(f"merge-verified: вердикт для {want[:7]} пройден "
       f"({data.get('unitTestsPassed','?')} модульных тестов, {data.get('e2eSuitesPassed','?')} e2e-сьютов)")
