@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>RentKeeper — учёт броней и долгосрочной аренды</title>
+<meta name="description" content="RentKeeper — настольное приложение для гостевых домов и апартаментов: календарь занятости, гибкие цены, договоры и счета в PDF, синхронизация между устройствами. Для macOS и Windows." />
+<meta name="color-scheme" content="dark light" />
+<meta property="og:title" content="RentKeeper — учёт броней и долгосрочной аренды" />
+<meta property="og:description" content="Календарь занятости, гибкие цены, договоры в PDF. Для macOS и Windows." />
+<meta property="og:type" content="website" />
+<link rel="stylesheet" href="./styles.css" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%232f8f68'/><path d='M28 62V38l22-14 22 14v24' stroke='%23eafff5' stroke-width='9' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>" />
+</head>
+<body>
+
+<!-- On a phone the answer is one sentence, not a broken layout. The application is desktop
+     software: the calendar, the documents and the price editor are built for a window with room
+     for them, and a phone-shaped version of this page would promise an app that does not exist. -->
+<div class="mobile-gate" role="alert">
+  <div class="mobile-gate__card">
+    <span class="mobile-gate__mark" aria-hidden="true">
+      <svg viewBox="0 0 100 100" width="56" height="56"><rect width="100" height="100" rx="22" fill="var(--accent)"/><path d="M28 62V38l22-14 22 14v24" stroke="#eafff5" stroke-width="9" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </span>
+    <h1>RentKeeper — для компьютера</h1>
+    <p>Приложение работает на <strong>macOS</strong> и <strong>Windows</strong>. Мобильной версии пока нет: календарь занятости, редактор цен и договоры рассчитаны на большой экран, и обещать телефон, которого нет, мы не будем.</p>
+    <p class="mobile-gate__hint">Откройте эту страницу на компьютере, чтобы скачать.</p>
+  </div>
+</div>
+
+<div class="page">
+  <header class="nav" id="nav">
+    <a class="nav__brand" href="#top">
+      <span class="nav__mark" aria-hidden="true">
+        <svg viewBox="0 0 100 100" width="30" height="30"><rect width="100" height="100" rx="22" fill="var(--accent)"/><path d="M28 62V38l22-14 22 14v24" stroke="#eafff5" stroke-width="9" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </span>
+      <span class="nav__name">RentKeeper</span>
+    </a>
+    <nav class="nav__links" aria-label="Разделы">
+      <a href="#features">Возможности</a>
+      <a href="#calendar">Календарь</a>
+      <a href="#pricing">Цены</a>
+      <a href="#documents">Документы</a>
+      <a href="#download">Скачать</a>
+    </nav>
+    <a class="button button--small" href="#download">Скачать</a>
+  </header>
+
+  <main id="top">
+
+    <!-- Hero -->
+    <section class="hero">
+      <div class="hero__glow" aria-hidden="true"></div>
+      <div class="hero__inner">
+        <p class="eyebrow reveal">Для гостевых домов и апартаментов</p>
+        <h1 class="hero__title reveal">
+          Брони, аренда и деньги<br />
+          <span class="hero__title-accent">в одном спокойном месте</span>
+        </h1>
+        <p class="hero__lede reveal">
+          RentKeeper показывает, какие ночи заняты и кем, считает цену по сезонам и скидкам,
+          готовит договор и счёт в PDF — и работает без интернета, синхронизируясь, когда он есть.
+        </p>
+        <div class="hero__actions reveal">
+          <a class="button button--primary" href="#download" data-cta="hero">
+            <span>Скачать для macOS</span>
+          </a>
+          <a class="button" href="#download" data-cta="hero-windows">Windows</a>
+        </div>
+        <p class="hero__note reveal">Бесплатно для одного дома. Без подписки на старте.</p>
+      </div>
+
+      <div class="hero__shot reveal" data-parallax="0.06">
+        <div class="window">
+          <div class="window__bar" aria-hidden="true">
+            <span class="window__dot"></span><span class="window__dot"></span><span class="window__dot"></span>
+            <span class="window__title">RentKeeper — Календарь</span>
+          </div>
+          <img src="./assets/calendar-dark.png" alt="Календарь занятости: полосы броней по дням, сводка по периоду и подсказка о свободных ночах" width="1500" height="1000" />
+        </div>
+      </div>
+    </section>
+
+    <!-- Numbers -->
+    <section class="strip reveal" aria-label="Коротко о продукте">
+      <div class="strip__item"><strong>7</strong><span>экранов вместо таблиц</span></div>
+      <div class="strip__item"><strong>3</strong><span>языка интерфейса</span></div>
+      <div class="strip__item"><strong>∞</strong><span>домов на платном тарифе</span></div>
+      <div class="strip__item"><strong>0 ₽</strong><span>за первый дом</span></div>
+    </section>
+
+    <!-- Features -->
+    <section class="section" id="features">
+      <header class="section__head reveal">
+        <p class="eyebrow">Возможности</p>
+        <h2>Всё, что нужно, чтобы вести дом</h2>
+        <p class="section__lede">Не «ещё одна CRM», а рабочий инструмент владельца: открыть утром, увидеть день, закрыть.</p>
+      </header>
+      <div class="grid grid--3">
+        <article class="card reveal">
+          <div class="card__icon" aria-hidden="true">◷</div>
+          <h3>Календарь занятости</h3>
+          <p>Полоса — одна бронь, а не четырнадцать отметок. Сводка по периоду: загрузка, заезды, выезды и сколько ещё не доплачено.</p>
+        </article>
+        <article class="card reveal">
+          <div class="card__icon" aria-hidden="true">◈</div>
+          <h3>Гибкие цены</h3>
+          <p>Сезоны, скидки за длительность, месячные ставки для аренды. Цена пересчитывается на глазах, с расшифровкой каждой строки.</p>
+        </article>
+        <article class="card reveal">
+          <div class="card__icon" aria-hidden="true">✎</div>
+          <h3>Договор и счёт</h3>
+          <p>PDF с реквизитами, сроком, суммой и подписями. Цифры берутся из сохранённой брони, а не из сегодняшних цен.</p>
+        </article>
+        <article class="card reveal">
+          <div class="card__icon" aria-hidden="true">⇄</div>
+          <h3>Синхронизация</h3>
+          <p>Работает офлайн и догоняет сервер, когда появится сеть. Конфликты не замалчиваются — показываются списком с решением.</p>
+        </article>
+        <article class="card reveal">
+          <div class="card__icon" aria-hidden="true">◐</div>
+          <h3>Тёмная тема</h3>
+          <p>Светлая и тёмная, плюс размер текста. Контраст измеряется на каждом экране, а не подбирается на глаз.</p>
+        </article>
+        <article class="card reveal">
+          <div class="card__icon" aria-hidden="true">⌂</div>
+          <h3>Долгосрочная аренда</h3>
+          <p>Договоры на месяцы рядом с посуточными бронями, в одном календаре. Месяц считается месяцами, а не ночами.</p>
+        </article>
+      </div>
+    </section>
+
+    <!-- Calendar -->
+    <section class="section section--split" id="calendar">
+      <div class="section__copy reveal">
+        <p class="eyebrow">Календарь</p>
+        <h2>Понять день за секунду</h2>
+        <p>Сетка отвечает на вопрос «какие ночи заняты». На два других — «насколько мы полны» и «когда можно заехать» — отвечает то, что рядом: сводка периода и подсказка о ближайшем свободном окне у каждого дома.</p>
+        <ul class="ticks">
+          <li>Одна полоса на бронь — видно, где заезд и где выезд</li>
+          <li>Загрузка, заезды, выезды и остаток к оплате за период</li>
+          <li>Свободное окно каждого дома: «свободно 4 ночи с 28 окт»</li>
+          <li>Стрелки листают период, «Сегодня» возвращает</li>
+        </ul>
+      </div>
+      <div class="section__shot reveal">
+        <img src="./assets/calendar-light.png" alt="Календарь объектов в светлой теме" width="1500" height="1000" loading="lazy" />
+      </div>
+    </section>
+
+    <!-- Pricing -->
+    <section class="section section--split section--reverse" id="pricing">
+      <div class="section__copy reveal">
+        <p class="eyebrow">Цены</p>
+        <h2>Сезон, скидка, договорная сумма</h2>
+        <p>Правило задаётся один раз: «Новый год — 480 вместо 300», «от 7 ночей — 10%». В диалоге брони видно, из чего сложилась сумма, а если вы назвали цену сами — она сохранится как договорная, с пометкой, что это согласованная цифра.</p>
+        <ul class="ticks">
+          <li>Сезоны — диапазоны ночей, а не дней</li>
+          <li>Скидки не складываются: побеждает больший порог</li>
+          <li>Округление — половина вверх на целых копейках</li>
+          <li>Ранний выезд пересчитывается по тем же правилам</li>
+        </ul>
+      </div>
+      <div class="section__shot reveal">
+        <img src="./assets/rates.png" alt="Редактор цен дома: базовая ставка, месячная ставка, сезоны и скидки" width="1500" height="1000" loading="lazy" />
+      </div>
+    </section>
+
+    <!-- Documents -->
+    <section class="section section--split" id="documents">
+      <div class="section__copy reveal">
+        <p class="eyebrow">Документы</p>
+        <h2>Договор и счёт — файлами</h2>
+        <p>Договор найма для длительной аренды и счёт для любой брони. Настоящие PDF: их можно распечатать, отправить гостю или приложить к отчётности. Номер документа выводится из даты и брони, поэтому не меняется при повторной генерации и не расходится между устройствами.</p>
+        <ul class="ticks">
+          <li>Суммы — из сохранённой брони, не из текущих цен</li>
+          <li>Скидка и сезонные строки печатаются отдельно</li>
+          <li>Реквизиты заполняются один раз в настройках</li>
+          <li>Подписи сторон и расшифровка — в договоре</li>
+        </ul>
+      </div>
+      <div class="section__shot reveal">
+        <img src="./assets/documents.png" alt="Диалог документов брони со списком сгенерированных файлов" width="1500" height="1000" loading="lazy" />
+      </div>
+    </section>
+
+    <!-- Download -->
+    <section class="section download" id="download">
+      <header class="section__head reveal">
+        <p class="eyebrow">Скачать</p>
+        <h2>RentKeeper для компьютера</h2>
+        <p class="section__lede">Версия <span data-version>0.2.0</span>. Установщик скачивается из релизов на GitHub — там же история версий.</p>
+      </header>
+
+      <div class="download__grid">
+        <a class="download__card reveal" href="https://github.com/inajaf/dombook/releases/latest" data-cta="mac">
+          <span class="download__os" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="34" height="34" fill="currentColor"><path d="M16.4 12.7c0-2.4 2-3.6 2.1-3.6-1.1-1.7-2.9-1.9-3.6-1.9-1.5-.2-3 .9-3.7.9s-1.9-.9-3.2-.8c-1.6 0-3.1 1-4 2.4-1.7 3-.4 7.4 1.2 9.8.8 1.2 1.8 2.5 3 2.4 1.2 0 1.7-.8 3.1-.8s1.9.8 3.2.8 2.2-1.2 3-2.4c.9-1.4 1.3-2.7 1.3-2.8-.1 0-2.4-1-2.4-3.9zM14 4.9c.7-.8 1.1-2 1-3.2-1 0-2.2.7-2.9 1.5-.6.7-1.2 1.9-1 3.1 1.1.1 2.2-.6 2.9-1.4z"/></svg>
+          </span>
+          <span class="download__body">
+            <strong>macOS</strong>
+            <small>Установщик .dmg · Apple Silicon и Intel</small>
+          </span>
+          <span class="download__arrow" aria-hidden="true">→</span>
+        </a>
+
+        <a class="download__card reveal" href="https://github.com/inajaf/dombook/releases/latest" data-cta="win">
+          <span class="download__os" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="34" height="34" fill="currentColor"><path d="M3 5.6l7.4-1v7.1H3V5.6zm8.6-1.2L21 3v8.7h-9.4V4.4zM3 12.9h7.4V20L3 18.9v-6zm8.6 0H21V21l-9.4-1.3v-6.8z"/></svg>
+          </span>
+          <span class="download__body">
+            <strong>Windows</strong>
+            <small>Установщик .exe · Windows 10 и 11</small>
+          </span>
+          <span class="download__arrow" aria-hidden="true">→</span>
+        </a>
+      </div>
+
+      <div class="download__notes reveal">
+        <p><strong>Мобильной версии нет.</strong> Приложение — настольное: календарь, редактор цен и договоры рассчитаны на большой экран. Мы не показываем кнопку «для телефона», пока за ней нечего положить.</p>
+        <p><strong>Linux собирается</strong>, но не входит в список поддерживаемых: сборка есть в релизах, гарантий по ней нет.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="footer__inner">
+      <div class="footer__brand">
+        <span class="nav__mark" aria-hidden="true">
+          <svg viewBox="0 0 100 100" width="24" height="24"><rect width="100" height="100" rx="22" fill="var(--accent)"/><path d="M28 62V38l22-14 22 14v24" stroke="#eafff5" stroke-width="9" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </span>
+        <span>RentKeeper</span>
+      </div>
+      <p class="footer__note">Учёт броней и долгосрочной аренды для гостевых домов и апартаментов.</p>
+      <nav class="footer__links" aria-label="Ссылки">
+        <a href="https://github.com/inajaf/dombook/releases">Релизы</a>
+        <a href="https://github.com/inajaf/dombook">Исходный код</a>
+      </nav>
+    </div>
+  </footer>
+</div>
+
+<!-- A CLASSIC script, deliberately.
+     As a module this file would not load at all when the page is opened from disk: module scripts
+     are fetched with CORS, and a `file://` origin is opaque, so the browser refuses. Electron
+     allows it (the application relies on that), a plain browser does not — and a product page that
+     is blank for anyone who opens the downloaded file is a page that fails before it is hosted.
+     Nothing here needs imports, so nothing here needs to be a module. -->
+<script src="./main.js" defer></script>
+</body>
+</html>

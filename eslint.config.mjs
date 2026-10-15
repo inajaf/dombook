@@ -86,10 +86,12 @@ export default defineConfig([
     rules: correctness,
   },
   {
-    // The marketing site is plain browser code, and it is the one place a stray global is easy.
+    // The marketing site is a CLASSIC script on purpose: as a module it would not load from
+    // `file://` at all — module scripts are fetched with CORS and a file origin is opaque — so the
+    // page would be blank for anyone who opened the downloaded file. Nothing there needs imports.
     files: ["website/**/*.js"],
-    languageOptions: { ecmaVersion: 2023, sourceType: "module", globals: { ...globals.browser } },
-    rules: correctness,
+    languageOptions: { ecmaVersion: 2023, sourceType: "script", globals: { ...globals.browser } },
+    rules: { ...correctness, "no-implicit-globals": "error" },
   },
   // Build output and vendored code are not ours to lint.
   { ignores: ["release/**", "node_modules/**", "artifacts/**", "server/**", ".dsh-vision-toolkit/**"] },
