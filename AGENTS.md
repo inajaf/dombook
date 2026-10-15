@@ -497,6 +497,11 @@ scripts/merge-verified.sh <pr>      # refuses without a passing verdict for the 
   into `release/web` minutes earlier.
 - `tests/agent-workflow.test.cjs` runs the hook and the merge gate in a throwaway repository, so
   the guards cannot rot into decoration.
+- **`main` is protected on GitHub and the required check is the one that runs the e2e suites.**
+  Runtime verification is therefore not a thing an agent may skip: the ten suites launch the real
+  app and drive it over the DevTools Protocol in CI, and a merge into `main` cannot happen without
+  them. `enforce_admins` is on, so this binds the owner too. Reversible with
+  `gh api -X DELETE repos/inajaf/dombook/branches/main/protection`.
 
 ## The Law of Failure (and where documentation sits in it)
 
