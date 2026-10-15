@@ -45,6 +45,24 @@ if (await app.evaluate(`return !document.getElementById('loginStepPlan').hidden`
 }
 check(await app.evaluate(`return document.getElementById('loginScreen').classList.contains('is-hidden')`), "signed in");
 
+// --- The app syncs on its own after a sign-in -----------------------------
+//
+// Nothing here calls sync.now(). The screen reads the LOCAL database, so on a fresh profile an
+// owner who signs in sees an empty workspace until something fetches the server's copy — and the
+// only things that did were a 60-second timer and a button in Settings. "I logged in and all my
+// bookings are gone" is what that looks like, and it happened to the owner on this machine.
+//
+// The suite used to reach its first sync through drain(), which calls sync.now() itself, so it
+// could never have noticed.
+await wait(6000);
+const automatic = await app.evaluate(`return (await window.domBook.sync.status()).data`);
+check(automatic.lastResult !== null,
+  "the app syncs by itself after signing in, without pressing anything",
+  `last=${automatic.lastResult?.at ?? "never"}`);
+check(automatic.pending === automatic.stuck,
+  "the automatic sync drains the queue it inherited",
+  `pending=${automatic.pending} stuck=${automatic.stuck}`);
+
 /** Push until nothing retryable is left, reporting the last result. */
 async function drain(attempts = 6) {
   let last = null;
@@ -61,7 +79,13 @@ async function drain(attempts = 6) {
 }
 
 // --- The first sync: the seeded demo, which fits the free allowance ---------
-const first = await drain();
+//
+// `drain()` returns null when there is nothing left to drain, which is now the COMMON case: the
+// app syncs by itself the moment the workspace opens, so by the time this runs the seed has been
+// pushed and the queue is already empty. The evidence for "the first sync succeeded" is then the
+// recorded result rather than a new one — the assertion is unchanged, its source is not.
+const first = await drain()
+  ?? await app.evaluate(`return (await window.domBook.sync.status()).data.lastResult`);
 const firstStatus = await app.evaluate(`return (await window.domBook.sync.status()).data`);
 check(first?.ok === true, "the first sync succeeds", `error=${first?.error ?? "none"}`);
 check((first?.pushed ?? 0) > 0, "it pushes the seeded data", `pushed=${first?.pushed}`);

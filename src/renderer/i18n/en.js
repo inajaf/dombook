@@ -190,6 +190,8 @@ window.RentKeeperLocales.en = {
     "Очень крупный": "Very large",
     "Увеличивает весь текст приложения. Действует на этом устройстве.": "Enlarges all text in the app. Applies to this device.",
     "Работа": "Work",
+    "Открывать документ после создания": "Open the document after creating it",
+    "Папка документов:": "Documents folder:",
     "ИНН / VÖEN": "Tax ID (INN / VÖEN)",
     "Документы": "Documents",
     "Реквизиты для договоров и счетов": "Details printed on contracts and invoices",

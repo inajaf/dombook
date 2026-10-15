@@ -182,6 +182,8 @@ window.RentKeeperLocales.az = {
     "Очень крупный": "Çox böyük",
     "Увеличивает весь текст приложения. Действует на этом устройстве.": "Tətbiqdəki bütün mətni böyüdür. Bu cihazda qüvvədədir.",
     "Работа": "İş",
+    "Открывать документ после создания": "Sənədi yaratdıqdan sonra aç",
+    "Папка документов:": "Sənədlər qovluğu:",
     "ИНН / VÖEN": "VÖEN / İNN",
     "Документы": "Sənədlər",
     "Реквизиты для договоров и счетов": "Müqavilə və hesab-faktura üçün rekvizitlər",
