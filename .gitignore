@@ -15,3 +15,8 @@ backups/
 
 # Generated analysis output (graphify). Machine-specific absolute paths; not source.
 graphify-out/
+
+# Vision toolkit artifacts (crops, traces, diffs, screenshots) written by the DSH
+# `vision_*` tools. They land in the session workspace, so without this rule every
+# vision call shows up as untracked noise in `git status`.
+.dsh-vision-toolkit/
