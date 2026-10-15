@@ -476,7 +476,9 @@ only place that would have noticed the browser build being broken — `npm test`
   path comes from `require("electron")` rather than being assembled: a hardcoded
   `Electron.app/Contents/MacOS/Electron` failed CI on Linux with ENOENT. On Linux the check runs
   under `xvfb-run` when it is available, and otherwise reports **SKIP** and exits 0 — a check that
-  cannot run must say so, not fail the build and not claim a pass.
+  cannot run must say so, not fail the build and not claim a pass. On Linux it is also started with
+  `--no-sandbox`: the checkerout's `chrome-sandbox` is not setuid, so Electron aborts with
+  *"The SUID sandbox helper binary was found, but is not configured correctly"*.
 
 ### Finding dead CSS tokens
 

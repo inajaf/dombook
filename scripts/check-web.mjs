@@ -84,8 +84,13 @@ app.whenReady().then(async () => {
 });
 `);
 
+// Chromium's SUID sandbox helper is owned by the checkout on a CI runner and not setuid, so
+// Electron aborts with "The SUID sandbox helper binary was found, but is not configured
+// correctly". The page under test is a local file served from 127.0.0.1 by this process, so the
+// flag is passed on Linux only — macOS is left exactly as it is.
+const flags = process.platform === "linux" ? ["--no-sandbox"] : [];
 const command = hasXvfb ? "xvfb-run" : ELECTRON;
-const args = hasXvfb ? ["-a", ELECTRON, driver] : [driver];
+const args = hasXvfb ? ["-a", ELECTRON, ...flags, driver] : [...flags, driver];
 const child = spawn(command, args, { env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined } });
 let output = "";
 child.stdout.on("data", (chunk) => { output += chunk; });
