@@ -271,14 +271,18 @@ to use.
 
 ## End-to-end suites (real app, real database)
 
-`scripts/e2e-all.sh` brings up the stack and drives the actual Electron app over CDP — 93
-checks across six suites. These exist because every serious bug in this project was invisible
-to both unit suites:
+`scripts/e2e-all.sh` brings up the stack and drives the actual Electron app over CDP. These exist
+because every serious bug in this project was invisible to both unit suites:
 
 - **`e2e-scenarios.mjs`** — signup, the plan step, a guest house and a unit.
 - **`e2e-booking.mjs`** — a stay through the dialog, its nights on the calendar, overlap
   refused, back-to-back allowed, capacity enforced.
 - **`e2e-branding.mjs`** — the product name as rendered, in three locales and both windows.
+- **`e2e-interface.mjs`** — the sidebar's grouping, and the readability floor measured on the
+  rendered page (text sizes, contrast, control sizes) across every screen.
+- **`e2e-pricing.mjs`** — a season and a discount reaching the dialog, the amount and its
+  breakdown being stored, a negotiated amount overriding the calculation, and the unit dialog
+  keeping the values it does not show.
 - **`e2e-operations.mjs`** — check-in, early checkout, cancel, delete, archive/restore, backup.
 - **`e2e-security.mjs`** — two tenants; neither can read, write or book into the other's data,
   and the signed-out bridge refuses everything.
@@ -466,6 +470,59 @@ reintroduce a way for the two modes to disagree.
 - Tenancies are exempt from the advance window and bounded by `maximumTenancyMonths` instead.
 - `MaxNightCount` (1096) must stay above the longest permitted tenancy (24 months = up to 731
   days); a test compares the two.
+
+## Flexible pricing (seasons, discounts, negotiated amounts)
+
+A unit's price is no longer two constants. It is a base nightly rate, a monthly rate, and a small
+rule set stored as JSON text on the unit row (`units.rate_rules` / `properties.rate_rules`):
+
+```json
+{"seasons":[{"name":"Новый год","from":"2026-12-25","to":"2027-01-10","nightlyRateMinor":48000}],
+ "stayDiscounts":[{"minimumNights":7,"percent":10}],
+ "tenancyDiscounts":[{"minimumMonths":12,"percent":10}]}
+```
+
+- **The rules live in `src/domain/booking/pricing.cjs`, mirrored in
+  `server/internal/domain/pricing.go`, pinned by `fixtures/pricing-cases.json`.** Same rule as
+  every other domain calculation in this project — the server prices a booking too (a reservation
+  arriving over REST is recomputed from the unit), so one stack charging a season rate the other
+  does not know about is a booking repriced behind the user's back.
+- **Writing is strict, reading is forgiving.** `validateRateRules` refuses overlapping seasons,
+  because the price would then depend on the order of a list nobody can see in the editor.
+  `parseRateRules` NEVER throws: it drops what it cannot price and falls back to the base rate. A
+  unit whose rules cannot be read must still be sellable — refusing the booking would turn one
+  malformed settings row into a calendar nobody can use.
+- **A season is a range of NIGHTS.** `to` is the check-in date of its last night, so a stay that
+  checks out on the morning after `to` still paid the season rate for that night. The other
+  convention makes the owner subtract a day in their head.
+- **Discounts do not stack.** The largest threshold the booking reaches wins. Stacking produces a
+  12-month let that triples a "10% for a year" rule, and it is invisible until an invoice is wrong.
+- **Rounding is half-up on integer minor units** (`floor((amount * p100 + 5000) / 10000)`), never
+  a float percentage. Go's float64 and JavaScript's Number disagree on some .5 boundaries.
+- **The amount carries its working.** `reservations.rate_breakdown` stores the nights, the season
+  rates that applied and the discount. Recomputing it on read would explain an amount charged
+  months ago with today's prices. A negotiated amount stores `{}` — there is no working to show
+  for a figure that was agreed rather than calculated.
+- **The dialog's price is a QUOTE from the main process** (`pricing:quote`), never arithmetic in
+  the renderer. The renderer is sandboxed and cannot load the module, and a second copy in the
+  view is exactly the drift the fixtures exist to prevent. Quotes carry a request id so the slower
+  of two keystrokes cannot overwrite the newer one.
+- **A typed amount is a negotiated amount**, and it is sent only when it was typed. Sending the
+  displayed value unconditionally would make every booking negotiated and freeze it against later
+  rule changes. `submitReservation` spreads `accommodationMinor` in only while
+  `state.accommodationManual` is set.
+- **Early checkout is repriced through the same quote.** It used to charge nights x the BASE rate,
+  silently refunding a peak-week surcharge for nights the guest actually stayed; a tenancy cut
+  short was charged its monthly rate times its NIGHTS, which is a number that looks like rent and
+  is not one. It is now whole months elapsed, flooring at one month.
+- **Adding a column to the sync allowlist means adding it to the migration too.** The sync
+  sanitizer iterates `syncColumns`, so a payload key that is not listed is not rejected — it is
+  never written, silently. `rate_rules` and `rate_breakdown` are TEXT on both sides and not
+  `jsonb`, so the value round trips byte for byte; a jsonb column comes back re-serialised and the
+  client compares the pulled value against what it stored to decide whether a row changed.
+- **The REST unit endpoints do not expose the rules yet.** A unit created through them gets the
+  empty rule set, and an update leaves the stored rules alone. The desktop is a sync client, so
+  nothing in the product is affected; a future web client editing rules would need the plumbing.
 
 ## Running locally
 
