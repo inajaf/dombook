@@ -496,7 +496,20 @@ stay began and ended.
 - **The card counts the stay, not the slice of it on screen**: the nights come from the
   reservation's own dates, so a booking the window clips still reads "3 ночи" beside its real
   dates rather than the one night visible.
-- **Inside a template literal, `\n` is a newline and `\D` is `D`.** Two e2e blocks were written
+- **The header of «Сегодня» is the DATE**, not «Рабочий день»: a phrase that reads the same on
+  every day of the year tells the reader nothing, and the weekday is what decides whether today's
+  arrivals are a problem. `todayLabel()` in formatters, applied in `navigate`.
+- **The range switch is a segmented control, not a `<select>`.** Three options on a toolbar are a
+  view-density switch; a form control with a «Период» label reads as a setting somebody has to
+  open, and its value is implied by the widget rather than stated.
+- **The summary strip answers what the grid cannot.** The grid says which nights are taken;
+  "how full are we" meant counting squares. Occupancy, arrivals, departures and what is still owed
+  are computed from the SAME occupancy rows the bars are drawn from, so the numbers and the
+  picture cannot disagree.
+- **Each unit states its next free stretch** («свободно 4 ночи с 28 окт») — the question an owner
+  is asked on the phone, and the one thing a grid of crosses makes you count.
+- **Arrow keys page the calendar**, on the calendar page and only when nothing is focused.
+- Inside a template literal, `\n` is a newline and `\D` is `D`. Two e2e blocks were written
   with single backslashes and neither failed where you would look: `/\D/g` stripped the letter D
   out of "Dev-режим" so the login code never matched, and `/\n+/g` became a regex containing a
   literal newline — a syntax error that left the harness reporting "the page reloaded". It now says

@@ -109,17 +109,53 @@ check((await rangeLabel()) === before, "and «Сегодня» comes back to it"
 // the grid stayed 14 days wide for every choice, which is invisible while 14 is the default.
 for (const [value, expected] of [["21", 22], ["30", 31], ["14", 15]]) {
   await app.evaluate(`
-    const select = document.getElementById('calendarRange');
-    select.value = ${JSON.stringify(value)};
-    select.dispatchEvent(new Event('change', { bubbles: true }));
+    document.querySelector('[data-calendar-range="${value}"]').click();
     return 'ok';
   `);
   await wait(900);
   const columns = await app.evaluate(`return getComputedStyle(document.querySelector('.calendar-grid')).gridTemplateColumns.split(' ').length`);
   check(columns === expected, `choosing ${value} days redraws the grid ${expected} columns wide`, `columns=${columns}`);
+  // The switch states which option is on, rather than leaving it to a native widget's chrome.
+  const active = await app.evaluate(`return document.querySelector('.range-option.is-active')?.dataset.calendarRange`);
+  check(active === value, `and ${value} is the one shown as chosen`, `active=${active}`);
 }
 
+// --- What the window HOLDS, not just which nights are taken -----------------
+// The grid answers "which nights"; counting squares to answer "how full are we" is the work this
+// removes. Every number is derived from the same occupancy rows the bars are drawn from.
+const summary = await app.evaluate(`
+  const el = document.querySelector('.calendar-summary');
+  return el ? el.innerText.replace(/\\n+/g, ' | ') : null;
+`);
+check(Boolean(summary), "the period is summarised without counting squares", String(summary).slice(0, 80));
+check(/занято/.test(summary || ""), "the summary states how full the period is", String(summary).slice(0, 60));
+
+// The next free stretch per unit — the question an owner is asked on the phone.
+const hint = await app.evaluate(`
+  return document.querySelector('.calendar-free-hint')?.textContent.trim() || null;
+`);
+check(Boolean(hint), "each unit says when it is next free", String(hint));
+
+// --- The dashboard's header is the date -------------------------------------
+// «Рабочий день» reads the same on every day of the year and tells the reader nothing.
+const header = await app.evaluate(`
+  document.querySelector('.nav-item[data-page="dashboard"]').click();
+  await new Promise((r) => setTimeout(r, 600));
+  return { eyebrow: document.getElementById('pageEyebrow').textContent,
+    title: document.getElementById('pageTitle').textContent };
+`);
+const today = await app.evaluate(`return (await window.domBook.system.info()).data.bookingPolicy.today`);
+const expectedDay = String(Number(today.slice(8, 10)));
+check(header.eyebrow.includes(expectedDay) && header.eyebrow.includes(","),
+  "the dashboard header is today's date, not a phrase that never changes",
+  `${header.eyebrow} (today=${today})`);
+check(!/Рабочий день/i.test(header.eyebrow), "and no longer says «Рабочий день»", header.eyebrow);
+
 // --- The hover card -------------------------------------------------------
+// Back to the calendar first: the header check above navigated to the dashboard, and a card
+// measured while its page is hidden reports a zero box — which reads as "the card is broken".
+await app.evaluate(`document.querySelector('.nav-item[data-page="calendar"]').click(); return 'ok';`);
+await wait(700);
 const card = await app.evaluate(`
   const cell = document.querySelector('.calendar-night[data-calendar-reservation]');
   cell.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
@@ -127,9 +163,12 @@ const card = await app.evaluate(`
   const popover = document.getElementById('calendarPopover');
   const box = popover.getBoundingClientRect();
   return { hidden: popover.hidden, text: popover.innerText.replace(/\\n+/g, ' | '),
-    onScreen: box.left >= 0 && box.top >= 0 && box.width > 120 };
+    onScreen: box.left >= 0 && box.top >= 0 && box.width > 120,
+    box: [Math.round(box.left), Math.round(box.top), Math.round(box.width)],
+    page: document.querySelector('.page.active')?.id || null };
 `);
-check(card.hidden === false && card.onScreen, "hovering a booking shows a card on screen");
+check(card.hidden === false && card.onScreen, "hovering a booking shows a card on screen",
+  `hidden=${card.hidden} box=${JSON.stringify(card.box)} page=${card.page}`);
 check(/Короткая бронь/.test(card.text), "the card names the guest", card.text.slice(0, 60));
 check(/3 ночи/.test(card.text), "and counts the nights of the stay", card.text.slice(0, 90));
 check(/Оплата/.test(card.text), "and says what is owed", card.text.slice(0, 120));

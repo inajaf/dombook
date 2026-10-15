@@ -116,22 +116,69 @@ function popoverHtml(reservation, visible) {
     </div>`;
 }
 
+/**
+ * What the visible window holds, in the numbers a manager actually asks for.
+ *
+ * The calendar showed which nights were taken and nothing about the period as a whole, so "how
+ * full are we over these two weeks" meant counting squares. Occupancy is counted from the same
+ * occupancy rows the bars are drawn from, so the summary and the picture cannot disagree.
+ */
+function periodSummary(data) {
+  const dates = data.dates;
+  const nights = new Set(dates);
+  const taken = data.occupancy.filter((row) => nights.has(row.night_date));
+  const capacity = data.properties.length * dates.length;
+  const load = capacity ? Math.round((taken.length / capacity) * 100) : 0;
+  const first = dates[0];
+  const last = dates[dates.length - 1];
+  const reservations = (state.reservations || []).filter((item) => !["cancelled", "no_show"].includes(item.status));
+  const arrivals = reservations.filter((item) => item.check_in_date >= first && item.check_in_date <= last).length;
+  const departures = reservations.filter((item) => item.check_out_date >= first && item.check_out_date <= last).length;
+  const revenue = reservations
+    .filter((item) => item.check_in_date <= last && item.check_out_date >= first)
+    .reduce((sum, item) => sum + Math.max((item.total_minor || 0) - (item.prepaid_minor || 0), 0), 0);
+  return { taken: taken.length, capacity, load, arrivals, departures, revenue, currency: reservations[0]?.currency || "AZN" };
+}
+
+/**
+ * The next stretch of free nights on a unit, inside the window — the question an owner is asked on
+ * the phone ("when can we come?") and the one thing a grid of crosses makes you count.
+ */
+function freeWindow(data, propertyId) {
+  const taken = new Set(
+    data.occupancy.filter((row) => row.property_id === propertyId).map((row) => row.night_date),
+  );
+  let best = { start: null, nights: 0 };
+  let run = 0;
+  for (const date of data.dates) {
+    if (taken.has(date)) {
+      run = 0;
+      continue;
+    }
+    run += 1;
+    if (run > best.nights) best = { start: date, nights: run };
+  }
+  return best;
+}
+
 function navHtml(dates) {
-  const rangeOptions = CALENDAR_RANGES
-    .map((days) => `<option value="${days}" ${days === state.calendarDays ? "selected" : ""}>${days} дней</option>`)
+  // A segmented control rather than a <select>: three options on a toolbar are a view-density
+  // switch, and a form control sitting in a toolbar reads as a setting someone has to open.
+  const ranges = CALENDAR_RANGES
+    .map((days) => `<button type="button" class="range-option ${days === state.calendarDays ? "is-active" : ""}"
+        data-calendar-range="${days}" aria-pressed="${days === state.calendarDays}">${days}</button>`)
     .join("");
   return `
     <div class="calendar-nav">
       <div class="calendar-nav-group">
-        <button type="button" class="button ghost compact" data-calendar-nav="-1" aria-label="Предыдущий период">←</button>
-        <button type="button" class="button ghost compact" data-calendar-nav="today">Сегодня</button>
-        <button type="button" class="button ghost compact" data-calendar-nav="1" aria-label="Следующий период">→</button>
+        <button type="button" class="button ghost compact" data-calendar-nav="-1" aria-label="Предыдущий период" title="Предыдущий период (←)">←</button>
+        <button type="button" class="button ghost compact" data-calendar-nav="today" title="Вернуться к сегодняшнему дню">Сегодня</button>
+        <button type="button" class="button ghost compact" data-calendar-nav="1" aria-label="Следующий период" title="Следующий период (→)">→</button>
       </div>
       <span class="calendar-nav-range" data-i18n-ignore>${escapeHtml(shortDate(dates[0]))} — ${escapeHtml(shortDate(dates[dates.length - 1]))}</span>
-      <label class="calendar-nav-range-picker">
-        <span class="visually-hidden">Период</span>
-        <select id="calendarRange" aria-label="Сколько дней показывать">${rangeOptions}</select>
-      </label>
+      <div class="calendar-range" role="group" aria-label="Сколько дней показывать">
+        <span class="calendar-range-label">Дней</span>${ranges}
+      </div>
     </div>`;
 }
 
@@ -169,7 +216,7 @@ export function renderCalendar() {
           : `Создать бронь для ${property.name} с ${shortDate(date)}`;
       return `<button type="button" class="calendar-cell calendar-night ${booking ? "is-booked" : outsideBookingWindow ? "is-outside-window" : "is-free"}"
         data-place-row="${row}" data-place-column="${column + 2}"
-        data-calendar-property="${property.id}" data-calendar-date="${date}"
+        data-calendar-property="${property.id}" data-calendar-date="${date}" data-today="${date === today ? "1" : "0"}"
         ${booking ? `data-calendar-reservation="${booking.reservation_id}"` : ""}
         ${outsideBookingWindow ? "disabled" : ""}
         aria-label="${escapeHtml(label)}">${
@@ -187,18 +234,31 @@ export function renderCalendar() {
         <span class="timeline-bar-status">${escapeHtml(STATUS_LABELS[run.status] || run.status)}</span>
       </div>`).join("");
 
+    const free = freeWindow(data, property.id);
+    const freeHint = free.nights
+      ? `<small class="calendar-free-hint" data-i18n-ignore>свободно ${free.nights} ${free.nights === 1 ? "ночь" : free.nights < 5 ? "ночи" : "ночей"} с ${escapeHtml(shortDate(free.start))}</small>`
+      : `<small class="calendar-free-hint is-full" data-i18n-ignore>все ночи заняты</small>`;
     return `
     <div class="calendar-cell calendar-house" data-place-row="${row}" data-place-column="1">
       <span class="calendar-house-copy">
         <strong class="calendar-house-name" data-i18n-ignore title="${escapeHtml(property.name)}">${escapeHtml(property.name)}</strong>
         <small class="calendar-house-context" ${property.place_name || property.location ? "data-i18n-ignore" : ""} title="${escapeHtml(propertyContext)}">${escapeHtml(propertyContext)}</small>
+        ${freeHint}
       </span>
     </div>
     ${cells}${bars}`;
   }).join("");
 
+  const summary = periodSummary(data);
   container.innerHTML = `
     ${navHtml(data.dates)}
+    <div class="calendar-summary">
+      <span class="calendar-stat"><strong>${summary.load}%</strong> занято</span>
+      <span class="calendar-stat">${summary.taken} из ${summary.capacity} ночей</span>
+      <span class="calendar-stat">Заездов <strong>${summary.arrivals}</strong></span>
+      <span class="calendar-stat">Выездов <strong>${summary.departures}</strong></span>
+      ${summary.revenue > 0 ? `<span class="calendar-stat">К доплате <strong data-i18n-ignore>${escapeHtml(money(summary.revenue, summary.currency))}</strong></span>` : ""}
+    </div>
     <div class="calendar-scroll">
       <div class="calendar-grid">
         <div class="calendar-cell calendar-head calendar-house" data-place-row="1" data-place-column="1">Дом</div>
