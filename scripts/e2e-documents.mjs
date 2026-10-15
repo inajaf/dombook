@@ -161,11 +161,26 @@ check(listed.ok && listed.count === 2,
 check(listed.names.some((n) => n.startsWith("dogovor")) && listed.names.some((n) => n.startsWith("schet")),
   "the list separates the contract from the invoice", JSON.stringify(listed.names));
 
+// Handing the file to the system viewer. On a machine WITH one this must succeed; on a headless
+// CI runner there is nothing to open a PDF with, and what matters there is the other half of the
+// same contract — that the call ANSWERS. It used to hang: `shell.openPath` never settles when no
+// application claims the file type, so the IPC reply was never sent and the button waited forever
+// with no message. That is a product defect wherever it happens, and CI is where it was found.
+const started = Date.now();
 const opened = await app.evaluate(`
   const bridge = window.domBook;
   return bridge.documents.open({ filePath: ${JSON.stringify(contract.data.path)} });
 `);
-check(opened.ok === true, "a generated document can be handed to the system viewer", JSON.stringify(opened.error ?? ""));
+const elapsed = Date.now() - started;
+check(elapsed < 15000, "the open call answers instead of hanging", `${elapsed} ms`);
+check(opened.ok === true || /не открыла|no application|open/i.test(opened.error || ""),
+  "a generated document is handed to the system viewer, or the reason it was not is stated",
+  `ok=${opened.ok} ${opened.error ?? ""}`);
+// Whichever branch ran, the folder fallback is the way a user reaches the file when the viewer
+// cannot be launched — and it goes through the same deadline.
+const folder = await app.evaluate(`return window.domBook.documents.openFolder();`);
+check(folder.ok === true, "the documents folder is reachable even when no viewer claims the file",
+  JSON.stringify(folder.error ?? ""));
 
 // The guard: this is the one channel that takes a path from the sandboxed renderer, so it must
 // only ever open files this app produced. Without it the view would have a general

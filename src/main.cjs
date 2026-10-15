@@ -324,10 +324,39 @@ function registerIpc() {
       return folder;
     });
 
+    /**
+     * `shell.openPath` with a deadline.
+     *
+     * It resolves with an error STRING, or with "" on success — and on a machine with no handler
+     * for the file type it does neither, it simply never settles. The renderer awaits the IPC
+     * reply, so the promise that never settles is a UI that hangs with no message: on a headless
+     * Linux box the "open the document" button waits forever. Found by running the document suite
+     * in CI, where there is no PDF viewer at all.
+     *
+     * A deadline turns that into the failure the renderer already knows how to report.
+     */
+    const openPathWithDeadline = async (target) => {
+      const DEADLINE_MS = 5000;
+      let timer;
+      const timeout = new Promise((resolve) => {
+        timer = setTimeout(() => resolve("__deadline__"), DEADLINE_MS);
+        timer.unref?.();
+      });
+      const outcome = await Promise.race([
+        shell.openPath(target).then((error) => error || ""),
+        timeout,
+      ]);
+      clearTimeout(timer);
+      if (outcome === "__deadline__") {
+        return `система не открыла файл за ${DEADLINE_MS / 1000} с — похоже, для него нет приложения`;
+      }
+      return outcome;
+    };
+
     handle("documents:openFolder", async () => {
       const folder = path.join(app.getPath("userData"), "documents");
       await fs.mkdir(folder, { recursive: true });
-      const error = await shell.openPath(folder);
+      const error = await openPathWithDeadline(folder);
       if (error) throw new Error(error);
       return folder;
     });
@@ -342,7 +371,7 @@ function registerIpc() {
      */
     handle("documents:open", async (payload) => {
       const target = await resolveDocumentPath(payload?.filePath);
-      const error = await shell.openPath(target);
+      const error = await openPathWithDeadline(target);
       if (error) throw new Error(error);
       return target;
     });
