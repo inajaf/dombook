@@ -471,6 +471,26 @@ tbody tr:last-child td { border-bottom: 0; }
 .meal-amount .money-input input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary), transparent 86%); }
 .meal-day-total { text-align: right; color: var(--primary-strong); font-weight: 800; }
 .meal-empty { padding: 14px; color: var(--muted); text-align: center; }
+/* The seasons and discount editor.
+ *
+ * One row per rule, laid out as the sentence it produces ("от 7 ночей — 10%") rather than as a
+ * table of fields: an owner reads a pricing rule as a phrase, and a grid of bare inputs is how a
+ * threshold ends up paired with the wrong percentage. */
+.rules-section { display: grid; gap: 18px; }
+.rule-block { display: grid; gap: 8px; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius); background: #fafcfb; }
+.rule-block h4 { margin: 0; font-size: var(--text-base); }
+.rule-hint { margin: 0; color: var(--muted); font-size: var(--text-xs); line-height: 1.5; }
+.rule-rows { display: grid; gap: 8px; }
+.rule-rows:empty { display: none; }
+.rule-row { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; padding: 10px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); }
+.rule-row .field { flex: 0 1 130px; }
+.rule-row .field > span { font-size: var(--text-xs); }
+.rule-row .field input { min-height: 42px; }
+.rule-row.season-row .field:first-child { flex: 1 1 180px; }
+.rule-row.season-row .field:nth-child(2), .rule-row.season-row .field:nth-child(3) { flex: 0 1 160px; }
+.rule-unit { align-self: center; padding-bottom: 12px; color: var(--muted); font-size: var(--text-sm); font-weight: 650; }
+.rule-row .icon-button { margin-bottom: 1px; }
+
 .form-error { margin-top: 15px; border-radius: 11px; padding: 11px 13px; background: var(--danger-soft); color: var(--danger); font-weight: 650; }
 .reservation-calculation { margin-top: 16px; border: 1px solid #cfe1d7; border-radius: 14px; background: #f2f8f4; overflow: hidden; }
 .calculation-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 13px 15px; border-bottom: 1px solid #d9e8df; }
@@ -478,10 +498,16 @@ tbody tr:last-child td { border-bottom: 0; }
 .calculation-heading > span:last-child { text-align: right; }
 .reservation-calculation strong, .reservation-calculation small { display: block; }
 .reservation-calculation small { color: var(--muted); }
-.calculation-breakdown { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+/* auto-fit, because the discount column only exists when a discount applied. */
+.calculation-breakdown { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
 .calculation-breakdown > span { min-width: 0; padding: 11px 15px; overflow-wrap: anywhere; }
 .calculation-breakdown > span + span { border-left: 1px solid #d9e8df; }
 .calculation-balance { color: var(--primary-strong); background: var(--primary-soft); }
+/* One line per season that applied. Small, because it answers a question the reader only has
+ * when the total looks wrong. */
+.calculation-lines { display: grid; gap: 2px; margin-top: 4px; color: var(--muted); font-size: var(--text-xs); }
+.calculation-reset { padding: 0 15px 12px; }
+.calculation-reset .text-button { min-height: 38px; }
 .reservation-calculation.compact { margin-bottom: 0; }
 .reservation-calculation.compact .calculation-breakdown { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .choice-group { margin: 18px 0 0; padding: 0; border: 0; display: grid; gap: 9px; }

@@ -9,6 +9,7 @@ const { createAuthApi } = require("./main/auth.cjs");
 const { createAuthSessionStore } = require("./main/auth-session.cjs");
 const { createSyncEngine } = require("./main/sync.cjs");
 const { wholeMonthsBetween } = require("./domain/booking/booking-policy.cjs");
+const { quoteReservation } = require("./domain/booking/pricing.cjs");
 const { nowIso } = require("./database.cjs");
 
 let mainWindow;
@@ -266,6 +267,35 @@ function registerIpc() {
     handle("properties:update", (payload) => database.updateProperty(payload.id, payload.data));
     handle("properties:archive", (payload) => database.archiveProperty(payload.id));
     handle("properties:restore", (payload) => database.restoreProperty(payload.id));
+
+  // A price for a booking that has not been saved yet.
+  //
+  // The dialog has to show what the guest will pay while the owner is still choosing dates, and
+  // the renderer is sandboxed: it cannot load the pricing module, and a second copy of the
+  // arithmetic there is the drift the shared fixtures exist to prevent. So the preview asks the
+  // process that owns the rule. Nothing is written — this is a quote, not a booking.
+  handle("pricing:quote", (payload) => {
+    const property = database.getProperty(payload?.propertyId);
+    if (!property) throw new Error("Дом не найден");
+    const bookingKind = payload?.bookingKind === "rental" ? "rental" : "stay";
+    const reservation = payload?.reservationId ? database.getReservation(payload.reservationId) : null;
+    // An edit keeps the rate the booking was taken at, the same way saving it does: a preview
+    // that quotes today's price would disagree with the amount the save then stores.
+    const nightlyRateMinor = reservation && reservation.property_id === property.id
+      ? reservation.nightly_rate_minor
+      : property.base_price_minor;
+    const monthlyRateMinor = reservation && reservation.property_id === property.id && reservation.monthly_rate_minor > 0
+      ? reservation.monthly_rate_minor
+      : property.monthly_rate_minor || 0;
+    return quoteReservation({
+      kind: bookingKind,
+      checkInDate: payload?.checkInDate,
+      checkOutDate: payload?.checkOutDate,
+      baseNightlyRateMinor: nightlyRateMinor,
+      monthlyRateMinor,
+      rateRules: property.rate_rules,
+    });
+  });
 
     handle("reservations:create", (payload) => database.createReservation(payload));
     handle("reservations:update", (payload) => database.updateReservation(payload.id, payload.data));

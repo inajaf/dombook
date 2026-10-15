@@ -23,6 +23,11 @@ contextBridge.exposeInMainWorld("domBook", {
     archive: (id) => invoke("properties:archive", { id }),
     restore: (id) => invoke("properties:restore", { id }),
   },
+  // A price for a booking that has not been saved. Computed in the main process, which owns the
+  // pricing rules — see src/domain/booking/pricing.cjs.
+  pricing: {
+    quote: (data) => invoke("pricing:quote", data),
+  },
   reservations: {
     list: () => invoke("reservations:list"),
     create: (data) => invoke("reservations:create", data),

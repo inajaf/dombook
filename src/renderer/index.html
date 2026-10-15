@@ -10,7 +10,7 @@
   <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
   <link rel="manifest" href="./manifest.webmanifest">
-  <link rel="stylesheet" href="./styles.css?v=20261015-7">
+  <link rel="stylesheet" href="./styles.css?v=20261015-8">
 </head>
 <body>
   <a class="skip-link" href="#main-content">Перейти к содержимому</a>
@@ -389,6 +389,37 @@
           <label class="field"><span>Выезд</span><input name="checkOutTime" type="time" value="11:00"></label>
           <label class="field span-2"><span>Заметки</span><textarea name="notes" maxlength="2000" rows="3" placeholder="Правила, особенности, инструкции администратору"></textarea></label>
         </div>
+
+        <!-- Seasons and length discounts.
+             The nightly rate above is what a night costs by default; anything here adjusts it for
+             a period, or for a booking long enough to earn a discount. It lives in the unit's own
+             dialog because a price belongs to the thing being sold — a separate "prices" screen
+             would let an owner change a rate without ever seeing the unit it applies to. -->
+        <div class="form-section rules-section">
+          <h3><span>2</span>Цены по сезонам и скидки</h3>
+          <p class="section-help">Необязательно. Без этих правил цена за ночь действует круглый год.</p>
+
+          <div class="rule-block">
+            <h4>Скидка за длительное проживание</h4>
+            <p class="rule-hint">Например: от 7 ночей — 10%. Применяется самая выгодная для гостя из подходящих, скидки не складываются.</p>
+            <div class="rule-rows" id="stayDiscountRows"></div>
+            <button type="button" class="text-button" id="addStayDiscount">Добавить скидку</button>
+          </div>
+
+          <div class="rule-block">
+            <h4>Скидка на длительную аренду</h4>
+            <p class="rule-hint">Например: от 12 месяцев — 10%. Так долгосрочная аренда выходит дешевле посуточной.</p>
+            <div class="rule-rows" id="tenancyDiscountRows"></div>
+            <button type="button" class="text-button" id="addTenancyDiscount">Добавить скидку</button>
+          </div>
+
+          <div class="rule-block">
+            <h4>Сезоны</h4>
+            <p class="rule-hint">Цена за ночь на выбранные ночи — например, новогодняя неделя дороже. Периоды не должны пересекаться.</p>
+            <div class="rule-rows" id="seasonRows"></div>
+            <button type="button" class="text-button" id="addSeason">Добавить сезон</button>
+          </div>
+        </div>
         <div class="form-error" id="propertyFormError" role="alert" hidden></div>
       </div>
       <footer class="modal-footer">
@@ -462,7 +493,7 @@
         <div class="form-section">
           <h3><span>4</span>Деньги и статус</h3>
           <div class="form-grid">
-            <label class="field"><span>Проживание</span><div class="money-input"><input name="accommodation" type="number" min="0" step="0.01" value="0" readonly><span>₼</span></div><small>Считается автоматически по ночам.</small></label>
+            <label class="field"><span>Проживание</span><div class="money-input"><input name="accommodation" type="number" min="0" step="0.01" value="0"><span>₼</span></div><small id="accommodationHelp">Считается автоматически: ночи, сезоны и скидка за длительность.</small></label>
             <label class="field"><span>Предоплата за бронь</span><div class="money-input"><input name="prepaid" type="number" min="0" step="0.01" value="0"><span>₼</span></div><small>Уменьшает остаток к оплате.</small></label>
             <label class="field"><span>Возвратный залог</span><div class="money-input"><input name="deposit" type="number" min="0" step="0.01" value="0"><span>₼</span></div><small>Считается отдельно и не является оплатой.</small></label>
             <label class="field"><span>Статус депозита</span><select name="depositStatus"><option value="none">Не требуется</option><option value="due">Ожидается</option><option value="received">Получен</option><option value="returned">Возвращён</option><option value="partially_withheld">Частично удержан</option><option value="withheld">Удержан</option></select></label>
@@ -471,14 +502,18 @@
           </div>
           <div class="reservation-calculation" role="status" aria-live="polite">
             <div class="calculation-heading">
-              <span><strong id="calculationNights">0 ночей</strong><small id="calculationFormula">Выберите корректные даты</small></span>
+              <span><strong id="calculationNights">0 ночей</strong><small id="calculationFormula">Выберите корректные даты</small><span class="calculation-lines" id="calculationLines"></span></span>
               <span><small>Проживание + питание</small><strong id="calculationTotal">0 ₼</strong></span>
             </div>
             <div class="calculation-breakdown">
               <span><small>Питание</small><strong id="calculationServices">0 ₼</strong></span>
+              <span id="calculationDiscountRow" hidden><small>Скидка</small><strong id="calculationDiscount">0 ₼</strong></span>
               <span><small>Получено</small><strong id="calculationPrepaid">0 ₼</strong></span>
               <span class="calculation-balance"><small>Осталось получить</small><strong id="calculationBalance">0 ₼</strong></span>
               <span><small>Залог отдельно</small><strong id="calculationDeposit">0 ₼</strong></span>
+            </div>
+            <div class="calculation-reset">
+              <button type="button" class="text-button" id="resetAccommodation" hidden>Вернуть расчёт по правилам объекта</button>
             </div>
           </div>
         </div>
@@ -538,6 +573,6 @@
   <script src="./i18n/az.js"></script>
   <script src="./i18n/en.js"></script>
   <script src="./i18n/i18n.js"></script>
-  <script src="./app.js?v=20261015-7"></script>
+  <script src="./app.js?v=20261015-8"></script>
 </body>
 </html>
