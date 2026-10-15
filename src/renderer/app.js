@@ -40,10 +40,13 @@ const state = {
   quote: null,
   // Bumped per request so a slow quote cannot overwrite a newer one.
   quoteRequest: 0,
+  // Set when this sign-in created the account (the address was not loginable a moment ago).
+  accountCreated: false,
   // True once the owner types an amount: the computed figure stops replacing it.
   accommodationManual: false,
-  // The booking the documents dialog is currently about.
+  // The booking the documents dialog is currently about, and where generated documents live.
   documentsReservation: null,
+  documentsFolder: "",
   reservationFilter: "all",
   search: "",
   expandedGroups: new Set(),
@@ -229,13 +232,36 @@ async function unwrap(promise) {
   return result.data;
 }
 
-function toast(message, type = "success") {
+/**
+ * A short message, optionally with one thing to do about it.
+ *
+ * The action exists for the case that produced it: a generated document announced itself and then
+ * left the owner to find `~/Library/Application Support` — a directory Finder hides by default —
+ * to look at the file they had just made. A message that says "the document is ready" without a
+ * way to open it is only half an answer.
+ */
+function toast(message, type = "success", action = null) {
   const element = document.createElement("div");
   element.className = `toast ${type === "error" ? "error" : ""}`;
-  element.textContent = message;
+  const text = document.createElement("span");
+  text.textContent = message;
+  element.append(text);
+  if (action) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "toast-action";
+    button.textContent = action.label;
+    button.addEventListener("click", () => {
+      element.remove();
+      action.run();
+    });
+    element.append(button);
+  }
   $("#toastRegion").append(element);
-  setTimeout(() => element.classList.add("is-leaving"), 3700);
-  setTimeout(() => element.remove(), 3900);
+  // A toast with an action stays long enough to be read and clicked; both disappear together.
+  const lifetime = action ? 9000 : 3700;
+  setTimeout(() => element.classList.add("is-leaving"), lifetime);
+  setTimeout(() => element.remove(), lifetime + 200);
 }
 
 function showError(target, error) {
@@ -351,6 +377,7 @@ function navigate(page) {
     refreshSyncStatus().catch(() => {});
     refreshBookingPolicy().catch(() => {});
     refreshEntitlements().catch(() => {});
+    refreshTeam().catch(() => {});
   }
   if (page === "conflicts") refreshConflicts().catch((error) => toast(error.message, "error"));
   if (page === "rentals") renderRentals();
@@ -1036,15 +1063,79 @@ function openDocumentsDialog(reservationId) {
   // The contract is offered for a tenancy only: printing a "договор найма" for two nights would
   // produce a document with a monthly rent and a term that do not exist.
   $("#documentContract").hidden = !isRental;
+  // Refresh if it is not known yet; the dialog is opened from a live session, so this succeeds
+  // even when the workspace was entered before the folder could be resolved.
+  loadDocumentsFolder();
+  renderGeneratedDocuments(reservationId);
   $("#documentsDialog").showModal();
+}
+
+async function loadDocumentsFolder() {
+  try {
+    state.documentsFolder = await unwrap(api.documents.folder());
+  } catch {
+    // A folder that cannot be resolved only costs the path line in the dialog.
+    state.documentsFolder = "";
+  }
+  const target = $("#documentsFolderPath");
+  if (target) {
+    target.textContent = state.documentsFolder;
+    target.hidden = !state.documentsFolder;
+  }
+  return state.documentsFolder;
 }
 
 async function createDocument(reservationId, kind) {
   const choose = $("#documentsChoosePath")?.checked === true;
+  const openAfter = $("#documentsOpenAfter")?.checked !== false;
   const result = await unwrap(api.documents.create({ reservationId, kind, choose }));
   if (result?.canceled) return;
-  toast(`Документ сохранён: ${result.fileName}`);
+  // Opened straight away by default: the owner asked for a document in order to look at it, print
+  // it, or send it. The checkbox is there for someone producing a batch of them.
+  if (openAfter) await openDocumentFile(result.path);
+  toast(`Документ сохранён: ${result.fileName}`, "success", {
+    label: "Открыть",
+    run: () => openDocumentFile(result.path),
+  });
+  renderGeneratedDocuments(reservationId);
   return result;
+}
+
+/** Hand a file to the system's own viewer. The main process decides what it will open. */
+async function openDocumentFile(filePath) {
+  try {
+    await unwrap(api.documents.open({ filePath }));
+  } catch (error) {
+    toast(`Не удалось открыть файл: ${error.message}`, "error");
+  }
+}
+
+/**
+ * The documents already produced for this booking.
+ *
+ * Regenerating is not the only way to look at a contract: the file from last week is still in the
+ * folder, and until this list existed the only route back to it was knowing that folder's path.
+ */
+async function renderGeneratedDocuments(reservationId) {
+  const container = $("#documentsGenerated");
+  if (!container) return;
+  try {
+    const files = await unwrap(api.documents.list({ reservationId }));
+    container.innerHTML = files.length
+      ? `<p class="rule-hint">Уже созданы:</p>${files.map((file) => `
+          <div class="document-file">
+            <span>${icon("i-book")}</span>
+            <span><strong data-i18n-ignore>${escapeHtml(file.name)}</strong>
+              <small>${escapeHtml(formatBytes(file.size))} · ${escapeHtml(new Date(file.modifiedAt).toLocaleString(interfaceLocale()))}</small></span>
+            <button type="button" class="button secondary compact" data-open-document="${escapeHtml(file.path)}">Открыть</button>
+            <button type="button" class="button ghost compact" data-reveal-document="${escapeHtml(file.path)}">Показать в папке</button>
+          </div>`).join("")}`
+      : "";
+  } catch (error) {
+    // A listing failure must not make the dialog look broken; the generate buttons still work.
+    container.innerHTML = "";
+    console.warn("Document list failed", error);
+  }
 }
 
 function renderSettings() {
@@ -1065,6 +1156,80 @@ function renderSettings() {
       <small>${formatBytes(backup.size)}</small>
     </div>
   `).join("") : `<div class="empty-inline">Копий пока нет. Создайте первую перед внесением реальных данных.</div>`;
+}
+
+/**
+ * Who may sign in to this account, and who has been invited.
+ *
+ * Isolation between accounts is the default and is enforced on the server; this panel is the only
+ * place access is GRANTED. Two rules are the server's, and the panel states them rather than
+ * pretending otherwise: an invitation belongs to one email address, and it can never grant
+ * ownership.
+ */
+const ROLE_LABELS = {
+  owner: "Владелец",
+  admin: "Администратор",
+  staff: "Сотрудник",
+};
+
+async function refreshTeam() {
+  const list = $("#teamList");
+  if (!list) return;
+  try {
+    const [members, invites] = await Promise.all([
+      unwrap(api.team.members()),
+      // The invitation list is owner/admin only. A member who is refused still sees the team,
+      // so the panel does not disappear for them — it just drops the part they may not read.
+      unwrap(api.team.invites()).catch(() => null),
+    ]);
+    const team = members?.members || [];
+    $("#teamBadge").textContent = `${team.length} ${team.length === 1 ? "человек" : "человека"}`;
+    list.innerHTML = team.map((member) => `
+      <div class="team-row">
+        <span class="team-avatar">${escapeHtml((member.name || member.email || "?").trim().charAt(0).toUpperCase())}</span>
+        <span><strong data-i18n-ignore>${escapeHtml(member.name || member.email)}</strong>
+          <small data-i18n-ignore>${escapeHtml(member.email)}</small></span>
+        <span class="pill">${escapeHtml(ROLE_LABELS[member.role] || member.role)}${member.isSelf ? " · это вы" : ""}</span>
+      </div>`).join("");
+
+    const pending = (invites?.invites || []).filter((invite) => invite.status === "pending");
+    $("#inviteList").innerHTML = pending.length
+      ? `<h3 class="team-heading">Ожидают входа</h3>${pending.map((invite) => `
+          <div class="team-row">
+            <span class="team-avatar pending">${icon("i-key")}</span>
+            <span><strong data-i18n-ignore>${escapeHtml(invite.email)}</strong>
+              <small>приглашён ${escapeHtml(new Date(invite.createdAt).toLocaleDateString(interfaceLocale()))}, действует до ${escapeHtml(new Date(invite.expiresAt).toLocaleDateString(interfaceLocale()))}</small></span>
+            <span class="pill">${escapeHtml(ROLE_LABELS[invite.role] || invite.role)}</span>
+            <button type="button" class="button ghost compact" data-revoke-invite="${escapeHtml(invite.id)}">Отозвать</button>
+          </div>`).join("")}`
+      : "";
+    // Nothing to invite with, for someone who may not invite.
+    $("#inviteForm").hidden = invites === null;
+  } catch (error) {
+    list.innerHTML = `<p class="empty-inline">${escapeHtml(error.message)}</p>`;
+  }
+}
+
+async function submitInvite(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const errorBox = $("#inviteError");
+  const successBox = $("#inviteSuccess");
+  errorBox.hidden = true;
+  successBox.hidden = true;
+  const submit = $("#inviteSubmit");
+  try {
+    setBusy(submit, true);
+    await unwrap(api.team.invite(form.elements.email.value.trim(), form.elements.role.value));
+    successBox.textContent = "Приглашение создано. Человек войдёт с этого адреса и увидит данные аккаунта.";
+    successBox.hidden = false;
+    form.reset();
+    await refreshTeam();
+  } catch (error) {
+    showError(errorBox, error);
+  } finally {
+    setBusy(submit, false);
+  }
 }
 
 /** The details a contract prints, kept in app_settings so they follow the owner between devices. */
@@ -2154,8 +2319,34 @@ function bindEvents() {
   $("#openDocumentsFolder").addEventListener("click", () => {
     unwrap(api.documents.openFolder()).catch((error) => toast(error.message, "error"));
   });
+  // Delegated: the rows are rebuilt every time a document is produced.
+  $("#documentsGenerated").addEventListener("click", (event) => {
+    const open = event.target.closest("[data-open-document]");
+    if (open) {
+      openDocumentFile(open.dataset.openDocument);
+      return;
+    }
+    const reveal = event.target.closest("[data-reveal-document]");
+    if (reveal) {
+      unwrap(api.documents.reveal({ filePath: reveal.dataset.revealDocument }))
+        .catch((error) => toast(error.message, "error"));
+    }
+  });
   $("#requisitesForm")?.addEventListener("submit", (event) => {
     submitRequisites(event).catch((error) => toast(error.message, "error"));
+  });
+  $("#inviteForm")?.addEventListener("submit", (event) => {
+    submitInvite(event).catch((error) => toast(error.message, "error"));
+  });
+  $("#inviteList")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-revoke-invite]");
+    if (!button) return;
+    unwrap(api.team.revokeInvite(button.dataset.revokeInvite))
+      .then(() => {
+        toast("Приглашение отозвано");
+        return refreshTeam();
+      })
+      .catch((error) => toast(error.message, "error"));
   });
   $("#createBackup").addEventListener("click", createBackup);
   $("#interfaceLanguage").addEventListener("change", changeInterfaceLanguage);
@@ -2228,10 +2419,39 @@ function clearSessionUI() {
   $("#cloudAccount").innerHTML = "";
 }
 
+/**
+ * Pull once, quietly, right after the workspace opens.
+ *
+ * This was missing, and its absence is the worst first impression the product can make: the local
+ * database is what the screen reads, so on a fresh install — or any device whose profile has just
+ * been created — an owner signs in successfully and sees an EMPTY workspace. Their bookings exist;
+ * they are on the server, and the only thing that would have fetched them was a 60-second timer or
+ * a button hidden in Settings. "I logged in and everything is gone" is what that looks like.
+ *
+ * Silent, unlike the Settings button: nobody asked for this, so it must not toast on success. A
+ * failure is also silent and simply leaves the local data on screen, because being offline is a
+ * supported state rather than an error.
+ */
+async function syncAfterLogin() {
+  try {
+    const response = await window.domBook.sync.now();
+    if (!response?.ok || response.data?.ok === false) return;
+    if ((response.data?.applied || 0) > 0 || (response.data?.pushed || 0) > 0) {
+      await refreshCore();
+    }
+  } catch {
+    // Offline is a normal state; the periodic sync will catch up.
+  }
+}
+
 async function enterApp() {
   try {
     await refreshCore();
     navigate("dashboard");
+    // Resolved here rather than at boot: `documents:folder` needs a session, and boot runs at the
+    // login screen where there is none — which left the dialog's path line permanently empty.
+    loadDocumentsFolder();
+    syncAfterLogin();
   } catch (error) {
     toast(`Не удалось загрузить базу: ${error.message}`, "error");
   }
@@ -2240,6 +2460,7 @@ async function enterApp() {
 async function requestLoginCode() {
   const email = $("#loginEmail").value.trim();
   $("#loginEmailError").hidden = true;
+  state.accountCreated = false;
   if (!email) {
     showError($("#loginEmailError"), new Error("Укажите email"));
     return;
@@ -2259,6 +2480,10 @@ async function requestLoginCode() {
         // one, which it does only with AUTH_EXPOSE_CODE on.
         const alreadyIssued = result?.code;
         await unwrap(api.auth.setup(email));
+        // Remembered so the sign-in can tell "this address just became an account" from "this
+        // device has never seen the account it is signing in to". The two look identical locally
+        // — an empty database either way — and only the first should keep the demo sample.
+        state.accountCreated = true;
         // Provisioning the account is exactly what makes the address loginable, so the
         // judgement made a moment ago is now stale. Without this, the client rejects the
         // account it just created — "no account for this email" on the user's own signup.
@@ -2299,8 +2524,10 @@ async function submitLoginCode() {
   const button = $("#loginCodeSubmit");
   setBusy(button, true, "Вход…");
   try {
-    const result = await unwrap(api.auth.verify(state.loginEmail, code));
+    const result = await unwrap(api.auth.verify(state.loginEmail, code, state.accountCreated === true));
+    state.accountCreated = false;
     applySession(result);
+    reportAccountSwitch(result);
     // SessionView carries the account's plan, so an account that is already paid skips the
     // picker instead of being asked on every sign-in. A free account still sees it.
     if (result?.plan && result.plan !== "free") await enterAppAfterLogin();
@@ -2340,6 +2567,20 @@ async function submitPlanSelection() {
 async function enterAppAfterLogin() {
   hideLogin();
   await enterApp();
+}
+
+/**
+ * Say so when signing in removed another account's local data.
+ *
+ * The switch is correct — a device's local database holds one account — but it is also the only
+ * moment in the product where a sign-in can lose work, so it is never silent.
+ */
+function reportAccountSwitch(session) {
+  if (!session?.accountSwitched) return;
+  toast(
+    "Вы вошли в другой аккаунт. Данные предыдущего аккаунта удалены с этого устройства — они остались на сервере.",
+    "error",
+  );
 }
 
 function bindAuthEvents() {

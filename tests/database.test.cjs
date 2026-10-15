@@ -942,3 +942,44 @@ test("повторное открытие мигрированной базы н
     reopened.close();
   }
 });
+
+test("сброс локальной базы оставляет пустую схему без демо-данных", async (t) => {
+  // The desktop is single-tenant: its database has no way to tell one account's rows from
+  // another's. When a second account signs in on the same device the only correct answer is to
+  // throw the local copy away — keeping it shows the previous account's bookings and makes every
+  // later pull collide ("UNIQUE constraint failed: places.name").
+  const { database } = await createTestDatabase(t);
+  const before = database.writerId;
+  database.createProperty(house({ name: "Чужой объект" }));
+  database.createPlace({ name: "Чужой дом отдыха", address: "", hasFoodService: false });
+  assert.equal(database.listProperties().length, 1);
+
+  database.reset();
+
+  assert.equal(database.listProperties().length, 0, "объекты предыдущего аккаунта удалены");
+  assert.equal(database.listPlaces().length, 0, "дом отдыха предыдущего аккаунта удалён");
+  assert.equal(database.listReservations().length, 0);
+  // The seed must NOT run: this database is about to receive a real account, and sample rows
+  // would be pushed into it.
+  assert.equal(database.listProperties().length, 0, "демо-данные не подставляются");
+  // The schema has to be usable straight away, or the first booking after the switch fails.
+  assert.doesNotThrow(() => database.createProperty(house({ name: "Новый объект" })));
+  // A NEW device identity: the old one's queued rows are gone, and reusing the id would let the
+  // server attribute the new account's writes to the previous device.
+  assert.notEqual(database.writerId, before);
+});
+
+test("свежее устройство, не обменивавшееся с сервером, можно распознать", async (t) => {
+  // The sign-in path uses this to tell "a brand-new device holding only the demo seed" from
+  // "a device with the user's work on it". Getting it wrong in the permissive direction leaves the
+  // device unable to sync at all; getting it wrong in the other direction discards real work, so
+  // the signal is the per-device cursor, which is never replicated.
+  const { database } = await createTestDatabase(t);
+  assert.equal(database.hasNeverSynced(), true, "новая база ещё не обменивалась с сервером");
+
+  database.run(
+    "INSERT INTO app_settings(id, setting_key, setting_value, created_at, updated_at, version, last_writer) VALUES (?, 'sync_cursor', '7', ?, ?, 1, ?)",
+    ["test-cursor", new Date().toISOString(), new Date().toISOString(), database.writerId],
+  );
+  assert.equal(database.hasNeverSynced(), false, "курсор больше нуля — устройство уже получало данные");
+});

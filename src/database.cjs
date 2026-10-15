@@ -1008,6 +1008,48 @@ class RentKeeperDatabase {
     return result;
   }
 
+  /**
+   * Whether this device has ever exchanged anything with the server.
+   *
+   * A device that has not is holding nothing but the demo seed — and pushing that seed into an
+   * account that already exists is refused ("Такое название уже используется"), which matters far
+   * more than the refusal itself: a refused push SKIPS the pull, so the device never receives the
+   * account's data at all. That is what a second device, or any device whose profile has just been
+   * recreated, does on its first sign-in: it shows the sample and nothing else, forever.
+   *
+   * The cursor is per-device and never replicated, so it is a reliable "this installation has
+   * never heard from the server" signal.
+   */
+  hasNeverSynced() {
+    const cursor = Number(this.scalar(
+      "SELECT setting_value FROM app_settings WHERE setting_key = 'sync_cursor'",
+    ) || 0);
+    return !(cursor > 0);
+  }
+
+  /**
+   * Throw the local database away and start from an empty one.
+   *
+   * Called when a DIFFERENT account signs in on this device. The local database is a replica of
+   * one account's server state plus that account's unsent edits, and it has no tenant column —
+   * the desktop is single-tenant by design. Keeping it across a sign-in means the next account
+   * sees the previous one's bookings, and the pull that follows collides with what is already
+   * there: "UNIQUE constraint failed: places.name", a sync that never recovers, and queued rows
+   * belonging to someone else waiting to be pushed into the account that just signed in.
+   *
+   * No demo seed: this runs when a real account signs in, and sample data would be pushed into it.
+   */
+  reset() {
+    this.db.close();
+    fs.rmSync(this.filePath, { force: true });
+    this.db = new this.SQL.Database();
+    this.db.run("PRAGMA foreign_keys = ON");
+    this.migrate();
+    this.ensureDeviceId();
+    this.persist();
+    return this;
+  }
+
   persist() {
     const bytes = Buffer.from(this.db.export());
     const tempPath = `${this.filePath}.${crypto.randomUUID()}.tmp`;

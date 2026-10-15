@@ -386,6 +386,39 @@ func (s *Store) CountRecentCodes(ctx context.Context, email string, since time.T
 // Invites
 // ---------------------------------------------------------------------------
 
+// ListUsersForAccount returns the people who may sign in to an account.
+//
+// Runs under RLS: the users policy filters on current_tenant_id(), so an account can only ever
+// see its own members — there is no WHERE clause here to forget, and a second account's rows are
+// not merely filtered out but invisible to the query.
+func (s *Store) ListUsersForAccount(ctx context.Context, accountID string) ([]User, error) {
+	users := []User{}
+	err := s.WithTenant(ctx, accountID, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT id, account_id, email, name, role, created_at, updated_at
+			FROM users
+			ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, created_at`)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var user User
+			var role string
+			if err := rows.Scan(&user.ID, &user.AccountID, &user.Email, &user.Name, &role, &user.CreatedAt, &user.UpdatedAt); err != nil {
+				return err
+			}
+			user.Role = UserRole(role)
+			users = append(users, user)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return users, nil
+}
+
 // CreateInvite stores a pending invitation.
 //
 // The invited email typically has no user row yet, so the insert cannot be

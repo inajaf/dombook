@@ -146,6 +146,65 @@ check(invoice.data.path !== contract.data.path, "the two documents are separate 
 const windows = await app.evaluate(`return window.__documentWindowCount ?? 'unknown';`);
 check(windows === "unknown" || windows === 0, "no leftover renderer window", String(windows));
 
+// --- Looking at what was produced ----------------------------------------
+// The first version saved the file and said so, and left the owner to find
+// ~/Library/Application Support — which Finder hides by default — to read it. A document nobody
+// can open is not a delivered document.
+const listed = await app.evaluate(`
+  const bridge = window.domBook;
+  const files = await bridge.documents.list({ reservationId: ${JSON.stringify(setup.bookingId)} });
+  return { ok: files.ok, count: (files.data || []).length, names: (files.data || []).map((f) => f.name) };
+`);
+check(listed.ok && listed.count === 2,
+  "both documents for the booking are listed, so an old one can be reopened",
+  JSON.stringify(listed.names));
+check(listed.names.some((n) => n.startsWith("dogovor")) && listed.names.some((n) => n.startsWith("schet")),
+  "the list separates the contract from the invoice", JSON.stringify(listed.names));
+
+const opened = await app.evaluate(`
+  const bridge = window.domBook;
+  return bridge.documents.open({ filePath: ${JSON.stringify(contract.data.path)} });
+`);
+check(opened.ok === true, "a generated document can be handed to the system viewer", JSON.stringify(opened.error ?? ""));
+
+// The guard: this is the one channel that takes a path from the sandboxed renderer, so it must
+// only ever open files this app produced. Without it the view would have a general
+// "open any file on this machine" primitive.
+const escapes = await app.evaluate(`
+  const bridge = window.domBook;
+  const folder = (await bridge.documents.folder()).data;
+  const attempts = [
+    folder + '/../../../.ssh/id_rsa',
+    folder + '/../../../../etc/passwd',
+    '/etc/passwd',
+    folder + '/../../rentkeeper-desktop/dogovor.pdf',
+  ];
+  const results = [];
+  for (const filePath of attempts) results.push((await bridge.documents.open({ filePath })).ok);
+  return results;
+`);
+check(escapes.every((ok) => ok === false),
+  "a path outside the documents folder is refused, traversal included", JSON.stringify(escapes));
+
+const dialogList = await app.evaluate(`
+  const bridge = window.domBook;
+  const list = await bridge.reservations.list();
+  const rental = list.data.find((r) => r.booking_kind === 'rental');
+  await openDocumentsDialog(rental.id);
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  return {
+    rows: document.querySelectorAll('#documentsGenerated .document-file').length,
+    folderShown: !document.getElementById('documentsFolderPath').hidden,
+    folderPath: document.getElementById('documentsFolderPath').textContent,
+    openAfterChecked: document.getElementById('documentsOpenAfter').checked,
+  };
+`);
+check(dialogList.rows === 2, "the dialog offers the documents that already exist", `${dialogList.rows} rows`);
+check(dialogList.folderShown && /documents$/.test(dialogList.folderPath),
+  "the dialog says where the files are", dialogList.folderPath);
+check(dialogList.openAfterChecked, "a generated document opens itself by default");
+await app.evaluate(`document.getElementById('documentsDialog').close(); return 'ok';`);
+
 // --- A stay gets an invoice, not a contract -------------------------------
 const stayCreated = await app.evaluate(`
   const bridge = window.domBook;

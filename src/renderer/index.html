@@ -10,7 +10,7 @@
   <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
   <link rel="manifest" href="./manifest.webmanifest">
-  <link rel="stylesheet" href="./styles.css?v=20261015-9">
+  <link rel="stylesheet" href="./styles.css?v=20261015-13">
 </head>
 <body>
   <a class="skip-link" href="#main-content">Перейти к содержимому</a>
@@ -356,6 +356,37 @@
               <dl class="info-list" id="syncInfo"></dl>
               <button class="button secondary" id="syncNow"><svg><use href="#i-refresh"/></svg>Синхронизировать</button>
             </article>
+            <article class="panel" id="teamPanel">
+              <header class="panel-header">
+                <div><p class="eyebrow">Команда</p><h2>Доступ к аккаунту</h2></div>
+                <span class="health-badge" id="teamBadge">—</span>
+              </header>
+              <p class="muted">
+                По умолчанию каждый аккаунт видит только свои данные. Доступ открывает сам аккаунт:
+                пригласите человека по email — он войдёт своим логином и увидит данные этого аккаунта.
+              </p>
+              <div class="team-list" id="teamList"></div>
+
+              <form id="inviteForm" class="policy-form">
+                <h3 class="team-heading">Пригласить</h3>
+                <label class="field" for="inviteEmail"><span>Email</span>
+                  <input id="inviteEmail" name="email" type="email" maxlength="200" autocomplete="off" placeholder="colleague@example.com" required>
+                  <small>Человек должен войти именно с этого адреса — приглашение привязано к нему.</small>
+                </label>
+                <label class="field" for="inviteRole"><span>Права</span>
+                  <select id="inviteRole" name="role">
+                    <option value="staff">Сотрудник — работает с бронями</option>
+                    <option value="admin">Администратор — плюс доступ и настройки</option>
+                  </select>
+                  <small>Владельца приглашением назначить нельзя — это защита от передачи аккаунта.</small>
+                </label>
+                <p class="form-error" id="inviteError" hidden></p>
+                <p class="form-success" id="inviteSuccess" hidden></p>
+                <button class="button primary" type="submit" id="inviteSubmit">Пригласить</button>
+              </form>
+
+              <div class="invite-list" id="inviteList"></div>
+            </article>
             <article class="panel" id="requisitesPanel">
               <header class="panel-header">
                 <div><p class="eyebrow">Документы</p><h2>Реквизиты для договоров и счетов</h2></div>
@@ -610,7 +641,10 @@
             <svg><use href="#i-arrow"/></svg>
           </button>
         </div>
+        <div class="documents-generated" id="documentsGenerated"></div>
+        <label class="toggle-row documents-choose"><input type="checkbox" id="documentsOpenAfter" checked><span>Открывать документ после создания</span></label>
         <label class="toggle-row documents-choose"><input type="checkbox" id="documentsChoosePath"><span>Спросить, куда сохранить</span></label>
+        <p class="rule-hint documents-folder">Папка документов: <span data-i18n-ignore id="documentsFolderPath"></span></p>
         <div class="form-error" id="documentsError" role="alert" hidden></div>
       </div>
       <footer class="modal-footer">
@@ -640,6 +674,6 @@
   <script src="./i18n/az.js"></script>
   <script src="./i18n/en.js"></script>
   <script src="./i18n/i18n.js"></script>
-  <script src="./app.js?v=20261015-9"></script>
+  <script src="./app.js?v=20261015-13"></script>
 </body>
 </html>

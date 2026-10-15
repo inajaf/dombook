@@ -523,6 +523,26 @@ tbody tr:last-child td { border-bottom: 0; }
 .confirm-modal p { margin: 0; color: var(--muted); }
 .confirm-icon { width: 58px; height: 58px; border-radius: 18px; display: grid; place-items: center; margin: auto; background: var(--danger-soft); color: var(--danger); }
 .confirm-icon svg { width: 27px; height: 27px; }
+/* The team, and who has been invited but not arrived.
+ *
+ * One row per person, in the order the server returns (owner, admins, staff), because the first
+ * question about a shared account is who is in it and the second is what they may do. */
+.team-list, .invite-list { display: grid; gap: 8px; margin: 16px 20px; }
+.team-heading { margin: 0 20px 4px; font-size: var(--text-sm); color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.team-row {
+  display: grid; grid-template-columns: 42px minmax(0, 1fr) auto auto; align-items: center; gap: 12px;
+  padding: 11px 13px; border: 1px solid var(--line); border-radius: var(--radius); background: #fafcfb;
+}
+.team-avatar {
+  width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--primary-soft); color: var(--primary-strong); font-weight: 800; font-size: var(--text-lg);
+}
+.team-avatar.pending { border-radius: 12px; }
+.team-avatar svg { width: 20px; }
+.team-row strong, .team-row small { display: block; overflow-wrap: anywhere; }
+.team-row small { color: var(--muted); font-size: var(--text-xs); }
+.form-success { margin-top: 12px; border-radius: 11px; padding: 11px 13px; background: var(--primary-soft); color: var(--primary-strong); font-weight: 650; }
+
 /* Choosing which document to print. Two cards, because a contract and an invoice go to different
  * readers and a person about to hand paperwork to a tax office should not have to guess which
  * button produces which. */
@@ -541,6 +561,26 @@ tbody tr:last-child td { border-bottom: 0; }
 .document-choice-icon { width: 46px; height: 46px; border-radius: 13px; display: grid; place-items: center; background: var(--primary-soft); color: var(--primary); }
 .document-choice > svg:last-child { width: 18px; color: var(--muted); }
 .documents-choose { margin-top: 6px; }
+.documents-folder { margin: 10px 0 0; overflow-wrap: anywhere; }
+/* A document that already exists: opening it again must not require regenerating it, and must not
+ * require knowing a path that Finder hides by default. */
+.documents-generated { display: grid; gap: 8px; margin: 16px 0 0; }
+.document-file {
+  display: grid; grid-template-columns: 38px minmax(0, 1fr) auto auto; align-items: center; gap: 10px;
+  padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: #fafcfb;
+}
+.document-file > span:first-child { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; background: var(--primary-soft); color: var(--primary); }
+.document-file strong, .document-file small { display: block; overflow-wrap: anywhere; }
+.document-file small { color: var(--muted); font-size: var(--text-xs); }
+
+/* A toast that offers one thing to do about the message. */
+.toast { display: flex; align-items: center; gap: 14px; }
+.toast > span { min-width: 0; }
+.toast-action {
+  flex: 0 0 auto; border: 0; border-radius: 9px; padding: 0 14px; min-height: 36px;
+  background: rgb(255 255 255 / 18%); color: white; font-weight: 700; font-size: var(--text-sm); cursor: pointer;
+}
+.toast-action:hover { background: rgb(255 255 255 / 30%); }
 
 .toast-region { position: fixed; z-index: 300; right: 20px; bottom: 20px; display: grid; gap: 8px; }
 .toast { min-width: min(280px, calc(100vw - 40px)); max-width: min(420px, calc(100vw - 40px)); padding: 13px 16px; border-radius: 13px; background: #17211c; color: white; box-shadow: var(--shadow-md); overflow-wrap: anywhere; animation: toast-in var(--motion-slow) var(--ease-out); transition: opacity 180ms ease-in, transform 180ms ease-in; }

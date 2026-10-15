@@ -155,6 +155,7 @@ function registerIpc() {
   handle("auth:status", async () => {
     try {
       const session = await authApi.restore();
+      await adoptAccount(session);
       return {
         authenticated: Boolean(session),
         session,
@@ -169,7 +170,13 @@ function registerIpc() {
   });
   handle("auth:send", (payload) => authApi.send(payload?.email));
   handle("auth:setup", (payload) => authApi.setup(payload?.email));
-  handle("auth:verify", (payload) => authApi.verify(payload?.email, payload?.code));
+  handle("auth:verify", async (payload) => {
+    const session = await authApi.verify(payload?.email, payload?.code);
+    const adopted = await adoptAccount(session, { accountCreated: payload?.accountCreated === true });
+    // The renderer needs to say so when someone else's local data has just been removed: it is
+    // the one consequence of signing in that a user can lose work to.
+    return { ...session, accountSwitched: adopted.switched };
+  });
   handle("auth:setPlan", (payload) => authApi.setPlan(payload?.plan));
     handle("auth:checkout", async (payload) => {
       const checkout = await authApi.checkout(payload?.plan);
@@ -325,6 +332,53 @@ function registerIpc() {
       return folder;
     });
 
+    /**
+     * Hand a generated document to the system's viewer.
+     *
+     * The path is REFUSED unless it is inside the documents folder. The renderer is sandboxed and
+     * this is the one channel that takes a path from it, so without the check a compromised view
+     * would have a general "open any file on this machine" primitive. The folder is the only place
+     * this app writes documents, so nothing legitimate is excluded by the restriction.
+     */
+    handle("documents:open", async (payload) => {
+      const target = await resolveDocumentPath(payload?.filePath);
+      const error = await shell.openPath(target);
+      if (error) throw new Error(error);
+      return target;
+    });
+
+    handle("documents:reveal", async (payload) => {
+      const target = await resolveDocumentPath(payload?.filePath);
+      shell.showItemInFolder(target);
+      return target;
+    });
+
+    // What has already been produced for a booking, so a document from last week is reachable
+    // without knowing where the folder is. Filtered by the document number, which is derived from
+    // the booking — the same number that is in the file name.
+    handle("documents:list", async (payload) => {
+      const folder = path.join(app.getPath("userData"), "documents");
+      const reservation = database.getReservation(payload?.reservationId);
+      const number = reservation ? documentFileName("invoice", reservation).split("-").slice(1, 3).join("-") : "";
+      let names = [];
+      try {
+        names = await fs.readdir(folder);
+      } catch {
+        // No folder yet simply means nothing has been produced.
+        return [];
+      }
+      const files = [];
+      for (const name of names) {
+        if (!name.toLowerCase().endsWith(".pdf")) continue;
+        if (number && !name.includes(number)) continue;
+        const filePath = path.join(folder, name);
+        const stat = await fs.stat(filePath).catch(() => null);
+        if (!stat) continue;
+        files.push({ name, path: filePath, size: stat.size, modifiedAt: stat.mtime.toISOString() });
+      }
+      return files.sort((a, b) => (a.modifiedAt < b.modifiedAt ? 1 : -1));
+    });
+
     // The document, built but not written. Kept separate from the save so the wording and the
     // arithmetic can be asserted without producing a file, and so a preview is possible.
     handle("documents:html", (payload) => {
@@ -373,6 +427,13 @@ function registerIpc() {
       createMenu(language);
       return language;
     });
+    // Team and invitations. Passed straight through to the server, which decides by role:
+    // nothing about who may see what is decided here.
+    handle("team:members", () => authApi.members());
+    handle("team:invites", () => authApi.invites());
+    handle("team:invite", (payload) => authApi.invite(payload?.email, payload?.role));
+    handle("team:revokeInvite", (payload) => authApi.revokeInvite(payload?.inviteId));
+
     handle("system:setDocumentRequisites", (payload) => database.setDocumentRequisites(payload));
     handle("system:openBackupDirectory", async () => {
       const error = await shell.openPath(database.systemInfo().backupDir);
@@ -397,6 +458,81 @@ function registerIpc() {
    */
   function documentDate() {
     return database.systemInfo().bookingPolicy.today;
+  }
+
+  /**
+   * Which account this device's local database belongs to.
+   *
+   * A file rather than a row, deliberately: the local database is the thing being identified, so a
+   * marker inside it would be replaced along with it, and `app_settings` replicates to the very
+   * account we are trying to tell apart from the last one.
+   */
+  function accountMarkerPath() {
+    return path.join(app.getPath("userData"), "account.json");
+  }
+
+  function storedAccountId() {
+    try {
+      return JSON.parse(fsSync.readFileSync(accountMarkerPath(), "utf8")).accountId || "";
+    } catch {
+      return "";
+    }
+  }
+
+  /**
+   * Make the local database belong to the account that just signed in.
+   *
+   * The desktop is single-tenant: its database has no tenant column and no notion of an owner, so
+   * without this a second account signing in on the same device reads the first account's
+   * bookings and then fails to sync — the pull collides with rows that are already there
+   * ("UNIQUE constraint failed: places.name"), and any row still queued from the previous account
+   * is waiting to be pushed INTO the new one.
+   *
+   * No marker means an install that predates this check. Nothing is thrown away on a guess: it is
+   * adopted as-is, and the marker is written so the next switch is caught.
+   */
+  async function adoptAccount(session, { accountCreated = false } = {}) {
+    const accountId = session?.accountId || "";
+    if (!accountId) return { switched: false };
+    const stored = storedAccountId();
+    const switched = Boolean(stored) && stored !== accountId;
+    // Nothing but the demo seed, no marker, and an account that already existed: this device has
+    // never talked to the server, so there is nothing of the account's to keep and nothing of the
+    // user's to lose. It is discarded for the same reason a switch is — see hasNeverSynced() for
+    // what the seed costs when it is pushed at an account that already holds one.
+    //
+    // `accountCreated` is the whole difference between a SECOND DEVICE and a SIGNUP, which look
+    // identical from here: both are an empty database and an address that was just typed. A signup
+    // must keep the sample — it is the only data the new account has — and a second device must
+    // throw it away and take the account's.
+    const pristine = !switched && !stored && !accountCreated && database.hasNeverSynced();
+    if (switched || pristine) {
+      database.reset();
+    }
+    try {
+      fsSync.writeFileSync(accountMarkerPath(), JSON.stringify({ accountId, at: nowIso() }));
+    } catch (error) {
+      // Losing the marker costs the NEXT account switch, not this session; refusing the sign-in
+      // over it would be worse.
+      console.error("Could not record the account marker:", error);
+    }
+    return { switched: switched || pristine };
+  }
+
+  /**
+   * A path the renderer asked us to open, confirmed to be a document this app produced.
+   *
+   * `path.resolve` first, so `..` segments are collapsed before the prefix test — comparing the
+   * raw string would accept `<documents>/../../.ssh/id_rsa`.
+   */
+  async function resolveDocumentPath(filePath) {
+    const folder = path.join(app.getPath("userData"), "documents");
+    const resolved = path.resolve(String(filePath || ""));
+    if (!resolved.startsWith(path.resolve(folder) + path.sep)) {
+      throw new Error("Можно открыть только документы, созданные приложением");
+    }
+    await fs.access(resolved);
+    return resolved;
   }
 
   function documentContext(reservationId) {

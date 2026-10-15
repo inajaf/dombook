@@ -463,31 +463,6 @@ The `vision_*` tools (`vision_glance`, `vision_ground`, `vision_detect`, `vision
 The older `dsh-glance` / `dsh-ground` / `dsh-detect` / `dsh-crop` shell commands are gone: they
 wrapped a different, now-removed plugin. Use the `vision_*` tools.
 
-### How to actually look at the app
-
-The `vision_*` tools (`vision_glance`, `vision_ground`, `vision_detect`, `vision_crop`,
-`vision_trace`, `vision_pixel_diff`, `vision_long_screenshot_ocr`, `vision_extract_foreground`,
-`vision_dominant_colors`, `vision_html_screenshot`) come from the DSH plugin
-`@anionex/dsh-vision-toolkit`. Call `vision_toolkit_activate` once to expose them.
-
-- **Coordinates are ORIGINAL image pixels**, so a `vision_ground` box feeds straight into
-  `vision_crop` with no scaling in between.
-- **Artifacts are written into the session workspace** under `.dsh-vision-toolkit/`, which is
-  gitignored. Deleting that directory is always safe.
-- **The provider is DeepSeek** (`deepseek-flash`, the only vision-capable model on that key),
-  configured in `~/.dsh/profiles/web/cordis.patch.yml`, with the key held as the DSH credential
-  `VISION_API_KEY`. The plugin's own default is a free public endpoint that answers HTTP 429
-  under any real use, so if vision starts failing with a rate limit, that default is back —
-  meaning the profile config was lost.
-- **The plugin is version-exempt, and the exemption is keyed to the exact DSH version.** It is
-  published for DSH `<0.2.0` while this machine runs a 0.2.x alpha, so DSH loads it only
-  because an explicit exemption was granted. **A DSH upgrade invalidates it** and the tools
-  stop loading. Repair with `~/.dsh/vision-setup.sh` (`--status` to check only; idempotent),
-  then restart DSH.
-
-The older `dsh-glance` / `dsh-ground` / `dsh-detect` / `dsh-crop` shell commands are gone: they
-wrapped a different, now-removed plugin. Use the `vision_*` tools.
-
 ## Long-term rentals
 
 A tenancy is a reservation with `booking_kind = 'rental'` and a long date range, so the one
@@ -558,6 +533,35 @@ rule set stored as JSON text on the unit row (`units.rate_rules` / `properties.r
 - **The REST unit endpoints do not expose the rules yet.** A unit created through them gets the
   empty rule set, and an update leaves the stored rules alone. The desktop is a sync client, so
   nothing in the product is affected; a future web client editing rules would need the plumbing.
+
+## Access between accounts (invitations)
+
+Isolation is the default and is enforced in PostgreSQL. **The only way access is granted is an
+invitation created by the account itself**, from Настройки → «Доступ к аккаунту» — which is what
+the owner asked for in those words: another account sees nothing of this one unless this one
+opens the door.
+
+- **`GET /account/members` is for every member; the invitation routes are owner/admin only.** Who
+  you work alongside is not administration; who may be invited is. `RequireRole("owner", "admin")`
+  is the server's decision, never the client's — the panel hides the form when the list answers
+  403, and that is presentation, not the control.
+- **An invitation is bound to one email address and is what makes it loginable.** An address
+  nobody invited cannot sign in at all (`loginable: false`), and `/auth/verify` turns a pending
+  invitation into membership on that address's first sign-in.
+- **An invitation can never grant `owner`** — `create_login_invite()` enforces that in the
+  database, so an invite that could grant ownership cannot exist even if a handler were wrong.
+- **It works only for an address with no user yet.** An existing account signing in is treated as
+  "Existing member" (`server/internal/auth/service.go`) and lands in its own account; the
+  invitation is ignored. Giving an ALREADY EXISTING account access to another would need
+  memberships (one login, several accounts) — a change to how a session picks its tenant, not a
+  new route. Not built.
+- `e2e-security.mjs` holds the whole contract as assertions: nothing gets in before the grant, the
+  colleague signs in and lands in the inviting account, they see the inviter's data, they cannot
+  invite anyone else, and a revoked invitation closes the address again.
+- **A test that takes a token from account creation and uses it later will get a 401**: clicking
+  "sign out" calls `RevokeUserSessions`, which kills every session for that user, including the
+  one an API client is holding. And re-signing in is not a workaround — `/auth/send` is throttled
+  per address, and the window outlasts a 45-second wait. Take the token where you use it.
 
 ## Printed documents (contracts and invoices)
 

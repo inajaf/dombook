@@ -173,6 +173,37 @@ function createAuthApi({ baseUrl, storage }) {
     return request("GET", `/sync/pull?since=${encodeURIComponent(String(since ?? 0))}`, undefined, session.token);
   }
 
+  /**
+   * Who may sign in to this account.
+   *
+   * Every route here is authorized by the server against the caller's role, not by the client:
+   * `GET /account/members` is open to any member, the invitation routes are owner/admin only.
+   * The client's job is to show what it is given and to relay the refusal.
+   */
+  async function members() {
+    const session = await storage.load();
+    if (!session?.token) throw httpError("Нет активной сессии", 401);
+    return request("GET", "/account/members", undefined, session.token);
+  }
+
+  async function invites() {
+    const session = await storage.load();
+    if (!session?.token) throw httpError("Нет активной сессии", 401);
+    return request("GET", "/auth/invites", undefined, session.token);
+  }
+
+  async function invite(email, role) {
+    const session = await storage.load();
+    if (!session?.token) throw httpError("Нет активной сессии", 401);
+    return request("POST", "/auth/invites", { email, role }, session.token);
+  }
+
+  async function revokeInvite(inviteId) {
+    const session = await storage.load();
+    if (!session?.token) throw httpError("Нет активной сессии", 401);
+    return request("POST", `/auth/invites/${encodeURIComponent(inviteId)}/revoke`, {}, session.token);
+  }
+
   async function logout() {
     const session = await storage.load();
     if (session?.token) {
@@ -200,6 +231,10 @@ function createAuthApi({ baseUrl, storage }) {
     bookingPolicy,
     setBookingPolicy,
     entitlements,
+    members,
+    invites,
+    invite,
+    revokeInvite,
     syncPush,
     syncPull,
     logout,

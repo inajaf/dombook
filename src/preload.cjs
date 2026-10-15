@@ -23,6 +23,13 @@ contextBridge.exposeInMainWorld("domBook", {
     archive: (id) => invoke("properties:archive", { id }),
     restore: (id) => invoke("properties:restore", { id }),
   },
+  // Who may sign in to this account. The server authorizes by role; this only relays.
+  team: {
+    members: () => invoke("team:members"),
+    invites: () => invoke("team:invites"),
+    invite: (email, role) => invoke("team:invite", { email, role }),
+    revokeInvite: (inviteId) => invoke("team:revokeInvite", { inviteId }),
+  },
   // Contracts and invoices. The document is built in the main process from stored rows, so the
   // renderer cannot produce paperwork the database does not agree with.
   documents: {
@@ -30,6 +37,9 @@ contextBridge.exposeInMainWorld("domBook", {
     create: (data) => invoke("documents:create", data),
     folder: () => invoke("documents:folder"),
     openFolder: () => invoke("documents:openFolder"),
+    list: (data) => invoke("documents:list", data),
+    open: (data) => invoke("documents:open", data),
+    reveal: (data) => invoke("documents:reveal", data),
   },
   // A price for a booking that has not been saved. Computed in the main process, which owns the
   // pricing rules — see src/domain/booking/pricing.cjs.
@@ -77,7 +87,7 @@ contextBridge.exposeInMainWorld("domBook", {
     status: () => invoke("auth:status"),
     send: (email) => invoke("auth:send", { email }),
     setup: (email) => invoke("auth:setup", { email }),
-    verify: (email, code) => invoke("auth:verify", { email, code }),
+    verify: (email, code, accountCreated = false) => invoke("auth:verify", { email, code, accountCreated }),
     setPlan: (plan) => invoke("auth:setPlan", { plan }),
     checkout: (plan) => invoke("auth:checkout", { plan }),
     logout: () => invoke("auth:logout"),
