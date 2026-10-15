@@ -1268,14 +1268,24 @@ async function submitLoginCode() {
   const button = $("#loginCodeSubmit");
   setBusy(button, true, "Вход…");
   try {
-    const result = await unwrap(api.auth.verify(state.loginEmail, code, state.accountCreated === true));
+    // Captured before the flag is cleared: it is the difference between SIGNING UP and SIGNING IN,
+    // and only the first one asks which plan the account wants.
+    const justSignedUp = state.accountCreated === true;
+    const result = await unwrap(api.auth.verify(state.loginEmail, code, justSignedUp));
     state.accountCreated = false;
     applySession(result);
     reportAccountSwitch(result);
-    // SessionView carries the account's plan, so an account that is already paid skips the
-    // picker instead of being asked on every sign-in. A free account still sees it.
-    if (result?.plan && result.plan !== "free") await enterAppAfterLogin();
-    else showPlanStep();
+    // The plan picker belongs to signup, not to the login screen.
+    //
+    // It used to be shown to anyone whose plan read "free", which is every account that has not
+    // bought the paid tier — so a returning owner, and a colleague who had just accepted an
+    // invitation, were asked to choose a tariff on EVERY sign-in. The question had already been
+    // answered, and the screen that asked it reads as a gate the user cannot get past. An
+    // existing account goes straight into the app; the plan lives in Settings, where it can be
+    // changed deliberately rather than being re-asked at the door.
+    const needsPlanChoice = justSignedUp && (!result?.plan || result.plan === "free");
+    if (needsPlanChoice) showPlanStep();
+    else await enterAppAfterLogin();
   } catch (error) {
     showError($("#loginCodeError"), error);
   } finally {

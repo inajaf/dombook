@@ -84,12 +84,17 @@ stop_api() { pkill -f "/tmp/rentkeeper-api" 2>/dev/null || true; sleep 1; }
 start_api() {
   cd "$ROOT/server"
   go build -o /tmp/rentkeeper-api ./cmd/api
+  # AUTH_MIN_SEND_INTERVAL_SECONDS is set below for a reason worth stating: the per-address send
+  # throttle is a PRODUCTION policy with its own Go tests, and left at its default of 60 seconds it
+  # makes any suite that signs in twice unusable. "Sign in again" is exactly the flow worth testing
+  # — it is where a returning user was being asked to choose a plan they had already chosen.
   RENTKEEPER_DSN="$(app_role_dsn "$DB")" \
   RENTKEEPER_SKIP_MIGRATE=1 \
   RENTKEEPER_ADMIN_DSN="$(admin_role_dsn "$DB")" \
   ADMIN_API_KEY="e2e-admin-key-long-enough-value" \
   JWT_SECRET="e2e-run-secret-value-16chars" \
   RENTKEEPER_ADDR="127.0.0.1:${PORT}" AUTH_EXPOSE_CODE=true \
+  AUTH_MIN_SEND_INTERVAL_SECONDS=1 \
   /tmp/rentkeeper-api > /tmp/e2e-api.log 2>&1 &
   for _ in $(seq 1 20); do
     curl -sf "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1 && return 0
