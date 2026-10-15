@@ -71,6 +71,11 @@ run "go test (serial, race)" env \
 # decides. A silent pass here would let unformatted code through unnoticed.
 run "gofmt" bash -c 'unformatted=$(cd server && gofmt -l .); if [ -n "$unformatted" ]; then echo "not gofmt-clean:"; echo "$unformatted"; exit 1; fi'
 
+# The web build is a deliverable with its own entry point, and nothing exercised it: it shipped
+# with no auth mock at all and opened on a login screen nobody could get past. Building it and
+# booting it in a real Chromium is one command and the only thing that would notice.
+run "web build" bash -c 'node scripts/build-web.cjs >/dev/null && node scripts/check-web.mjs'
+
 # --- End to end ----------------------------------------------------------------
 if [ "$RUN_E2E" -eq 1 ]; then
   run "end-to-end suites" bash scripts/e2e-all.sh

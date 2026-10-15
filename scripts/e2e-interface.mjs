@@ -142,33 +142,90 @@ const groupLabels = await app.evaluate(`
 check(JSON.stringify(groupLabels) === JSON.stringify(["Работа", "Система"]),
   "both groups are named, so the split reads as two sections", JSON.stringify(groupLabels));
 
-// --- Readability, measured on every screen -------------------------------
-const problems = { tooSmall: [], lowContrast: [], tiny: [] };
-for (const page of PAGES) {
-  await app.evaluate(`document.querySelector('.nav-item[data-page="${page}"]').click(); return 'ok';`);
-  await wait(700);
-  const measured = await app.evaluate(MEASURE);
-  for (const key of Object.keys(problems)) {
-    problems[key].push(...measured[key].map((entry) => `${page}: ${entry}`));
+// --- Readability, measured on every screen, in BOTH themes ---------------
+//
+// The dark palette is a second set of sixty roles, and a role that was chosen for how it looks
+// rather than for what it measures is unreadable in the one theme nobody checked. So the suite
+// walks every screen twice, once per theme: the same floor applies to both, and the theme is
+// switched through the control the owner uses rather than by setting an attribute behind the UI.
+async function measureEveryScreen(themeName) {
+  const problems = { tooSmall: [], lowContrast: [], tiny: [] };
+  for (const page of PAGES) {
+    await app.evaluate(`document.querySelector('.nav-item[data-page="${page}"]').click(); return 'ok';`);
+    await wait(700);
+    const measured = await app.evaluate(MEASURE);
+    for (const key of Object.keys(problems)) {
+      problems[key].push(...measured[key].map((entry) => `${themeName} ${page}: ${entry}`));
+    }
   }
-}
-// The booking dialog is the densest screen in the product and the one a first-time owner is
-// most likely to give up on, so it is measured rather than assumed to follow the rest.
-await app.evaluate(`document.querySelector('.nav-item[data-page="reservations"]').click(); return 'ok';`);
-await wait(500);
-await app.evaluate(`document.getElementById('primaryAction').click(); return 'ok';`);
-await wait(700);
-const dialog = await app.evaluate(MEASURE);
-for (const key of Object.keys(problems)) {
-  problems[key].push(...dialog[key].map((entry) => `booking dialog: ${entry}`));
+  return problems;
 }
 
-check(problems.tooSmall.length === 0,
-  "no visible text is smaller than 12px", problems.tooSmall.slice(0, 6).join(" | "));
-check(problems.lowContrast.length === 0,
-  "every text colour meets its contrast floor", problems.lowContrast.slice(0, 6).join(" | "));
-check(problems.tiny.length === 0,
-  "no control is smaller than the 24px minimum target", problems.tiny.slice(0, 6).join(" | "));
+const setTheme = async (choice) => {
+  // Through the Settings control: it is the one the owner has, and it goes through localStorage
+  // and the pre-paint bootstrap exactly as a real switch does.
+  await app.evaluate(`document.querySelector('.nav-item[data-page="settings"]').click(); return 'ok';`);
+  await wait(400);
+  await app.evaluate(`
+    const select = document.getElementById('themeSelect');
+    select.value = ${JSON.stringify(choice)};
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    return document.documentElement.dataset.theme;
+  `);
+  await wait(400);
+  return app.evaluate(`return document.documentElement.dataset.theme`);
+};
+
+check((await setTheme("light")) === "light", "the Settings control switches to the light theme");
+const lightProblems = await measureEveryScreen("light");
+const lightDialog = await measureBookingDialog("light");
+
+// Dark, measured the same way. The sidebar is dark in both themes, so a fault there is a fault in
+// the light pass; what this pass is for is every card, table, input and dialog.
+check((await setTheme("dark")) === "dark", "and to the dark theme");
+const darkProblems = await measureEveryScreen("dark");
+const darkDialog = await measureBookingDialog("dark");
+// The booking dialog is the densest screen in the product and the one a first-time owner is
+// most likely to give up on, so it is measured rather than assumed to follow the rest — and in
+// both themes, because it is drawn after the theme pass and would otherwise be measured in
+// whichever one happened to be left on.
+async function measureBookingDialog(themeName) {
+  const found = { tooSmall: [], lowContrast: [], tiny: [] };
+  await app.evaluate(`document.querySelector('.nav-item[data-page="reservations"]').click(); return 'ok';`);
+  await wait(500);
+  await app.evaluate(`document.getElementById('primaryAction').click(); return 'ok';`);
+  await wait(700);
+  const measured = await app.evaluate(MEASURE);
+  for (const key of Object.keys(found)) {
+    found[key].push(...measured[key].map((entry) => `${themeName} booking dialog: ${entry}`));
+  }
+  await app.evaluate(`
+    const dialog = document.getElementById('reservationDialog');
+    if (dialog?.open) dialog.close();
+    return 'ok';
+  `);
+  await wait(300);
+  return found;
+}
+
+const bothThemes = (key) => [
+  ...lightProblems[key], ...lightDialog[key], ...darkProblems[key], ...darkDialog[key],
+];
+check(bothThemes("tooSmall").length === 0,
+  "no visible text is smaller than 12px, in either theme", bothThemes("tooSmall").slice(0, 6).join(" | "));
+check(bothThemes("lowContrast").length === 0,
+  "every text colour meets its contrast floor, in either theme",
+  bothThemes("lowContrast").slice(0, 6).join(" | "));
+check(bothThemes("tiny").length === 0,
+  "no control is smaller than the 24px minimum target, in either theme",
+  bothThemes("tiny").slice(0, 6).join(" | "));
+
+// The switch has to survive a restart, and it has to be applied BEFORE the first paint — a window
+// that paints light and turns dark reads as a fault rather than as a preference.
+const storedTheme = await app.evaluate(`
+  return { stored: localStorage.getItem('rentkeeper.theme'), applied: document.documentElement.dataset.theme };
+`);
+check(storedTheme.stored === "dark", "the chosen theme is remembered on this device", String(storedTheme.stored));
 
 // --- The sections of the booking form are numbered as shown ---------------
 // The food section is hidden for a place without a kitchen, and the numbers used to be typed

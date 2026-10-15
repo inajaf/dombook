@@ -285,10 +285,33 @@ because every serious bug in this project was invisible to both unit suites:
   keeping the values it does not show.
 - **`e2e-documents.mjs`** — a contract and an invoice written as real PDF files, checked for a
   PDF header, a plausible size and a PAGE COUNT, plus the requisites they print.
+- **`e2e-calendar.mjs`** — the timeline: one bar per stay spanning the nights it holds, a window
+  that pages, the 14/21/30 range actually resizing the grid, the hover card, and a booking started
+  by clicking a free night.
 - **`e2e-operations.mjs`** — check-in, early checkout, cancel, delete, archive/restore, backup.
 - **`e2e-security.mjs`** — two tenants; neither can read, write or book into the other's data,
   and the signed-out bridge refuses everything.
 - **`e2e-sync.mjs`** — a real push and pull, with the nights confirmed in PostgreSQL.
+
+### The harness must never replay a block (this was the flake)
+
+`evaluate()` in `scripts/e2e-lib.mjs` collected a block's result by awaiting its promise over CDP.
+Chrome DROPS that promise when the renderer is busy — `Promise was collected` — which is
+indistinguishable from a crash, so the harness retried the block. **A retry replays everything the
+block did.** A block that created a booking and then redrew re-ran its create, and the second
+attempt was refused as *"уже занят"* by the row the FIRST attempt had just written. The suite then
+reported a product fault — a booking colliding with a row the run never created, an early checkout
+refused because the row it had just checked in was not active — while the product was correct. It
+was intermittent, because it depended on how busy the renderer happened to be.
+
+That is the shape of the failure this file carried as unexplained: *"a booking refused as already
+occupied by a row the suite never created, which looks exactly like a product bug"*, and the
+cancel-block cascade below. It was diagnosed by logging every retry and reading the app's own error
+log, which showed the create being refused **by the row the same run had just made**.
+
+The harness now gives each block a token, starts it, and POLLS `window[token]` for the result. The
+block runs exactly once whatever the inspector does with the promise, and a navigation is reported
+as a navigation instead of being retried into a false pass. **Do not reintroduce a retry.**
 
 ### Writing one: the traps, all of which cost real time here
 
@@ -340,9 +363,10 @@ separate them:
 | the unit is there, the dates are refused | `Заезд можно оформить максимум на 21 день вперёд — до <date>` |
 
 **The original failure was never reproduced** — 5 isolated runs and 4 full `e2e-all.sh` runs, 9
-in total, all green. So this is a diagnosed hardening, not a confirmed fix: whatever produced
-the unit-creation failure is still unexplained. Do not re-broaden it into a hunt without that
-output in hand — it now names the cause on the spot instead of cascading, which is the point.
+in total, all green. Its cause was found later and it was NOT in the product: see *"The harness
+must never replay a block"* above. The retry replayed a write, so the suite created a row twice and
+reported the collision as a booking made by a previous run. The hardening in this section is what
+made the failure name its cause on the spot instead of cascading.
 
 **The entitlement cap was ruled out, and the counter-evidence is worth keeping.** The first
 hypothesis was that the free tier's 1-unit cap refused the create. It cannot have: there is no
@@ -412,6 +436,49 @@ baseline it was written against, and what it reads now:
   screenshot or measurement harness must neutralise animation first — otherwise every
   `animation-fill-mode: both` element is rasterised in its FROM state and the capture shows a
   blank title. A capture artefact, not what a user with a visible window sees.
+
+### The timeline calendar
+
+`src/renderer/js/views/calendar.js` draws the occupancy grid. A booking is **one bar spanning its
+nights**, placed on the day cells' own CSS grid by explicit row and column, with
+`pointer-events: none` so the CELL keeps the click. The earlier version repeated the guest's name
+in every night cell, which made a fortnight look like fourteen separate bookings and hid where each
+stay began and ended.
+
+- **Placement goes through the CSSOM, never a `style="…"` attribute.** The page's CSP is
+  `style-src 'self'`, which does not include `'unsafe-inline'`, so a style ATTRIBUTE is parsed into
+  the DOM and then ignored: `getAttribute('style')` shows it while `getComputedStyle` reports
+  `auto`. A bar without placement is laid out on a row of its own — still visible, still wrong —
+  and `--calendar-days` set that way left the grid 14 columns wide for EVERY range, which is
+  invisible while 14 is the default and wrong the moment it is not. `e2e-calendar.mjs` checks the
+  computed placement and the column count for all three ranges.
+- **The window is a date, not an offset.** `state.calendarStart` is an ISO day and
+  `database.calendar(days, startDate)` bounds the occupancy query by it, so paging forward shows
+  the next period's bookings rather than redrawing the same fortnight.
+- **A stay the window cuts in half is drawn cut** (`is-cut-start` / `is-cut-end`), not as a booking
+  that begins or ends at the edge.
+- **The card counts the stay, not the slice of it on screen**: the nights come from the
+  reservation's own dates, so a booking the window clips still reads "3 ночи" beside its real
+  dates rather than the one night visible.
+- **Inside a template literal, `\n` is a newline and `\D` is `D`.** Two e2e blocks were written
+  with single backslashes and neither failed where you would look: `/\D/g` stripped the letter D
+  out of "Dev-режим" so the login code never matched, and `/\n+/g` became a regex containing a
+  literal newline — a syntax error that left the harness reporting "the page reloaded". It now says
+  the block never started and points at the escapes.
+
+### The web build
+
+`npm run check:web` builds `release/web`, serves it, boots it in a real Chromium (Electron is
+already a dependency) and fails on any console error. It runs inside `check-all.sh`, which is the
+only place that would have noticed the browser build being broken — `npm test` never loads a page.
+
+- **It is the only step in `check-all.sh` that needs a DISPLAY**, and CI is headless. The Electron
+  path comes from `require("electron")` rather than being assembled: a hardcoded
+  `Electron.app/Contents/MacOS/Electron` failed CI on Linux with ENOENT. On Linux the check runs
+  under `xvfb-run` when it is available, and otherwise reports **SKIP** and exits 0 — a check that
+  cannot run must say so, not fail the build and not claim a pass. On Linux it is also started with
+  `--no-sandbox`: the checkerout's `chrome-sandbox` is not setuid, so Electron aborts with
+  *"The SUID sandbox helper binary was found, but is not configured correctly"*.
 
 ### Finding dead CSS tokens
 

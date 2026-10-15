@@ -68,35 +68,78 @@ export async function connect() {
     ws.send(JSON.stringify({ id, method, params }));
   });
 
+  let evalCounter = 0;
+
   /**
-   * Evaluate an async expression in the renderer and return its value.
+   * Run an async block in the renderer and return its value.
    *
-   * "Promise was collected" is a Chrome quirk, not a page error: the inspector drops a pending
-   * promise when the renderer is busy, which happens on the longer scenario blocks. It looks
-   * identical to a crash, so it is retried rather than reported — a genuine page exception
-   * still throws on the first attempt.
+   * The result is collected by POLLING A SLOT THE PAGE OWNS, not by awaiting the promise over CDP.
+   *
+   * Awaiting it is what made this harness lie. Chrome drops a pending `Runtime.evaluate` promise
+   * when the renderer is busy — "Promise was collected" — which is indistinguishable from a crash,
+   * so the old code retried the block. A retry REPLAYS EVERYTHING THE BLOCK DID: a block that
+   * created a booking and then redrew re-ran its create, and the second attempt was refused as
+   * "already occupied" by the row the FIRST attempt had just written. The suite then reported a
+   * product fault — a booking colliding with a row the run never created, an early checkout refused
+   * because the row it had just checked in was not active — while the product was correct. It was
+   * intermittent, which is why it survived: it depended on how busy the renderer happened to be.
+   *
+   * Here the block runs exactly ONCE, whatever the inspector does with the promise, and the answer
+   * is read back from `window[token]` when it is ready.
    */
-  const evaluateOnce = async (expression) => {
-    const result = await send("Runtime.evaluate", {
-      expression: `(async () => { ${expression} })()`,
-      awaitPromise: true,
+  const evaluate = async (expression, { timeoutMs = 120_000 } = {}) => {
+    const token = `__rkEval${++evalCounter}`;
+    await send("Runtime.evaluate", {
+      expression: `
+        window[${JSON.stringify(token)}] = { done: false, value: undefined, error: null };
+        (async () => {
+          try { window[${JSON.stringify(token)}].value = await (async () => { ${expression} })(); }
+          catch (error) { window[${JSON.stringify(token)}].error = String((error && error.stack) || error); }
+          finally { window[${JSON.stringify(token)}].done = true; }
+        })();
+        "started"`,
       returnByValue: true,
     });
-    if (result.exceptionDetails) {
-      throw new Error("page error: " + (result.exceptionDetails.exception?.description ?? JSON.stringify(result.exceptionDetails)));
-    }
-    return result.result.value;
-  };
 
-  const evaluate = async (expression) => {
-    for (let attempt = 1; ; attempt += 1) {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      let slot;
       try {
-        return await evaluateOnce(expression);
+        const result = await send("Runtime.evaluate", {
+          expression: `window[${JSON.stringify(token)}] ? { done: window[${JSON.stringify(token)}].done, error: window[${JSON.stringify(token)}].error, value: window[${JSON.stringify(token)}].value } : null`,
+          returnByValue: true,
+        });
+        slot = result.result.value;
       } catch (error) {
-        const collected = /Promise was collected/.test(error.message);
-        if (!collected || attempt >= 3) throw error;
-        await new Promise((r) => setTimeout(r, 400));
+        // A navigation destroys the page's slot. That is a real failure of the block, and it must
+        // not be mistaken for a lost promise — the old code's retry hid exactly this too.
+        throw new Error("the page navigated while a block was running: " + error.message);
       }
+      if (slot === null) {
+        // A missing slot is NOT proof of a reload: a block with a syntax error never assigns one.
+        // Saying "the page reloaded" there sends the reader looking for a navigation that never
+        // happened, so the page is asked whether it is still the same document.
+        let alive = true;
+        try {
+          const probe = await send("Runtime.evaluate", { expression: "1 + 1", returnByValue: true });
+          alive = probe?.result?.value === 2;
+        } catch {
+          alive = false;
+        }
+        throw new Error(alive
+          ? "the block did not start — most likely a syntax error in it (check escapes inside the template literal): " + expression.trim().split("\n")[0].slice(0, 60)
+          : "the page reloaded while a block was running");
+      }
+      if (slot.done) {
+        // The slot is dropped so a long run does not accumulate renderer-side state.
+        await send("Runtime.evaluate", { expression: `delete window[${JSON.stringify(token)}]`, returnByValue: true });
+        if (slot.error) throw new Error("page error: " + slot.error);
+        return slot.value;
+      }
+      if (Date.now() > deadline) {
+        throw new Error("block did not finish within " + timeoutMs + "ms: " + expression.trim().split("\n")[0].slice(0, 60));
+      }
+      await wait(100);
     }
   };
 

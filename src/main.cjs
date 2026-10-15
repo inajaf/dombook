@@ -254,7 +254,7 @@ function registerIpc() {
     });
 
     handle("dashboard:get", () => database.dashboard());
-    handle("calendar:get", (payload) => database.calendar(payload?.days ?? 14));
+    handle("calendar:get", (payload) => database.calendar(payload?.days ?? 14, payload?.startDate ?? null));
   // The renderer is sandboxed and cannot load modules, so the month count a tenancy displays
   // is computed here, where the shared booking-policy module already lives. One
   // implementation, pinned in both languages by fixtures/rental-terms-cases.json.

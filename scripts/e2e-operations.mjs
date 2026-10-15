@@ -76,7 +76,10 @@ const nightsOn = async (unitId, from, to) => app.evaluate(`
 // from an earlier run cannot collide with them. The suite previously used fixed offsets and
 // intermittently failed with "already occupied" by a booking it had not made in this run —
 // an environment problem that read exactly like a product bug.
-const stay = await app.evaluate(`
+// The window is READ first and the booking written second, in two blocks. A single block that
+// reads a calendar and then writes cannot be safely retried — and both halves are long enough to
+// lose the inspector's promise, which is exactly why the retry existed.
+const window_ = await app.evaluate(`
   const today = (await window.domBook.system.info()).data.bookingPolicy.today;
   const add = (iso, n) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
   const occupancy = (await window.domBook.calendar.get(60)).data?.occupancy || [];
@@ -87,17 +90,23 @@ const stay = await app.evaluate(`
     const taken = occupancy.some((o) => o.property_id === ${JSON.stringify(base.unitId)} && o.night_date >= from && o.night_date < to);
     if (!taken) { start = offset; break; }
   }
+  return { today, checkIn: add(today, start), checkOut: add(today, start + 3), actualCheckOut: add(today, start + 1) };
+`);
+const stay = await app.evaluate(`
   const booking = await window.domBook.reservations.create({
     propertyId: ${JSON.stringify(base.unitId)}, guestName: 'Операционный гость', status: 'hold',
     prepaidMinor: 0, depositMinor: 0, depositStatus: 'none', adults: 2, children: 0,
-    checkInDate: add(today, start), checkOutDate: add(today, start + 3) });
+    checkInDate: ${JSON.stringify(window_.checkIn)}, checkOutDate: ${JSON.stringify(window_.checkOut)} });
   await refreshCore();
-  return { ...booking, start, actualCheckOut: add(today, start + 1) };
+  return booking;
 `);
 check(stay.ok === true, "a booking is created with status hold", `err=${stay.error ?? "none"}`);
 
+const currentStay = await app.evaluate(`
+  return (await window.domBook.reservations.list()).data.find((r) => r.id === ${JSON.stringify(stay.data?.id)}) || null;
+`);
 const checkedIn = await app.evaluate(`
-  const current = (await window.domBook.reservations.list()).data.find((r) => r.id === ${JSON.stringify(stay.data?.id)});
+  const current = ${JSON.stringify(currentStay)};
   if (!current) return { ok: false, error: 'the booking is not in the list' };
   const r = await window.domBook.reservations.update(current.id, {
     propertyId: current.property_id, guestName: current.guest_name,
@@ -125,16 +134,20 @@ check(await nightsOn(base.unitId, stay.data.check_in_date, stay.data.check_out_d
 // unit is unsellable for dates nobody is in it.
 // A guest leaves after the first night. The date comes from the booking, not from an offset
 // guessed before it existed.
-const earlyResult = await app.evaluate(`
+const beforeCheckout = await app.evaluate(`
   const current = (await window.domBook.reservations.list()).data.find((r) => r.id === ${JSON.stringify(stay.data?.id)});
   const plus = (iso, n) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
-  const actual = plus(current.check_in_date, 1);
+  return { id: current.id, checkIn: current.check_in_date, checkOut: current.check_out_date,
+    actual: plus(current.check_in_date, 1) };
+`);
+const earlyResult = await app.evaluate(`
+  const current = ${JSON.stringify(beforeCheckout)};
   const f = document.getElementById('earlyCheckoutForm');
-  f.elements.actualCheckOutDate.value = actual;
+  f.elements.actualCheckOutDate.value = current.actual;
   const r = await window.domBook.reservations.earlyCheckout(current.id, {
-    actualCheckOutDate: actual, billingPolicy: 'keep_total' });
+    actualCheckOutDate: current.actual, billingPolicy: 'keep_total' });
   await refreshCore();
-  return { r, actual, checkIn: current.check_in_date, checkOut: current.check_out_date };
+  return { r, actual: current.actual, checkIn: current.checkIn, checkOut: current.checkOut };
 `);
 const early = earlyResult.r;
 check(early.ok === true, "an early checkout is recorded", `err=${early.error ?? "none"}`);
