@@ -290,6 +290,26 @@ because every serious bug in this project was invisible to both unit suites:
   and the signed-out bridge refuses everything.
 - **`e2e-sync.mjs`** — a real push and pull, with the nights confirmed in PostgreSQL.
 
+### The harness must never replay a block (this was the flake)
+
+`evaluate()` in `scripts/e2e-lib.mjs` collected a block's result by awaiting its promise over CDP.
+Chrome DROPS that promise when the renderer is busy — `Promise was collected` — which is
+indistinguishable from a crash, so the harness retried the block. **A retry replays everything the
+block did.** A block that created a booking and then redrew re-ran its create, and the second
+attempt was refused as *"уже занят"* by the row the FIRST attempt had just written. The suite then
+reported a product fault — a booking colliding with a row the run never created, an early checkout
+refused because the row it had just checked in was not active — while the product was correct. It
+was intermittent, because it depended on how busy the renderer happened to be.
+
+That is the shape of the failure this file carried as unexplained: *"a booking refused as already
+occupied by a row the suite never created, which looks exactly like a product bug"*, and the
+cancel-block cascade below. It was diagnosed by logging every retry and reading the app's own error
+log, which showed the create being refused **by the row the same run had just made**.
+
+The harness now gives each block a token, starts it, and POLLS `window[token]` for the result. The
+block runs exactly once whatever the inspector does with the promise, and a navigation is reported
+as a navigation instead of being retried into a false pass. **Do not reintroduce a retry.**
+
 ### Writing one: the traps, all of which cost real time here
 
 - **Use `freshStart(appHdl)`, never `resetAuthState()` alone.** The app holds its database in
@@ -340,9 +360,10 @@ separate them:
 | the unit is there, the dates are refused | `Заезд можно оформить максимум на 21 день вперёд — до <date>` |
 
 **The original failure was never reproduced** — 5 isolated runs and 4 full `e2e-all.sh` runs, 9
-in total, all green. So this is a diagnosed hardening, not a confirmed fix: whatever produced
-the unit-creation failure is still unexplained. Do not re-broaden it into a hunt without that
-output in hand — it now names the cause on the spot instead of cascading, which is the point.
+in total, all green. Its cause was found later and it was NOT in the product: see *"The harness
+must never replay a block"* above. The retry replayed a write, so the suite created a row twice and
+reported the collision as a booking made by a previous run. The hardening in this section is what
+made the failure name its cause on the spot instead of cascading.
 
 **The entitlement cap was ruled out, and the counter-evidence is worth keeping.** The first
 hypothesis was that the free tier's 1-unit cap refused the create. It cannot have: there is no
