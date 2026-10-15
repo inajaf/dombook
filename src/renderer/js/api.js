@@ -117,9 +117,32 @@ function createBrowserDemoApi() {
     };
   };
   return {
+    // There is no server behind the web build, and no way to deliver a one-time code, so the demo
+    // starts signed in. It answers the same SHAPE as the real bridge, which is what the renderer
+    // needs; it is not a fake login screen.
+    auth: {
+      status: () => response({
+        authenticated: true,
+        baseUrl: "demo",
+        session: {
+          token: "demo",
+          accountId: "demo",
+          accountName: "Демонстрационный аккаунт",
+          user: { email: "demo@rentkeeper.test", name: "Демо-режим" },
+          plan: "free",
+        },
+      }),
+      send: () => response({ loginable: true, code: "000000" }),
+      setup: () => response({ ok: true }),
+      verify: () => response({ token: "demo", accountId: "demo", accountName: "Демонстрационный аккаунт", user: { email: "demo@rentkeeper.test", name: "Демо-режим" }, plan: "free" }),
+      setPlan: () => response({ plan: "free" }),
+      logout: () => response({ ok: true }),
+    },
     dashboard: { get: () => response({ today: new Date().toISOString().slice(0, 10), activeProperties: properties.filter((p) => p.status === "active").length, activeReservations: reservations.filter((r) => ["hold", "confirmed", "checked_in"].includes(r.status)).length, expectedMinor: reservations.reduce((sum, r) => sum + Math.max(r.total_minor - r.prepaid_minor, 0), 0), refundsDueMinor: reservations.reduce((sum, r) => sum + Math.max(r.prepaid_minor - r.total_minor, 0), 0), depositsHeldMinor: reservations.filter((r) => r.deposit_status === "received").reduce((sum, r) => sum + r.deposit_minor, 0), arrivals: [], departures: [] }) },
-    calendar: { get: (days = 14) => {
-      const start = new Date();
+    calendar: { get: (days = 14, startDate = null) => {
+      // `startDate` is what makes the calendar navigable here too. Without it the demo could page
+      // nowhere: every window began today, exactly as the desktop did before the same fix.
+      const start = startDate ? new Date(`${startDate}T00:00:00`) : new Date();
       const dates = Array.from({ length: days }, (_, index) => new Date(start.getTime() + index * 86_400_000).toISOString().slice(0, 10));
       const occupancy = [];
       reservations.filter((r) => !["cancelled", "no_show"].includes(r.status)).forEach((r) => {
@@ -127,7 +150,7 @@ function createBrowserDemoApi() {
           occupancy.push({ property_id: r.property_id, night_date: cursor.toISOString().slice(0, 10), reservation_id: r.id, guest_name: r.guest_name, status: r.status });
         }
       });
-      return response({ dates, properties: properties.filter((p) => p.status === "active"), occupancy });
+      return response({ dates, startDate: dates[0], properties: properties.filter((p) => p.status === "active"), occupancy });
     } },
     places: {
       list: () => response(places),

@@ -24,7 +24,8 @@
     "build:mac": "electron-builder --mac --x64 --arm64 --publish never",
     "build:win": "electron-builder --win --x64 --publish never",
     "build:linux": "electron-builder --linux --x64 --publish never",
-    "build:web": "node scripts/build-web.cjs"
+    "build:web": "node scripts/build-web.cjs",
+    "check:web": "node scripts/build-web.cjs && node scripts/check-web.mjs"
   },
   "dependencies": {
     "sql.js": "1.14.1"
