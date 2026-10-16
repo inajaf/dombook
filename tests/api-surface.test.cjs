@@ -10,6 +10,13 @@ const { RentKeeperDatabase } = require("../src/database.cjs");
 // that no test touches passes every behavioural check and fails in the application, at the moment
 // a user opens the screen that needed it.
 //
+// The list changed here, when the schema work moved to `src/domain/migrations.cjs`: `migrate`,
+// `migrateLegacyIntegerIds`, `rebuildReservationsForConflictStatus`, `ensureColumn` and
+// `ensureOutboxColumns` are gone from the class. The pin failed first, and the names were removed
+// only after grepping every file outside `database.cjs` and the new module and finding no caller.
+// Removing a name nobody calls is the refactor working. Removing one somebody calls is the failure
+// this exists to prevent, and the two look identical in a diff.
+//
 // So the surface is written down. It was captured from the RUNTIME prototype, not from a scan of
 // the source: the first draft of this list came from reading the file and was missing eight
 // members, because an accessor and a differently declared method do not look like the pattern the
@@ -33,9 +40,7 @@ const EXPECTED = [
   "documentRequisites",
   "earlyCheckout",
   "enqueueSync",
-  "ensureColumn",
   "ensureDeviceId",
-  "ensureOutboxColumns",
   "entitlements",
   "failedSyncCount",
   "getLanguage",
@@ -51,14 +56,11 @@ const EXPECTED = [
   "listPlaces",
   "listProperties",
   "listReservations",
-  "migrate",
-  "migrateLegacyIntegerIds",
   "pendingSyncCount",
   "pendingSyncEntries",
   "persist",
   "pruneBackups",
   "query",
-  "rebuildReservationsForConflictStatus",
   "recordSyncFailure",
   "replaceReservationMeals",
   "reset",
