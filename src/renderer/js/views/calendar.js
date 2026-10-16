@@ -20,7 +20,8 @@
 
 import { $, escapeHtml } from "../dom.js";
 import { state } from "../store.js";
-import { guestCountLabel, interfaceLocale, money, nightsBetween, shortDate } from "../formatters.js";
+import { guestCountLabel, interfaceLocale, money, nightLabel, nightsBetween, shortDate } from "../formatters.js";
+import { translate, withCounts } from "../i18n-text.js";
 
 /** The ranges the owner can choose between. 14 fits a laptop, 30 fits a month of planning. */
 export const CALENDAR_RANGES = [14, 21, 30];
@@ -104,7 +105,7 @@ function popoverHtml(reservation, visible) {
       </div>
       <dl class="calendar-popover-rows">
         <div><dt>Даты</dt><dd data-i18n-ignore>${escapeHtml(shortDate(reservation.check_in_date))} — ${escapeHtml(shortDate(reservation.check_out_date))} · ${nights} ${nights === 1 ? "ночь" : nights < 5 ? "ночи" : "ночей"}</dd></div>
-        ${visible < nights ? `<div><dt>В окне</dt><dd>${visible} из ${nights} ночей — остальное за пределами показанных дат</dd></div>` : ""}
+        ${visible < nights ? `<div><dt>${escapeHtml(translate("В окне"))}</dt><dd>${escapeHtml(withCounts(translate("{visible} из {nights} ночей, остальное за пределами показанных дат"), { visible, nights }))}</dd></div>` : ""}
         <div><dt>Гость</dt><dd data-i18n-ignore>${escapeHtml(contact)}${reservation.adults ? ` · ${escapeHtml(guestCountLabel((reservation.adults || 0) + (reservation.children || 0)))}` : ""}</dd></div>
         <div><dt>Объект</dt><dd data-i18n-ignore>${escapeHtml(reservation.property_name || "")}</dd></div>
         <div><dt>Оплата</dt><dd>${escapeHtml(payment)}</dd></div>
@@ -233,7 +234,7 @@ export function renderCalendar() {
 
     const free = freeWindow(data, property.id);
     const freeHint = free.nights
-      ? `<small class="calendar-free-hint" data-i18n-ignore>свободно ${free.nights} ${free.nights === 1 ? "ночь" : free.nights < 5 ? "ночи" : "ночей"} с ${escapeHtml(shortDate(free.start))}</small>`
+      ? `<small class="calendar-free-hint" data-i18n-ignore>${escapeHtml(withCounts(translate("свободно {nights} с {date}"), { nights: `${free.nights} ${nightLabel(free.nights)}`, date: shortDate(free.start) }))}</small>`
       : `<small class="calendar-free-hint is-full" data-i18n-ignore>все ночи заняты</small>`;
     return `
     <div class="calendar-cell calendar-house" data-place-row="${row}" data-place-column="1">
@@ -251,7 +252,7 @@ export function renderCalendar() {
     ${navHtml(data.dates)}
     <div class="calendar-summary">
       <span class="calendar-stat"><strong>${summary.load}%</strong> занято</span>
-      <span class="calendar-stat">${summary.taken} из ${summary.capacity} ночей</span>
+      <span class="calendar-stat">${escapeHtml(withCounts(translate("{taken} из {capacity} ночей"), { taken: summary.taken, capacity: summary.capacity }))}</span>
       <span class="calendar-stat">Заездов <strong>${summary.arrivals}</strong></span>
       <span class="calendar-stat">Выездов <strong>${summary.departures}</strong></span>
       ${summary.revenue > 0 ? `<span class="calendar-stat">К доплате <strong data-i18n-ignore>${escapeHtml(money(summary.revenue, summary.currency))}</strong></span>` : ""}

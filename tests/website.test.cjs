@@ -34,16 +34,50 @@ test("обещанные платформы названы, а мобильна�
   // an honest sentence.
   assert.match(html, /macOS/, "не сказано про macOS");
   assert.match(html, /Windows/, "не сказано про Windows");
-  assert.match(html, /Мобильной версии нет/, "мобильная версия не названа прямо");
-  assert.match(html, /mobile-gate/, "нет экрана для телефона");
+  assert.match(html, /No phone version/, "отсутствие мобильной версии не сказано прямо");
+  assert.match(html, /class="gate"/, "нет экрана для телефона");
 });
 
-test("ссылки на скачивание ведут в релизы, а не в никуда", () => {
-  const downloads = [...html.matchAll(/class="download__card[^"]*"\s+href="([^"]+)"/g)].map((m) => m[1]);
-  assert.equal(downloads.length, 2, `кнопок скачивания найдено ${downloads.length}`);
-  for (const href of downloads) {
-    assert.match(href, /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/releases/,
-      `кнопка скачивания ведёт не в релизы: ${href}`);
+test("страница не обещает сборку, которой нет", () => {
+  // The download buttons led to a releases page with NOTHING on it: the v0.2.0 tag exists only on
+  // a local machine, and `gh release list` was empty. A product page whose primary button is a
+  // dead end is the most expensive kind of wrong, so the page has to say the state out loud.
+  assert.match(html, /No build is published yet/, "страница умалчивает, что сборки не опубликованы");
+  assert.match(html, /build it from source|build from source/i, "не сказано, что делать вместо этого");
+});
+
+test("каждый текст на странице переведён на три языка", () => {
+  // A missing key is not a blank, it is English: the page falls back, which is right, and silent,
+  // which is not. The application's own markup has the same guard for the same reason.
+  const dict = fs.readFileSync(path.join(SITE, "i18n.js"), "utf8");
+  const keys = [...html.matchAll(/data-i18n="([^"]+)"/g)].map((m) => m[1]);
+  assert.ok(keys.length > 50, `ключей перевода найдено ${keys.length}`);
+  const [ru, az] = dict.split("var AZ");
+  for (const [name, part] of [["ru", ru], ["az", az]]) {
+    const defined = new Set([...part.matchAll(/"([A-Za-z0-9.]+)"\s*:/g)].map((m) => m[1]));
+    const missing = [...new Set(keys)].filter((key) => !defined.has(key));
+    assert.deepEqual(missing, [], `${name}: нет перевода для ${missing.join(", ")}`);
+  }
+  // English is not in the dictionary on purpose: it is snapshotted from the markup, so the two
+  // cannot drift into disagreeing about what the page says.
+  assert.doesNotMatch(ru, /^\s*"en"/m, "английский должен оставаться в разметке");
+});
+
+test("в текстах нет штампов машинного письма", () => {
+  // The page is read by people deciding whether to trust the product with their bookings. Long
+  // dashes and the rest of the register that gives a text away cost more here than anywhere.
+  const i18n = fs.readFileSync(path.join(SITE, "i18n.js"), "utf8");
+  const tells = [
+    ["длинное тире", /\u2014/],
+    ["дефис вместо тире", /\s-\s/],
+    ["not just X but Y", /not just .{3,40} but /i],
+  ];
+  for (const [label, pattern] of tells) {
+    assert.doesNotMatch(html, pattern, `в разметке найден штамп: ${label}`);
+    assert.doesNotMatch(i18n, pattern, `в переводах найден штамп: ${label}`);
+  }
+  for (const word of ["delve", "showcase", "testament to", "vibrant", "seamless", "leverage", "utilize"]) {
+    assert.doesNotMatch(html, new RegExp(word, "i"), `в разметке найден штамп: ${word}`);
   }
 });
 
@@ -51,8 +85,8 @@ test("ссылки на скачивание ведут в релизы, а не
  * The span of an at-rule's block: from the `{` after its prelude to the matching `}`.
  *
  * Brace counting, not a regular expression, because the question is "is this rule INSIDE that
- * block" — and a regex answers "does this text appear", which is how the first version of this
- * test passed on a page that rendered blank.
+ * block" and a regex answers "does this text appear", which is how an earlier version of this test
+ * passed on a page that rendered blank.
  */
 function blockSpan(css, prelude) {
   const at = css.indexOf(prelude);
@@ -84,22 +118,22 @@ test("движение не является условием видимости
   assert.ok(guard, "скрытие не ограничено включённым скриптом: нет @media (scripting: enabled)");
   for (const index of hiding) {
     assert.ok(index > guard[0] && index < guard[1],
-      "`.reveal` скрыт вне защиты от выключенного скрипта — страница останется пустой");
+      "`.reveal` скрыт вне защиты от выключенного скрипта: страница останется пустой");
   }
 
   assert.match(css, /prefers-reduced-motion/, "не учтён prefers-reduced-motion");
   assert.match(js, /prefers-reduced-motion/, "скрипт не проверяет prefers-reduced-motion");
   assert.match(js, /showAll\(\)/, "нет пути, на котором содержимое показывается без наблюдателя");
-  // ...and the net for a script that runs but whose observer never fires.
   assert.match(js, /setTimeout\(/, "нет страховки на случай, когда наблюдатель не сработал");
 });
 
-test("страница работает и без веб-сервера", () => {
-  // A module script is fetched with CORS, so from a `file://` origin the browser refuses it and the
-  // page is blank — the exact failure this site shipped with, found by rendering it. A classic
-  // script loads either way, and nothing on this page needs imports.
-  const script = html.match(/<script[^>]*src="\.\/main\.js"[^>]*>/);
-  assert.ok(script, "нет подключения main.js");
-  assert.doesNotMatch(script[0], /type="module"/,
-    "main.js подключён модулем: со скачанного файла он не загрузится, и страница будет пустой");
+test("заголовок остаётся видимым без анимации", () => {
+  // The hero title is masked and animated up from below. If the resting state were the hidden one,
+  // the first thing a visitor reads would be missing for anyone whose animation never runs.
+  const css = fs.readFileSync(path.join(SITE, "styles.css"), "utf8");
+  const reduced = blockSpan(css, "@media (prefers-reduced-motion: reduce)");
+  assert.ok(reduced, "нет блока prefers-reduced-motion");
+  const block = css.slice(reduced[0], reduced[1]);
+  assert.match(block, /\.hero__title\s+\.line__in\s*\{[^}]*transform:\s*none/,
+    "при отключённой анимации строки заголовка остаются сдвинутыми за край");
 });
