@@ -6,11 +6,11 @@
 // otherwise translated sidebar, and nothing anywhere reports it. Adding a label is therefore a
 // two-file change, and this is the check that says so.
 //
-// Scope: the static markup. `src/renderer/app.js` builds a great deal of text at runtime from
-// Russian literals (error messages, status labels, interpolation), and those are NOT covered
-// here — they are asserted where they are produced, and the e2e branding suite asserts the
-// rendered result in all three locales. Widening this file to app.js would mean guessing which
-// Cyrillic literal is user-facing, and a guess is not a test.
+// Scope: the static markup, plus the phrases a view builds through `translate()` from
+// `js/i18n-text.js`. What is still NOT covered is a bare Russian literal in the renderer (error
+// messages, interpolation): guessing which Cyrillic string is user-facing would be a guess, not a
+// test. The rule for a view is therefore to build its text with `translate()`, which this file can
+// then check, and the e2e branding suite asserts the rendered result in all three locales.
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -101,5 +101,37 @@ test("the navigation is grouped by name, and every group is translated", () => {
     for (const group of groups) {
       assert.ok(locales[code].messages[group], `${code}.js is missing the group label "${group}"`);
     }
+  }
+});
+
+test("фразы, которые представления собирают в рантайме, переведены", async () => {
+  // The markup suite above cannot see a string a VIEW builds: it is not in index.html, so a missing
+  // entry does not fail, the phrase simply stays Russian. Two shipped that way in the calendar and
+  // an English screenshot is what found them: "17 из 84 ночей" and "свободно 14 ночей с Oct 29".
+  //
+  // The check reads every `translate("...")` call in the renderer and asserts the dictionaries
+  // carry it. Russian needs no entry: it is the source language and the key comes back as is.
+  const viewsDir = path.join(__dirname, "..", "src", "renderer", "js");
+  const files = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name.endsWith(".js")) files.push(full);
+    }
+  };
+  walk(viewsDir);
+
+  const used = new Set();
+  for (const file of files) {
+    const source = fs.readFileSync(file, "utf8");
+    for (const match of source.matchAll(/\btranslate\(\s*"([^"]+)"/g)) used.add(match[1]);
+  }
+  assert.ok(used.size > 0, "не найдено ни одного вызова translate() со строкой");
+
+  for (const locale of ["en", "az"]) {
+    const dictionary = locales[locale].messages;
+    const missing = [...used].filter((key) => !(key in dictionary));
+    assert.deepEqual(missing, [], `${locale}: нет перевода для ${missing.join(" | ")}`);
   }
 });

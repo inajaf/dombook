@@ -246,6 +246,29 @@ const commands = {
     });
   },
 
+  /**
+   * Switch the application's interface language.
+   *
+   * Added because the product page needs screenshots in the language it is written in, and taking
+   * them meant reaching into the settings form from a throwaway script every time. That is the
+   * thing this CLI exists to stop: the judgement is "I need an English screenshot", the mechanics
+   * belong in a command.
+   */
+  async lang(code) {
+    if (!code) fail("нужен код языка", "node scripts/inspect.mjs lang en   (есть ru, en, az)");
+    return withApp(async (app) => {
+      const applied = await app.evaluate(`
+        const select = document.getElementById('interfaceLanguage');
+        if (!select) return { ok: false, error: 'нет #interfaceLanguage' };
+        select.value = ${JSON.stringify(code)};
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        await new Promise((r) => setTimeout(r, 1200));
+        return { ok: true, value: select.value, html: document.documentElement.lang };
+      `);
+      return applied;
+    });
+  },
+
   /** The tail of the app's own log — where a refused write explains itself. */
   async logs(lines = "40") {
     const file = "/tmp/e2e-app.log";
@@ -271,6 +294,7 @@ if (!command || command === "help" || command === "--help") {
   sync                       очередь и результат последней синхронизации
   shot [файл]                снимок экрана
   signin <email>             вход с dev-кодом
+  lang <ru|en|az>            язык интерфейса приложения
   logs [n]                   хвост лога приложения
 
 Вывод — JSON. Страницы: ${PAGES.join(", ")}
