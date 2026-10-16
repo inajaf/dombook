@@ -179,6 +179,7 @@ window.RentKeeperLocales.en = {
     "Открыть папку базы": "Open database folder",
     "Резервные копии": "Backups",
     "Создать копию": "Create backup",
+    "Хранятся последние 10 копий. Старые удаляются при создании новой.": "The newest 10 backups are kept. Older ones are removed when a new one is made.",
     "Сейчас копии создаются локально. Подключение зашифрованного S3-cloud backup — следующий этап.": "Backups are currently stored locally. Encrypted S3 cloud backup is the next stage.",
     "Интерфейс": "Interface",
     "Язык приложения": "Application language",

@@ -33,6 +33,27 @@ export function renderSettings() {
       <small>${formatBytes(backup.size)}</small>
     </div>
   `).join("") : `<div class="empty-inline">Копий пока нет. Создайте первую перед внесением реальных данных.</div>`;
+  renderDocumentsUsage();
+}
+
+/**
+ * How much disk the documents folder uses.
+ *
+ * Nothing deletes a document automatically, on purpose: a contract is a legal record, and trading
+ * one for a few hundred kilobytes is the wrong trade at any size. The consequence is a folder that
+ * only grows, so its size is shown and the owner decides what to do about it.
+ */
+async function renderDocumentsUsage() {
+  const target = $("#documentsUsage");
+  if (!target) return;
+  try {
+    const usage = unwrap(await api.documents.usage());
+    target.textContent = usage.count
+      ? `Документов: ${usage.count}, всего ${formatBytes(usage.bytes)}. Ничего не удаляется автоматически.`
+      : "Документов пока нет. Они не удаляются автоматически.";
+  } catch (error) {
+    target.textContent = "";
+  }
 }
 
 /** The details a contract prints, kept in app_settings so they follow the owner between devices. */

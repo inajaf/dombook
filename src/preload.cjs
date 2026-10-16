@@ -38,6 +38,7 @@ contextBridge.exposeInMainWorld("domBook", {
     folder: () => invoke("documents:folder"),
     openFolder: () => invoke("documents:openFolder"),
     list: (data) => invoke("documents:list", data),
+    usage: () => invoke("documents:usage"),
     open: (data) => invoke("documents:open", data),
     reveal: (data) => invoke("documents:reveal", data),
   },

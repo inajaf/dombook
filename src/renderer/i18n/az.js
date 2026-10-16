@@ -171,6 +171,7 @@ window.RentKeeperLocales.az = {
     "Открыть папку базы": "Baza qovluğunu aç",
     "Резервные копии": "Ehtiyat nüsxələri",
     "Создать копию": "Nüsxə yarat",
+    "Хранятся последние 10 копий. Старые удаляются при создании новой.": "Ən yeni 10 nüsxə saxlanılır. Yenisi yaradılanda köhnələr silinir.",
     "Сейчас копии создаются локально. Подключение зашифрованного S3-cloud backup — следующий этап.": "Hazırda nüsxələr lokal saxlanılır. Şifrələnmiş S3 cloud backup növbəti mərhələdir.",
     "Интерфейс": "İnterfeys",
     "Язык приложения": "Tətbiqin dili",
