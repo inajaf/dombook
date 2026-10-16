@@ -13,6 +13,8 @@ const path = require("node:path");
 // this catches it in a second rather than in a browser.
 const STYLES = path.join(__dirname, "..", "src", "renderer", "styles.css");
 
+const SHELL = path.join(__dirname, "..", "src", "renderer", "js", "app.js");
+
 const COLOUR_KEYWORDS = ["white", "black", "silver", "gray", "grey", "maroon", "navy", "teal", "olive", "lime", "aqua", "fuchsia"];
 
 function stripComments(text) {
@@ -69,4 +71,127 @@ test("каждая роль определена в обеих темах", () =
   const missing = [...light].filter((name) => thematic(name) && !dark.has(name) && !["color-scheme"].includes(name));
   assert.deepEqual(missing, [],
     "роль определена для светлой темы и не переопределена для тёмной — она останется светлой на тёмной странице");
+});
+
+// THE OTHER HALF OF `animation-fill-mode: both`.
+//
+// A keyframe set that STARTS at `opacity: 0` and is applied with a backwards fill holds the element
+// invisible until the animation runs, and a window that is occluded or throttled never advances the
+// frame clock, so it never runs: the login screen, a page, a table of rows stays blank with nothing
+// on screen to explain it. `settleEntranceMotion` (src/renderer/js/app.js) takes the motion away
+// once it has had its time, which is what puts the element back in its resting state — and it can
+// only do that while two things hold: the animation ENDS VISIBLE and it ends AT ALL. An entrance
+// whose last keyframe hides the element, or one that iterates forever, is content no pass can give
+// back, and it fails in exactly the way this mechanism exists to prevent.
+
+/** The body of every `@keyframes` block in the sheet, by animation name. */
+function keyframeBodies(css) {
+  const bodies = new Map();
+  for (const opener of css.matchAll(/@keyframes\s+([\w-]+)\s*\{/g)) {
+    const start = opener.index + opener[0].length;
+    let depth = 1;
+    let end = start;
+    while (depth > 0 && end < css.length) {
+      if (css[end] === "{") depth += 1;
+      else if (css[end] === "}") depth -= 1;
+      end += 1;
+    }
+    bodies.set(opener[1], css.slice(start, end - 1));
+  }
+  return bodies;
+}
+
+/** `null` when the value is absent or is not a plain number — a `var()` is not ours to judge. */
+function opacityOf(declarations) {
+  const found = declarations.split(";").map((part) => part.trim()).find((part) => /^opacity\s*:/.test(part));
+  if (!found) return null;
+  const value = Number.parseFloat(found.slice(found.indexOf(":") + 1));
+  return Number.isFinite(value) ? value : null;
+}
+
+/** Declarations under the keyframe stops a body labels `from, 0%` (or `to, 100%`) — the two ends. */
+function stopDeclarations(body, stops) {
+  const found = [];
+  for (const rule of body.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    if (rule[1].split(",").some((stop) => stops.test(stop.trim()))) found.push(rule[2]);
+  }
+  return found.join(";");
+}
+
+const START_STOP = /^(from|0%)$/;
+const END_STOP = /^(to|100%)$/;
+
+/** Values of one longhand property in a rule body, comma-separated ones included. */
+function longhandValues(body, property) {
+  const match = body.match(new RegExp(`(?:^|;)\\s*${property}\\s*:([^;]+)`));
+  return match ? match[1].split(",").map((value) => value.trim()) : [];
+}
+
+/**
+ * Every place the sheet holds an element back with a backwards fill: a rule whose animation names
+ * a keyframe set that starts hidden — the entrance shape — and whose fill mode keeps that from-state
+ * applied for as long as the animation has not run.
+ *
+ * Both spellings are read, the `animation` shorthand and the longhands, because a check that only
+ * understood one of them would stop seeing a new entrance the moment somebody wrote the other, and
+ * a guard nobody can trust is worse than none.
+ */
+function entranceAnimations(css, keyframes) {
+  const found = [];
+  for (const rule of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const body = rule[2];
+    const shorthand = body.match(/(?:^|;)\s*animation\s*:\s*([^;]+)/);
+    const value = shorthand ? shorthand[1] : longhandValues(body, "animation-name").join(",");
+    const names = value.trim().split(/[\s,]+/).filter((token) => keyframes.has(token));
+    if (!names.length) continue;
+    const fill = shorthand ? shorthand[1] : longhandValues(body, "animation-fill-mode").join(",");
+    if (!/(?:^|[\s,])(both|backwards)(?=$|[\s,])/.test(fill)) continue;
+    const iterations = shorthand ? shorthand[1] : longhandValues(body, "animation-iteration-count").join(",");
+    for (const name of names) {
+      const keyframesBody = keyframes.get(name);
+      if (opacityOf(stopDeclarations(keyframesBody, START_STOP)) !== 0) continue;
+      found.push({
+        selector: rule[1].trim(),
+        name,
+        infinite: /(?:^|[\s,])(infinite)(?=$|[\s,])/.test(iterations),
+        endsHidden: opacityOf(stopDeclarations(keyframesBody, END_STOP)) === 0,
+      });
+    }
+  }
+  return found;
+}
+
+test("анимация входа заканчивается видимой и конечной", () => {
+  const css = stripComments(fs.readFileSync(STYLES, "utf8"));
+  const keyframes = keyframeBodies(css);
+  const entrances = entranceAnimations(css, keyframes);
+  assert.ok(entrances.length > 0,
+    "в листе не нашлось ни одной анимации входа — либо их правда больше нет, либо проверка перестала видеть лист");
+
+  const problems = [];
+  for (const entrance of entrances) {
+    if (entrance.endsHidden) {
+      problems.push(`${entrance.selector}: ${entrance.name} — последний кадр скрывает элемент`);
+    }
+    if (entrance.infinite) {
+      problems.push(`${entrance.selector}: ${entrance.name} — не заканчивается никогда`);
+    }
+  }
+  assert.deepEqual(problems, [],
+    "анимация входа оставит содержимое невидимым: вернуть его к покою можно только видимым концом конечной анимации");
+});
+
+test("проход, возвращающий покой, установлен при запуске", () => {
+  const shell = fs.readFileSync(SHELL, "utf8");
+  // The rule above is a promise the SHELL keeps: the sheet is only safe because the motion is taken
+  // away once it has had its time. Delete that and the check above keeps passing while the blank
+  // screen comes back. There is no DOM in this suite, so the wiring is read from the source.
+  assert.match(shell, /document\.getAnimations\(\)/,
+    "оболочка не перебирает анимации страницы — анимация входа останется в невидимом первом кадре");
+  assert.match(shell, /animation\.(finish|cancel)\(\)/,
+    "оболочка не снимает анимацию — элемент останется в её первом кадре");
+  assert.match(shell, /MutationObserver/,
+    "новые анимации появляются и после запуска: без наблюдателя проход увидит только стартовые");
+  assert.match(shell, /^\s*watchEntranceMotion\(\);/m,
+    "проход написан, но не установлен при запуске — до первого прохода анимация успеет остаться в первом кадре");
 });

@@ -590,7 +590,17 @@ suite; the rules that matter every session are here:
   var(--border)` silently removed the border. Grep for used-but-undefined tokens after touching
   the palette — the one-liner is in `docs/ui-findings.md`.
 - **`animation-fill-mode: both` hides what it decorates** in a window that is not compositing.
-  Remove the class on `animationend`, with a timer fallback.
+  The remedy is one pass, not one handler per element: `settleEntranceMotion` in `js/app.js`
+  finishes any animation whose `currentTime` has not moved since it was sampled, and a
+  `MutationObserver` arms it again on every render, so a new animated element is covered without
+  anybody remembering. The per-element rule that survives, and that `tests/styles.test.cjs`
+  enforces, is that an entrance must END VISIBLE and must END AT ALL: an infinite animation, or a
+  last keyframe that hides, is content the pass cannot give back.
+  The measurement that decided the design is worth keeping. In a genuinely occluded window the
+  stuck animation reports `running` with `currentTime` frozen at 0, NOT `pending`, so a rule that
+  settled everything still running after N ms would cut long animations for a normal user, and one
+  that settled only `pending` animations would miss the real case. Movement is the only thing that
+  separates a motion from a freeze.
 - **The harness must never replay a block.** It polls `window[token]`; a retry re-runs a write and
   reports the collision as a product bug. Do not reintroduce one.
 - **Never reuse fixed date offsets in a fixture** — and derive the ASSERTION from the booking too,

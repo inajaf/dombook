@@ -1362,7 +1362,71 @@ function bindAuthEvents() {
   });
 }
 
+/**
+ * Every entrance animation in the stylesheet, settled once it has had its time.
+ *
+ * `animation-fill-mode: both` holds an element in its FROM state — `opacity: 0` for all of these —
+ * until the animation runs, and a window that is occluded or throttled never advances the frame
+ * clock at all. The animation then never leaves its first frame and the content stays invisible:
+ * the login screen, a page, a table of rows, with nothing on screen to explain it. `navigate()`
+ * protects the three topbar animations this way, one at a time; this is the same guarantee for
+ * every animation there is, from one place.
+ *
+ * It cannot live in the stylesheet: the fill mode is what makes the motion visible at all, so a
+ * rule that dropped it would drop the animation. The motion is taken away here instead, which is
+ * invisible to a renderer that played it — the end keyframe IS the resting state — and is the only
+ * thing that gives the content back on one that did not.
+ *
+ * Armed by DOM changes rather than by a call in each view: a row, a card or a dialog that starts
+ * animating a year from now is covered by the same pass, and no view has to remember to ask.
+ */
+// Late rather than tight. An animation is briefly pending, with no current time at all, and a pass
+// that judged it then would take a motion away before it had started — so this is a few frames of
+// room for a renderer that IS compositing to have moved the clock, not a guess at a duration.
+const MOTION_SETTLE_MS = 900;
+let motionSettleTimer = 0;
+/** Where each animation stood when the pass was armed, so a motion can be told from a freeze. */
+let motionAtArm = new Map();
+const motionObserver = new MutationObserver(armEntranceMotion);
+
+function armEntranceMotion() {
+  motionAtArm = new Map(document.getAnimations().map((animation) => [animation, animation.currentTime]));
+  clearTimeout(motionSettleTimer);
+  motionSettleTimer = setTimeout(settleEntranceMotion, MOTION_SETTLE_MS);
+}
+
+function settleEntranceMotion() {
+  let undecided = false;
+  for (const animation of document.getAnimations()) {
+    const timing = animation.effect?.getComputedTiming?.();
+    // The busy spinner never ends, so it has no resting state to force — and stopping it would
+    // leave a dead ring on a button that is still working.
+    if (!timing || !Number.isFinite(timing.endTime)) continue;
+    // A finished animation already holds the end state; an idle one applies nothing at all.
+    if (animation.playState === "finished" || animation.playState === "idle") continue;
+    if (!motionAtArm.has(animation)) {
+      // Started after the sample was taken. Guessing here would cut a motion nobody has watched.
+      undecided = true;
+      continue;
+    }
+    // The clock moved, so the renderer is compositing and this motion is playing exactly as
+    // designed, however long it is. What the frame clock left behind is the animation that has not
+    // moved at all since the sample — a duration is not evidence of anything.
+    if (motionAtArm.get(animation) !== animation.currentTime) continue;
+    animation.finish();
+  }
+  if (undecided) armEntranceMotion();
+}
+
+function watchEntranceMotion() {
+  // Before the first render: the login screen's animation starts while the document is still
+  // being parsed, earlier than any listener installed here could see it.
+  armEntranceMotion();
+  motionObserver.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+}
+
 async function boot() {
+  watchEntranceMotion();
   // Before anything is bound or drawn: a view that calls a shell callback has to find one there.
   connectShell({ refresh: refreshCore, navigate, toast, openReservation: openReservationDialog });
   bindEvents();
