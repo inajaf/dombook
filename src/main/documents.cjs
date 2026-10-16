@@ -22,6 +22,9 @@
  * appear.
  */
 
+const path = require("node:path");
+const { pathToFileURL } = require("node:url");
+
 const { wholeMonthsBetween } = require("../domain/booking/booking-policy.cjs");
 
 const ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
@@ -166,11 +169,52 @@ function discountOf(reservation) {
   return null;
 }
 
+/**
+ * The faces a document is measured in, addressed the way the renderer will fetch them.
+ *
+ * These were the system's — `"Times New Roman", Georgia, serif` — which is a different font on
+ * every machine: Times New Roman exists on macOS and on a Windows image with Office, and on a
+ * stock Linux it does not exist at all, so Chromium substitutes another serif with different
+ * advance widths. The same booking then broke its lines elsewhere, and `scripts/e2e-documents.mjs`
+ * asserts a PAGE COUNT — so that assertion was really an assertion about the machine's fonts.
+ *
+ * Liberation Serif is metric-compatible with Times New Roman (same advances, the same 2048
+ * units-per-em), which is why the pages keep the line breaks and the page count they already had
+ * while no longer depending on an installed font. It ships in `build/fonts/`.
+ *
+ * The URL is absolute and built with `pathToFileURL`, because the document is written to a
+ * TEMPORARY file and loaded from there: a relative URL would resolve against the temp directory
+ * and find nothing. `pathToFileURL` is also what escapes the spaces and non-ASCII characters a
+ * real install path contains — "Book program", `C:\Program Files`, a Cyrillic user name.
+ *
+ * `local()` is deliberately NOT listed before the file. A machine that already has some Liberation
+ * Serif — an older 1.x, a distribution's rebuild — would then win over the shipped file, which is
+ * the very machine-dependence this removes.
+ */
+const FONT_FACES = [
+  { weight: 400, file: "LiberationSerif-Regular.ttf" },
+  { weight: 700, file: "LiberationSerif-Bold.ttf" },
+];
+
+function fontFaceRules() {
+  const directory = path.join(__dirname, "..", "..", "build", "fonts");
+  return FONT_FACES.map(({ weight, file }) => `
+    @font-face {
+      font-family: "Liberation Serif";
+      font-style: normal;
+      font-weight: ${weight};
+      src: url("${pathToFileURL(path.join(directory, file)).href}") format("truetype");
+    }`).join("");
+}
+
 function styleSheet() {
   return `
-    @page { size: A4; margin: 18mm 16mm; }
+    @page { size: A4; margin: 18mm 16mm; }${fontFaceRules()}
     * { box-sizing: border-box; }
-    body { margin: 0; color: #17211c; font: 11.5pt/1.5 "Times New Roman", Georgia, serif; }
+    /* No fallback that can change the metrics: Georgia was one, and it is a wider face than the
+       one Times New Roman resolved to. The trailing generic serif is a last resort for an install
+       whose font files are missing, and it is the only case in which the machine decides. */
+    body { margin: 0; color: #17211c; font: 11.5pt/1.5 "Liberation Serif", serif; }
     h1 { margin: 0 0 2mm; font-size: 16pt; text-align: center; }
     h2 { margin: 7mm 0 2mm; font-size: 12.5pt; }
     .meta { display: flex; justify-content: space-between; margin-bottom: 6mm; font-size: 10.5pt; color: #44514a; }
