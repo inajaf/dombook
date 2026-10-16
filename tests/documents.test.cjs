@@ -6,6 +6,9 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const { fileURLToPath } = require("node:url");
 const {
   DOCUMENT_KINDS,
   buildContractHtml,
@@ -229,4 +232,54 @@ test("оба вида документа зарегистрированы и с�
     assert.match(html, /^<!doctype html>/, `${kind} должен быть полным документом`);
     assert.match(html, /@page \{ size: A4/, `${kind} должен задавать формат страницы`);
   }
+});
+
+/** The `src:` URLs the stylesheet asks the renderer to fetch. */
+function fontUrls(html) {
+  return [...html.matchAll(/src: url\("([^"]+)"\)/g)].map((match) => match[1]);
+}
+
+test("документ печатается встроенным шрифтом, а не тем, что стоит на машине", () => {
+  // Times New Roman, which the stack used to name, does not exist on a stock Linux; Chromium then
+  // substitutes a serif with different advance widths, so the same booking broke its lines
+  // elsewhere and could change page count — and scripts/e2e-documents.mjs asserts a page count,
+  // which made that assertion an assertion about the machine's fonts.
+  //
+  // Asserted on the STACK rather than on the whole page, because the stylesheet explains in a
+  // comment which family it replaced, and a substring check over the document would find that
+  // explanation and fail on it.
+  for (const kind of Object.keys(DOCUMENT_KINDS)) {
+    const html = DOCUMENT_KINDS[kind].build({ reservation: kind === "contract" ? tenancy() : stay(), unit, place, requisites, generatedAt: "2026-10-15" });
+    assert.match(html, /font-family: "Liberation Serif"/, `${kind} должен объявлять встроенное семейство`);
+    const stack = /font: [\d.]+pt\/[\d.]+ ([^;]+);/.exec(html)?.[1];
+    assert.equal(stack, `"Liberation Serif", serif`,
+      `${kind} должен печататься встроенным семейством, а последним — только общий serif`);
+  }
+});
+
+test("шрифт документа лежит в поставке, а не только на машине разработчика", () => {
+  // The URL is absolute and points into the repository, so a renamed or missing file is the one
+  // failure the stylesheet cannot show: the page quietly falls back to a system serif, which is
+  // the machine-dependence this replaced. Resolving the URL is what catches it.
+  const urls = fontUrls(buildContractHtml({ reservation: tenancy(), unit, place, requisites, generatedAt: "2026-10-15" }));
+  assert.equal(urls.length, 2, "нужны Regular и Bold — ими набраны и текст, и заголовки");
+  assert.deepEqual(urls.map((url) => path.basename(fileURLToPath(url))).sort(),
+    ["LiberationSerif-Bold.ttf", "LiberationSerif-Regular.ttf"]);
+  for (const url of urls) {
+    const file = fileURLToPath(url);
+    assert.ok(fs.existsSync(file), `${file} должен существовать`);
+    // A stub or a truncated download would satisfy `exists` and still render nothing.
+    assert.ok(fs.statSync(file).size > 100000, `${file} должен быть настоящим шрифтом`);
+  }
+  // The OFL requires the licence to travel with the files it covers.
+  assert.ok(fs.existsSync(path.join(path.dirname(fileURLToPath(urls[0])), "LICENSE.txt")));
+});
+
+test("файлы шрифта попадают в установщик", () => {
+  // `build.files` is an ALLOWLIST, and it did not list build/fonts: the packaged application would
+  // have shipped without the font and printed with whatever serif the user's machine happens to
+  // have. A checkout cannot show that — the file is on disk either way.
+  const { files } = require("../package.json").build;
+  assert.ok(files.some((pattern) => /^build\/fonts\//.test(pattern)),
+    `build.files должен включать build/fonts, а в нём: ${JSON.stringify(files)}`);
 });

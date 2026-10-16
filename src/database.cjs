@@ -336,6 +336,9 @@ function canonicalName(value) {
   return String(value ?? "").trim().toLocaleLowerCase("ru-RU");
 }
 
+/** How many backups stay on disk. The newest are kept, the rest are removed on each new backup. */
+const BACKUP_LIMIT = 10;
+
 class RentKeeperDatabase {
   constructor({ filePath, backupDir, seed = true, todayProvider = todayInTimeZone }) {
     this.filePath = filePath;
@@ -1841,8 +1844,42 @@ class RentKeeperDatabase {
     fs.copyFileSync(this.filePath, backupPath);
     const checksum = crypto.createHash("sha256").update(fs.readFileSync(backupPath)).digest("hex");
     this.audit("backup", null, "created", { file: path.basename(backupPath), checksum });
+    const removed = this.pruneBackups();
     this.persist();
-    return { file: path.basename(backupPath), path: backupPath, checksum, createdAt: nowIso() };
+    return { file: path.basename(backupPath), path: backupPath, checksum, createdAt: nowIso(), removed };
+  }
+
+  /**
+   * Keep the newest BACKUP_LIMIT copies and delete the rest.
+   *
+   * Nothing removed old backups, and each one is a full copy of the database. A daily backup on a
+   * database that grows is a disk that fills quietly, and the failure arrives as a write error in
+   * the middle of somebody's booking rather than as anything that mentions backups.
+   *
+   * A LIMIT, not a size budget: the number of files is what an owner can reason about, and the
+   * newest ten are the ones a bad week is recovered from. Documents are deliberately NOT covered
+   * by this. A contract is a legal record and deleting one automatically would trade a few
+   * hundred kilobytes for the paper a tax inspection asks for, which is the wrong trade at any
+   * size (AGENTS.md records the same reasoning for the documents folder).
+   */
+  pruneBackups() {
+    if (!fs.existsSync(this.backupDir)) return [];
+    const files = fs.readdirSync(this.backupDir)
+      .filter((name) => /^rentkeeper-.*\.sqlite$/.test(name))
+      .map((name) => ({ name, mtime: fs.statSync(path.join(this.backupDir, name)).mtimeMs }))
+      .sort((a, b) => b.mtime - a.mtime);
+    const doomed = files.slice(BACKUP_LIMIT);
+    for (const entry of doomed) {
+      try {
+        fs.rmSync(path.join(this.backupDir, entry.name));
+      } catch {
+        // A backup that cannot be removed is not a reason to fail the backup that was just made.
+      }
+    }
+    if (doomed.length) {
+      this.audit("backup", null, "pruned", { files: doomed.map((entry) => entry.name) });
+    }
+    return doomed.map((entry) => entry.name);
   }
 
   listBackups() {

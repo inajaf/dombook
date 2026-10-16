@@ -83,6 +83,15 @@
   --radius-sm: 10px;
   --radius: 16px;
   --radius-lg: 20px;
+  /* An entrance animation is an `animation-fill-mode: both` on a keyframe set that STARTS at
+   * `opacity: 0`. That is also what makes it dangerous: the backwards fill holds the element
+   * invisible until the animation runs, and a window that is occluded or throttled never advances
+   * the frame clock, so it never does — a page, a table of rows or the whole login screen stays
+   * blank. `settleEntranceMotion` in js/app.js takes the motion away once it has had its time,
+   * which is what returns the element to its resting state. So an entrance MUST end at that
+   * resting state and MUST end at all: a last keyframe that hides the element, or an endless
+   * iteration, is content no pass can give back. `tests/styles.test.cjs` holds that line.
+   */
   --motion-fast: 180ms;
   --motion-normal: 300ms;
   --motion-slow: 380ms;

@@ -431,6 +431,19 @@ prints and what the file contains cannot drift apart.
 - **The month count is derived from the dates** (`wholeMonthsBetween`). `rental_months` is attached
   by the IPC layer when it LISTS reservations and is absent from a single fetched row, which is how
   a twelve-month lease printed "(0 мес.)".
+- **The pages are laid out in a font that ships with the app, not in one the machine has.**
+  `build/fonts/LiberationSerif-{Regular,Bold}.ttf` (SIL OFL 1.1, licence and provenance in
+  `build/fonts/README.md`) are named by `@font-face` and addressed with an absolute `file://` URL,
+  because the document is written to a temp file and loaded from there — a relative URL resolves
+  against the temp directory. Liberation Serif is metric-compatible with Times New Roman, so the
+  line breaks and the page count did not move. The stack used to be
+  `"Times New Roman", Georgia, serif`: Times New Roman does not exist on a stock Linux, Chromium
+  substituted another serif with different advances, and the page-count assertion in the suite was
+  really an assertion about the machine's fonts. **`build.files` is an allowlist** and did not list
+  `build/fonts` — a packaged app would have shipped without the font and printed in whatever serif
+  the user had, which a checkout cannot show. `tests/documents.test.cjs` now resolves the emitted
+  URL to a file that exists and checks the packaging pattern, and with the font embedded the
+  contract went from 153 KB (7 subsets, 88% of it font streams) to 37 KB (2 subsets).
 - **`preferCSSPageSize` is left unset.** A two-page contract came out as a single page once, with
   the clauses and the signature block simply absent, and the file was a valid PDF that opened
   normally and ended mid-sentence. It has **not been reproduced** — 20 generations since, with and
@@ -577,7 +590,17 @@ suite; the rules that matter every session are here:
   var(--border)` silently removed the border. Grep for used-but-undefined tokens after touching
   the palette — the one-liner is in `docs/ui-findings.md`.
 - **`animation-fill-mode: both` hides what it decorates** in a window that is not compositing.
-  Remove the class on `animationend`, with a timer fallback.
+  The remedy is one pass, not one handler per element: `settleEntranceMotion` in `js/app.js`
+  finishes any animation whose `currentTime` has not moved since it was sampled, and a
+  `MutationObserver` arms it again on every render, so a new animated element is covered without
+  anybody remembering. The per-element rule that survives, and that `tests/styles.test.cjs`
+  enforces, is that an entrance must END VISIBLE and must END AT ALL: an infinite animation, or a
+  last keyframe that hides, is content the pass cannot give back.
+  The measurement that decided the design is worth keeping. In a genuinely occluded window the
+  stuck animation reports `running` with `currentTime` frozen at 0, NOT `pending`, so a rule that
+  settled everything still running after N ms would cut long animations for a normal user, and one
+  that settled only `pending` animations would miss the real case. Movement is the only thing that
+  separates a motion from a freeze.
 - **The harness must never replay a block.** It polls `window[token]`; a retry re-runs a write and
   reports the collision as a product bug. Do not reintroduce one.
 - **Never reuse fixed date offsets in a fixture** — and derive the ASSERTION from the booking too,

@@ -440,7 +440,9 @@
             <article class="panel">
               <header class="panel-header"><div><p class="eyebrow">Backup</p><h2>Резервные копии</h2></div><button class="button primary compact" id="createBackup">Создать копию</button></header>
               <p class="muted">Сейчас копии создаются локально. Подключение зашифрованного S3-cloud backup — следующий этап.</p>
+              <p class="rule-hint" id="backupRetention">Хранятся последние 10 копий. Старые удаляются при создании новой.</p>
               <div class="backup-list" id="backupList"></div>
+              <p class="rule-hint" id="documentsUsage" data-i18n-ignore></p>
             </article>
           </div>
         </section>

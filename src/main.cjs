@@ -5,6 +5,7 @@ const fs = require("node:fs/promises");
 // the database path is resolved, and `app.getPath("userData")` is read synchronously later.
 const fsSync = require("node:fs");
 const { RentKeeperDatabase } = require("./database.cjs");
+const { assertCheckoutUrl } = require("./main/checkout-url.cjs");
 const { createAuthApi } = require("./main/auth.cjs");
 const { createAuthSessionStore } = require("./main/auth-session.cjs");
 const { createSyncEngine } = require("./main/sync.cjs");
@@ -181,7 +182,7 @@ function registerIpc() {
     handle("auth:checkout", async (payload) => {
       const checkout = await authApi.checkout(payload?.plan);
       if (!checkout?.checkoutUrl) throw new Error("Paddle не вернул ссылку на оплату");
-      await shell.openExternal(checkout.checkoutUrl);
+      await shell.openExternal(assertCheckoutUrl(checkout.checkoutUrl));
       return checkout;
     });
     handle("auth:logout", () => authApi.logout());
@@ -385,6 +386,36 @@ function registerIpc() {
     // What has already been produced for a booking, so a document from last week is reachable
     // without knowing where the folder is. Filtered by the document number, which is derived from
     // the booking — the same number that is in the file name.
+    /**
+     * How much disk the documents folder uses.
+     *
+     * Nothing deletes a document, on purpose: a contract is a legal record and an automatic
+     * deletion would trade a few hundred kilobytes for the paper a tax inspection asks for. The
+     * consequence is a folder that only grows, so its size is reported and the owner decides.
+     */
+    handle("documents:usage", async () => {
+      const folder = path.join(app.getPath("userData"), "documents");
+      let names = [];
+      try {
+        names = await fs.readdir(folder);
+      } catch {
+        return { folder, count: 0, bytes: 0 };
+      }
+      let count = 0;
+      let bytes = 0;
+      for (const name of names) {
+        if (!name.toLowerCase().endsWith(".pdf")) continue;
+        try {
+          const stats = await fs.stat(path.join(folder, name));
+          count += 1;
+          bytes += stats.size;
+        } catch {
+          // A file that vanished between the listing and the stat is not a reason to fail.
+        }
+      }
+      return { folder, count, bytes };
+    });
+
     handle("documents:list", async (payload) => {
       const folder = path.join(app.getPath("userData"), "documents");
       const reservation = database.getReservation(payload?.reservationId);

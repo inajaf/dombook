@@ -223,6 +223,7 @@ function createBrowserDemoApi() {
       create: () => error("PDF создаётся только в приложении для компьютера"),
       folder: () => response("Browser downloads"),
       openFolder: () => response("Browser downloads"),
+      usage: () => response({ folder: "Browser downloads", count: 0, bytes: 0 }),
     },
   };
 }

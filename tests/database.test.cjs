@@ -1036,3 +1036,33 @@ test("календарь отказывает в неверной дате вм�
   assert.throws(() => database.calendar(14, "15.07.2026"), /неверная дата/);
   assert.throws(() => database.calendar(2), /Период календаря/);
 });
+
+test("старые копии удаляются, когда их становится больше десяти", async (t) => {
+  // Nothing removed old backups, and each one is a full copy of the database. A daily backup on a
+  // database that grows is a disk that fills quietly, and the failure arrives as a write error in
+  // the middle of a booking rather than as anything that mentions backups.
+  const { database } = await createTestDatabase(t);
+  database.createProperty(house());
+
+  for (let i = 0; i < 14; i += 1) database.createBackup();
+
+  const kept = database.listBackups();
+  assert.equal(kept.length, 10, `на диске ${kept.length} копий вместо десяти`);
+  // The newest survive: those are the ones a bad week is recovered from.
+  const onDisk = fs.readdirSync(path.join(database.backupDir)).filter((n) => n.endsWith(".sqlite"));
+  assert.deepEqual(onDisk.sort(), kept.map((b) => b.file).sort());
+});
+
+test("удаление старых копий не трогает документы", async (t) => {
+  // The rule is deliberately asymmetric. A backup is reproducible; a signed contract is not, and
+  // deleting one to save a few hundred kilobytes would trade the wrong thing (AGENTS.md).
+  const { database } = await createTestDatabase(t);
+  const documents = path.join(database.backupDir, "..", "documents");
+  fs.mkdirSync(documents, { recursive: true });
+  const contract = path.join(documents, "dogovor-20260101-abcd.pdf");
+  fs.writeFileSync(contract, "%PDF-1.4 contract");
+
+  for (let i = 0; i < 12; i += 1) database.createBackup();
+
+  assert.ok(fs.existsSync(contract), "документ исчез вместе со старыми копиями");
+});

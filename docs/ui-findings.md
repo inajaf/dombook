@@ -24,6 +24,25 @@ Layout faults that no assertion would have caught, all found by reading screensh
   Both now use `--line`/`--ink`. **Grep for this class of bug** — the one-liner is below.
 - **`.empty-state` was declared twice**, and the second copy silently won the shared properties:
   a 56px empty state was rendering at 44px. Merged into one block.
+### The general remedy, added later
+
+The per-element handler described below was the first fix. It was applied to the topbar and to
+nothing else, and the other thirteen `animation-fill-mode: both` entrances kept the defect.
+
+`settleEntranceMotion` in `src/renderer/js/app.js` now covers all of them from one place. It
+samples every animation's `currentTime`, arms a 900 ms pass, and finishes only those whose
+`currentTime` has not moved. A `MutationObserver` on the document arms it again after any render,
+so a row, a card or a dialog animated later is covered with no per-view hook.
+
+The measurement that decided it. In an occluded window the stuck animation reports `running` with
+`currentTime` frozen at 0, not `pending`. So "settle everything still running after N ms" would cut
+a long animation for a normal user, and "settle only pending" would miss the real case.
+
+The surviving per-element rule is that an entrance must end visible and must end at all. An
+infinite animation has no resting state to force and the pass skips it, so an endless entrance
+whose frames hide the element is content nothing can bring back. `tests/styles.test.cjs` enforces
+both properties on every backwards-filling entrance in the sheet.
+
 - **An entrance animation can hide the content it was meant to decorate.**
   `.topbar.is-changing h1 { animation: … both }` holds the element at `opacity: 0` for the whole
   delay, and a renderer that never composites — an occluded or throttled window — leaves the page
