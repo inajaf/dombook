@@ -1,4 +1,5 @@
 const test = require("node:test");
+const { createBackup, listBackups } = require("../src/domain/backups.cjs");
 const { calendar, dashboard, listPlaces, listProperties, listReservations } = require("../src/domain/reports.cjs");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -583,10 +584,10 @@ test("стоимость, предоплата, остаток и депозит
 test("backup создаёт валидный файл и checksum", async (t) => {
   const { database } = await createTestDatabase(t);
   database.createProperty(house());
-  const backup = database.createBackup();
+  const backup = createBackup(database);
   assert.ok(fs.existsSync(backup.path));
   assert.match(backup.checksum, /^[a-f0-9]{64}$/);
-  assert.equal(database.listBackups().length, 1);
+  assert.equal(listBackups(database).length, 1);
 });
 
 test("все создаваемые записи получают UUID и sync-колонки", async (t) => {
@@ -1045,9 +1046,9 @@ test("старые копии удаляются, когда их станови
   const { database } = await createTestDatabase(t);
   database.createProperty(house());
 
-  for (let i = 0; i < 14; i += 1) database.createBackup();
+  for (let i = 0; i < 14; i += 1) createBackup(database);
 
-  const kept = database.listBackups();
+  const kept = listBackups(database);
   assert.equal(kept.length, 10, `на диске ${kept.length} копий вместо десяти`);
   // The newest survive: those are the ones a bad week is recovered from.
   const onDisk = fs.readdirSync(path.join(database.backupDir)).filter((n) => n.endsWith(".sqlite"));
@@ -1063,7 +1064,7 @@ test("удаление старых копий не трогает докуме�
   const contract = path.join(documents, "dogovor-20260101-abcd.pdf");
   fs.writeFileSync(contract, "%PDF-1.4 contract");
 
-  for (let i = 0; i < 12; i += 1) database.createBackup();
+  for (let i = 0; i < 12; i += 1) createBackup(database);
 
   assert.ok(fs.existsSync(contract), "документ исчез вместе со старыми копиями");
 });

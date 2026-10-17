@@ -1,4 +1,5 @@
 const { app, BrowserWindow, dialog, ipcMain, Menu, shell, safeStorage } = require("electron");
+const { createBackup, listBackups } = require("./domain/backups.cjs");
 const path = require("node:path");
 const fs = require("node:fs/promises");
 // The synchronous API, needed for the one-time data migration below: it must finish before
@@ -483,8 +484,8 @@ function registerIpc() {
       return { canceled: false, path: target, fileName: path.basename(target), folder: path.dirname(target) };
     });
 
-    handle("backups:list", () => database.listBackups());
-    handle("backups:create", () => database.createBackup());
+    handle("backups:list", () => listBackups(database));
+    handle("backups:create", () => createBackup(database));
     handle("system:info", () => database.systemInfo());
     handle("system:setLanguage", (payload) => {
       const language = database.setLanguage(payload?.language);

@@ -22,6 +22,10 @@ const { RentKeeperDatabase } = require("../src/database.cjs");
 // `listPlaces` are no longer on the class. As before, every caller outside `database.cjs` was
 // migrated first and the names were removed from this list afterwards.
 //
+// It changed a third time, when the backup file handling moved to `src/domain/backups.cjs`:
+// `createBackup`, `pruneBackups` and `listBackups` are no longer on the class. Every caller was
+// migrated first, as before.
+//
 // So the surface is written down. It was captured from the RUNTIME prototype, not from a scan of
 // the source: the first draft of this list came from reading the file and was missing eight
 // members, because an accessor and a differently declared method do not look like the pattern the
@@ -35,7 +39,6 @@ const EXPECTED = [
   "bookingPolicy",
   "cancelReservation",
   "close",
-  "createBackup",
   "createPlace",
   "createProperty",
   "createReservation",
@@ -53,11 +56,9 @@ const EXPECTED = [
   "insertNights",
   "insertRow",
   "insertRowRaw",
-  "listBackups",
   "pendingSyncCount",
   "pendingSyncEntries",
   "persist",
-  "pruneBackups",
   "query",
   "recordSyncFailure",
   "replaceReservationMeals",
