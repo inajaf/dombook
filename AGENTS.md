@@ -516,6 +516,33 @@ scripts/merge-verified.sh <pr>      # refuses without a passing verdict for the 
   them. `enforce_admins` is on, so this binds the owner too. Reversible with
   `gh api -X DELETE repos/inajaf/dombook/branches/main/protection`.
 
+## Splitting `database.cjs`: where the seams actually are
+
+The schema work already moved to `src/domain/migrations.cjs` (2024 lines to 1506). What remains is
+NOT a set of loose groups, and a round was spent proving that, so read this before trying again.
+
+`enqueueSync` is a store **primitive**, not part of an outbox group. It is 18 lines, it reads the
+row back from the database to build the payload, and fourteen write methods call it. Everything
+else in the file that looks like a group routes through it. `upsertSetting` calls it, so the whole
+settings and entitlements group sits behind it. Treat `enqueueSync`, `insertRow`, `insertRowRaw`,
+`audit`, `persist` and the `query`/`run`/`scalar`/`transaction` set as the storage layer, held in
+place until that layer itself is extracted.
+
+The four outbox methods (`enqueueSync`, `pendingSyncEntries`, `acknowledgeSync`,
+`recordSyncFailure`) are one-line delegations to `src/main/outbox.cjs`, which the store already
+imports. Deleting them looks like a free win and is not: `enqueueSync` is the one that is not a
+delegation, and `src/main.cjs` calls `database?.failedSyncCount?.()` with optional chaining, so
+removing the method silently reports zero stuck rows instead of failing. That attempt was measured,
+made, and reverted.
+
+What moves cleanly today, and is worth one small PR: `bookingPolicy` and `getLanguage` are pure
+reads over one setting, and `createBackup`/`listBackups`/`pruneBackups` are file operations over
+`this.filePath` and `this.backupDir`. That is roughly 70 lines, not the 400 the line target needs.
+
+The remaining work is therefore a **storage-layer extraction**: a small class that owns the handle
+and the primitives, with the domain operations left on top of it. That is a redesign, not a series
+of moves, and it wants a pin of its own. Do not start it by slicing groups.
+
 ## The Law of Failure (and where documentation sits in it)
 
 When an agent repeats a mistake, **do not update the prompt — fix the environment.** Documentation
