@@ -1,4 +1,5 @@
 "use strict";
+const { listReservations } = require("../src/domain/reports.cjs");
 
 // Long-term rentals in the desktop data layer.
 //
@@ -258,7 +259,7 @@ test("rentals are distinguishable from stays in the list the UI reads", async (t
     adults: 2, children: 0,
   });
 
-  const all = db.listReservations();
+  const all = listReservations(db);
   const rentals = all.filter((r) => r.booking_kind === "rental");
   assert.equal(rentals.length, 1, "exactly the tenancy is a rental");
   assert.equal(all.filter((r) => r.booking_kind !== "rental").length, 1, "the stay is not");

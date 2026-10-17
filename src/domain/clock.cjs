@@ -9,8 +9,20 @@
  * substituting it. `todayInTimeZone` exists on the store because a booking window depends on the
  * account's zone, and that is a real seam; this is not.
  */
+const { todayInTimeZone } = require("./booking/booking-policy.cjs");
+
 function nowIso() {
   return new Date().toISOString();
 }
 
-module.exports = { nowIso };
+/**
+ * Today, as the account's time zone sees it.
+ *
+ * Separate from `nowIso` on purpose: a timestamp is universal and a DATE is local, and a booking
+ * that starts today in Baku is not today in UTC for three hours of every evening.
+ */
+function todayIso() {
+  return todayInTimeZone();
+}
+
+module.exports = { nowIso, todayIso };

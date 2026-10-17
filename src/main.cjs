@@ -11,6 +11,10 @@ const { createAuthSessionStore } = require("./main/auth-session.cjs");
 const { createSyncEngine } = require("./main/sync.cjs");
 const { wholeMonthsBetween } = require("./domain/booking/booking-policy.cjs");
 const { quoteReservation } = require("./domain/booking/pricing.cjs");
+const {
+  dashboard, entitlements, listReservations, documentRequisites,
+  calendar, listProperties, listPlaces,
+} = require("./domain/reports.cjs");
 const { nowIso } = require("./database.cjs");
 const { DOCUMENT_KINDS, documentFileName } = require("./main/documents.cjs");
 const { renderHtmlToPdf } = require("./main/pdf.cjs");
@@ -226,7 +230,7 @@ function registerIpc() {
         return { ...entitlements, stale: false, allowance: database.unitAllowanceStatus() };
       } catch (error) {
         // Offline is expected, not an error: report the cached copy and say it is cached.
-        const cached = database.entitlements();
+        const cached = entitlements(database);
         return {
           ...(cached ?? { paid: false, planName: "Бесплатный", unitLimit: 1, features: [] }),
           stale: true,
@@ -254,25 +258,25 @@ function registerIpc() {
       };
     });
 
-    handle("dashboard:get", () => database.dashboard());
-    handle("calendar:get", (payload) => database.calendar(payload?.days ?? 14, payload?.startDate ?? null));
+    handle("dashboard:get", () => dashboard(database));
+    handle("calendar:get", (payload) => calendar(database, payload?.days ?? 14, payload?.startDate ?? null));
   // The renderer is sandboxed and cannot load modules, so the month count a tenancy displays
   // is computed here, where the shared booking-policy module already lives. One
   // implementation, pinned in both languages by fixtures/rental-terms-cases.json.
-  handle("reservations:list", () => database.listReservations().map((reservation) => ({
+  handle("reservations:list", () => listReservations(database).map((reservation) => ({
     ...reservation,
     rental_months: reservation.booking_kind === "rental"
       ? wholeMonthsBetween(reservation.check_in_date, reservation.check_out_date)
       : 0,
   })));
 
-    handle("places:list", (payload) => database.listPlaces(payload));
+    handle("places:list", (payload) => listPlaces(database, payload));
     handle("places:create", (payload) => database.createPlace(payload));
     handle("places:update", (payload) => database.updatePlace(payload.id, payload.data));
     handle("places:archive", (payload) => database.archivePlace(payload.id));
     handle("places:restore", (payload) => database.restorePlace(payload.id));
 
-    handle("properties:list", (payload) => database.listProperties(payload));
+    handle("properties:list", (payload) => listProperties(database, payload));
     handle("properties:create", (payload) => database.createProperty(payload));
     handle("properties:update", (payload) => database.updateProperty(payload.id, payload.data));
     handle("properties:archive", (payload) => database.archiveProperty(payload.id));
@@ -448,7 +452,7 @@ function registerIpc() {
         reservation,
         unit,
         place,
-        requisites: database.documentRequisites(),
+        requisites: documentRequisites(database),
         generatedAt: documentDate(),
       });
     });
@@ -461,7 +465,7 @@ function registerIpc() {
         reservation,
         unit,
         place,
-        requisites: database.documentRequisites(),
+        requisites: documentRequisites(database),
         generatedAt: documentDate(),
       });
 

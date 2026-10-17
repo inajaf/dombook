@@ -1,4 +1,5 @@
 const fs = require("node:fs");
+const { dashboard } = require("../src/domain/reports.cjs");
 const os = require("node:os");
 const path = require("node:path");
 const { RentKeeperDatabase } = require("../src/database.cjs");
@@ -41,13 +42,13 @@ async function main() {
       depositStatus: "received",
       notes: "",
     });
-    const dashboard = database.dashboard();
+    const summary = dashboard(database);
     const backup = database.createBackup();
     console.log(JSON.stringify({
       ok: true,
       propertyId: property.id,
       reservationId: booking.id,
-      activeReservations: dashboard.activeReservations,
+      activeReservations: summary.activeReservations,
       backup: path.basename(backup.path),
     }, null, 2));
   } finally {

@@ -1,4 +1,5 @@
 const test = require("node:test");
+const { calendar, dashboard, listPlaces, listProperties, listReservations } = require("../src/domain/reports.cjs");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -110,10 +111,10 @@ test("дом отдыха группирует несколько независ
   database.createProperty(house({ name: "Коттедж 1", kind: "cottage", placeId: place.id }));
   database.createProperty(house({ name: "Коттедж 2", kind: "cottage", placeId: place.id }));
 
-  const units = database.listProperties().filter((item) => item.place_id === place.id);
+  const units = listProperties(database).filter((item) => item.place_id === place.id);
   assert.equal(units.length, 2);
   assert.equal(units[0].place_name, "Лесная долина");
-  assert.equal(database.listPlaces()[0].active_unit_count, 2);
+  assert.equal(listPlaces(database)[0].active_unit_count, 2);
 });
 
 test("каждый дом отдыха сохраняет только свои объекты после перезапуска базы", async (t) => {
@@ -132,7 +133,7 @@ test("каждый дом отдыха сохраняет только свои 
     seed: false,
   }).init();
   try {
-    const properties = reopened.listProperties();
+    const properties = listProperties(reopened);
     assert.deepEqual(
       properties.filter((item) => item.place_id === firstPlace.id).map((item) => item.name).sort(),
       ["Альфа 1", "Альфа 2"],
@@ -191,7 +192,7 @@ test("двойная бронь одного дома на одну ночь о�
     })),
     /уже занят 2026-08-12/,
   );
-  assert.equal(database.listReservations().length, 1);
+  assert.equal(listReservations(database).length, 1);
 });
 
 test("отмена освобождает ночи для новой брони", async (t) => {
@@ -203,7 +204,7 @@ test("отмена освобождает ночи для новой брони"
   const second = database.createReservation(reservation(property.id, { guestName: "Новый гость" }));
   assert.notEqual(second.id, first.id);
   assert.match(second.id, UUID_RE);
-  assert.equal(database.listReservations().filter((item) => item.status === "cancelled").length, 1);
+  assert.equal(listReservations(database).filter((item) => item.status === "cancelled").length, 1);
 });
 
 test("удаление брони доступно после отмены и сохраняет запись аудита", async (t) => {
@@ -253,7 +254,7 @@ test("ошибка сохранения после commit не маскируе�
   };
 
   assert.throws(() => database.createProperty(house()), /disk unavailable/);
-  assert.equal(database.listProperties().length, 1);
+  assert.equal(listProperties(database).length, 1);
   database.persist = originalPersist;
 });
 
@@ -294,7 +295,7 @@ test("предоплата 50 AZN уменьшает долг за ночь 200 
     prepaidMinor: 5000,
   }));
 
-  const saved = database.listReservations()[0];
+  const saved = listReservations(database)[0];
   assert.equal(saved.nightly_rate_minor, 20000);
   assert.equal(saved.accommodation_minor, 20000);
   assert.equal(saved.services_minor, 0);
@@ -373,7 +374,7 @@ test("завтрак, обед и ужин вводятся отдельной �
     ],
   }));
 
-  const saved = database.listReservations()[0];
+  const saved = listReservations(database)[0];
   assert.equal(saved.accommodation_minor, 60000);
   assert.equal(saved.services_minor, 10000);
   assert.equal(saved.total_minor, 70000);
@@ -433,7 +434,7 @@ test("зафиксированная цена ночи не меняется, а
     mealItems: [{ date: "2026-08-10", type: "lunch", amountMinor: 4000 }],
   }));
 
-  const saved = database.listReservations()[0];
+  const saved = listReservations(database)[0];
   assert.equal(saved.nightly_rate_minor, 20000);
   assert.equal(saved.total_minor, 64000);
 });
@@ -512,7 +513,7 @@ test("досрочный выезд показывает возврат, есл�
   });
   assert.equal(checkedOut.balance_minor, 0);
   assert.equal(checkedOut.refund_due_minor, 30000);
-  assert.equal(database.dashboard().refundsDueMinor, 30000);
+  assert.equal(dashboard(database).refundsDueMinor, 30000);
 });
 
 test("при политике полной оплаты досрочный выезд освобождает календарь без снижения суммы", async (t) => {
@@ -554,7 +555,7 @@ test("редактирование оплаты после досрочного 
       .map((item) => item.night_date),
     ["2026-08-10"],
   );
-  assert.equal(database.listReservations()[0].actual_check_out_date, "2026-08-11");
+  assert.equal(listReservations(database)[0].actual_check_out_date, "2026-08-11");
 });
 
 test("стоимость, предоплата, остаток и депозит считаются независимо", async (t) => {
@@ -569,14 +570,14 @@ test("стоимость, предоплата, остаток и депозит
     depositStatus: "received",
   }));
 
-  const saved = database.listReservations()[0];
-  const dashboard = database.dashboard();
+  const saved = listReservations(database)[0];
+  const summary = dashboard(database);
   assert.equal(saved.total_minor, 55500);
   assert.equal(saved.prepaid_minor, 20000);
   assert.equal(saved.balance_minor, 35500);
   assert.equal(saved.deposit_minor, 25000);
-  assert.equal(dashboard.expectedMinor, 35500);
-  assert.equal(dashboard.depositsHeldMinor, 25000);
+  assert.equal(summary.expectedMinor, 35500);
+  assert.equal(summary.depositsHeldMinor, 25000);
 });
 
 test("backup создаёт валидный файл и checksum", async (t) => {
@@ -881,7 +882,7 @@ test("миграция legacy-базы переводит все данные н
 
   assert.ok(database.scalar("SELECT 1 FROM schema_migrations WHERE name = 'sync_schema_v1'"));
 
-  const booking = database.listReservations()[0];
+  const booking = listReservations(database)[0];
   assert.equal(booking.guest_name, "Али");
   assert.equal(booking.property_name, "Коттедж «Сосны»");
   assert.equal(booking.meals.length, 1);
@@ -905,7 +906,7 @@ test("мигрированную базу можно редактировать:
   const restored = database.restoreProperty(property.id);
   assert.equal(restored.version, 3);
 
-  const booking = database.listReservations()[0];
+  const booking = listReservations(database)[0];
   assert.throws(
     () => database.createReservation(reservation(property.id, {
       guestName: "Другой гость",
@@ -952,16 +953,16 @@ test("сброс локальной базы оставляет пустую с�
   const before = database.writerId;
   database.createProperty(house({ name: "Чужой объект" }));
   database.createPlace({ name: "Чужой дом отдыха", address: "", hasFoodService: false });
-  assert.equal(database.listProperties().length, 1);
+  assert.equal(listProperties(database).length, 1);
 
   database.reset();
 
-  assert.equal(database.listProperties().length, 0, "объекты предыдущего аккаунта удалены");
-  assert.equal(database.listPlaces().length, 0, "дом отдыха предыдущего аккаунта удалён");
-  assert.equal(database.listReservations().length, 0);
+  assert.equal(listProperties(database).length, 0, "объекты предыдущего аккаунта удалены");
+  assert.equal(listPlaces(database).length, 0, "дом отдыха предыдущего аккаунта удалён");
+  assert.equal(listReservations(database).length, 0);
   // The seed must NOT run: this database is about to receive a real account, and sample rows
   // would be pushed into it.
-  assert.equal(database.listProperties().length, 0, "демо-данные не подставляются");
+  assert.equal(listProperties(database).length, 0, "демо-данные не подставляются");
   // The schema has to be usable straight away, or the first booking after the switch fails.
   assert.doesNotThrow(() => database.createProperty(house({ name: "Новый объект" })));
   // A NEW device identity: the old one's queued rows are gone, and reusing the id would let the
@@ -990,17 +991,17 @@ test("календарь показывает запрошенный перио�
   // are how wide they opened the window.
   const { database } = await createTestDatabase(t, "2026-07-29");
 
-  const fromToday = database.calendar(14);
+  const fromToday = calendar(database);
   assert.equal(fromToday.dates[0], "2026-07-29", "без даты окно начинается сегодня");
   assert.equal(fromToday.dates.length, 14);
   assert.equal(fromToday.startDate, "2026-07-29", "окно сообщает, какие даты оно вернуло");
 
-  const backwards = database.calendar(14, "2026-07-15");
+  const backwards = calendar(database, 14, "2026-07-15");
   assert.equal(backwards.dates[0], "2026-07-15");
   assert.equal(backwards.dates[13], "2026-07-28");
   assert.equal(backwards.dates.length, 14);
 
-  const wider = database.calendar(30, "2026-07-15");
+  const wider = calendar(database, 30, "2026-07-15");
   assert.equal(wider.dates.length, 30);
   assert.equal(wider.dates[29], "2026-08-13", "месяц перелистывается, а не обрезается");
 
@@ -1017,12 +1018,12 @@ test("календарь показывает запрошенный перио�
   booking("Ранний гость", "2026-07-30", "2026-08-01");
   booking("Поздний гость", "2026-08-06", "2026-08-08");
 
-  const firstWindow = database.calendar(14);
+  const firstWindow = calendar(database);
   const firstGuests = firstWindow.occupancy.map((row) => row.guest_name);
   assert.ok(firstGuests.includes("Ранний гость"), "ночи в начале окна видны");
   assert.ok(firstGuests.includes("Поздний гость"), "ночи в конце окна видны");
 
-  const laterWindow = database.calendar(14, "2026-08-05");
+  const laterWindow = calendar(database, 14, "2026-08-05");
   const laterGuests = laterWindow.occupancy.map((row) => row.guest_name);
   assert.ok(laterGuests.includes("Поздний гость"), "сдвинутое окно показывает свои ночи");
   assert.ok(!laterGuests.includes("Ранний гость"), "ночи до начала окна не подмешиваются");
@@ -1032,9 +1033,9 @@ test("календарь отказывает в неверной дате вм�
   // A silently-corrected date is a calendar that shows a different fortnight than the one asked
   // for, and the owner has no way to tell.
   const { database } = await createTestDatabase(t, "2026-07-29");
-  assert.throws(() => database.calendar(14, "2026-02-30"), /неверная дата/);
-  assert.throws(() => database.calendar(14, "15.07.2026"), /неверная дата/);
-  assert.throws(() => database.calendar(2), /Период календаря/);
+  assert.throws(() => calendar(database, 14, "2026-02-30"), /неверная дата/);
+  assert.throws(() => calendar(database, 14, "15.07.2026"), /неверная дата/);
+  assert.throws(() => calendar(database, 2), /Период календаря/);
 });
 
 test("старые копии удаляются, когда их становится больше десяти", async (t) => {
