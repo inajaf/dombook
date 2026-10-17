@@ -26,6 +26,10 @@ const { RentKeeperDatabase } = require("../src/database.cjs");
 // `createBackup`, `pruneBackups` and `listBackups` are no longer on the class. Every caller was
 // migrated first, as before.
 //
+// It changed a fourth time, when the account's configuration moved to `src/domain/settings.cjs`:
+// the eight settings and entitlement methods are no longer on the class, and every caller outside
+// `database.cjs` was migrated first.
+//
 // So the surface is written down. It was captured from the RUNTIME prototype, not from a scan of
 // the source: the first draft of this list came from reading the file and was missing eight
 // members, because an accessor and a differently declared method do not look like the pattern the
@@ -36,7 +40,6 @@ const EXPECTED = [
   "archivePlace",
   "archiveProperty",
   "audit",
-  "bookingPolicy",
   "cancelReservation",
   "close",
   "createPlace",
@@ -47,7 +50,6 @@ const EXPECTED = [
   "enqueueSync",
   "ensureDeviceId",
   "failedSyncCount",
-  "getLanguage",
   "getPlace",
   "getProperty",
   "getReservation",
@@ -68,18 +70,12 @@ const EXPECTED = [
   "run",
   "scalar",
   "seedDemoData",
-  "setBookingPolicy",
   "setDocumentRequisites",
-  "setEntitlements",
-  "setLanguage",
   "systemInfo",
   "transaction",
-  "unitAllowance",
-  "unitAllowanceStatus",
   "updatePlace",
   "updateProperty",
   "updateReservation",
-  "upsertSetting",
   "validatePlace",
   "validateProperty",
   "validatePropertyRateRules",

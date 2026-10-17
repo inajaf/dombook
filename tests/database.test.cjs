@@ -1,4 +1,5 @@
 const test = require("node:test");
+const { setLanguage } = require("../src/domain/settings.cjs");
 const { createBackup, listBackups } = require("../src/domain/backups.cjs");
 const { calendar, dashboard, listPlaces, listProperties, listReservations } = require("../src/domain/reports.cjs");
 const assert = require("node:assert/strict");
@@ -155,9 +156,9 @@ test("каждый дом отдыха сохраняет только свои 
 test("язык интерфейса сохраняется в SQLite и восстанавливается после перезапуска", async (t) => {
   const { database, tempDir } = await createTestDatabase(t);
   assert.equal(database.systemInfo().language, "ru");
-  assert.equal(database.setLanguage("az"), "az");
+  assert.equal(setLanguage(database, "az"), "az");
   assert.equal(database.systemInfo().language, "az");
-  assert.throws(() => database.setLanguage("de"), /ru, az, en/);
+  assert.throws(() => setLanguage(database, "de"), /ru, az, en/);
   database.close();
 
   const reopened = await new RentKeeperDatabase({
@@ -168,7 +169,7 @@ test("язык интерфейса сохраняется в SQLite и восс
   }).init();
   try {
     assert.equal(reopened.systemInfo().language, "az");
-    assert.equal(reopened.setLanguage("en"), "en");
+    assert.equal(setLanguage(reopened, "en"), "en");
   } finally {
     reopened.close();
   }

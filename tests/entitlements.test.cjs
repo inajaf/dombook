@@ -1,4 +1,5 @@
 "use strict";
+const { bookingPolicy, setBookingPolicy, setEntitlements, unitAllowance, unitAllowanceStatus, upsertSetting } = require("../src/domain/settings.cjs");
 const { entitlements } = require("../src/domain/reports.cjs");
 
 // Entitlement tests for the desktop client.
@@ -32,14 +33,14 @@ test("a device with no cached licence assumes the free tier", async (t) => {
   // The conservative direction: a device that has never synced must not assume it is
   // licensed, or a fresh install would hand out the paid tier before the server has spoken.
   assert.equal(entitlements(db), null);
-  assert.equal(db.unitAllowance(), 1);
-  assert.equal(db.unitAllowanceStatus().unlimited, false);
+  assert.equal(unitAllowance(db), 1);
+  assert.equal(unitAllowanceStatus(db).unlimited, false);
 });
 
 test("a cached perpetual licence lifts the cap", async (t) => {
   const db = await freshDatabase(t);
 
-  db.setEntitlements({
+  setEntitlements(db, {
     paid: true,
     planName: "Пожизненная лицензия",
     skus: ["app_perpetual"],
@@ -51,30 +52,30 @@ test("a cached perpetual licence lifts the cap", async (t) => {
   const cached = entitlements(db);
   assert.equal(cached.paid, true);
   assert.equal(cached.unitLimit, null, "null means unlimited and must survive the cache");
-  assert.equal(db.unitAllowance(), null, "a licensed account has no cap");
-  assert.equal(db.unitAllowanceStatus().unlimited, true);
+  assert.equal(unitAllowance(db), null, "a licensed account has no cap");
+  assert.equal(unitAllowanceStatus(db).unlimited, true);
 });
 
 test("a corrupt entitlement cache does not hand out the paid tier", async (t) => {
   const db = await freshDatabase(t);
 
-  db.upsertSetting("entitlements", "{not json");
+  upsertSetting(db, "entitlements", "{not json");
   assert.equal(entitlements(db), null, "an unreadable cache reads as no cache");
-  assert.equal(db.unitAllowance(), 1, "and the free cap applies");
+  assert.equal(unitAllowance(db), 1, "and the free cap applies");
 
   // A cache claiming paid but omitting unitLimit must also not read as unlimited: a missing
   // field would be a giveaway, whereas falling back to the cap is merely cautious.
-  db.upsertSetting("entitlements", JSON.stringify({ paid: true }));
+  upsertSetting(db, "entitlements", JSON.stringify({ paid: true }));
   const parsed = entitlements(db);
   assert.equal(parsed.unitLimit, 1, "a paid cache with no limit field falls back to the cap");
 });
 
 test("an expired cached licence falls back to the free cap", async (t) => {
   const db = await freshDatabase(t);
-  db.setEntitlements({ paid: false, planName: "Бесплатный", skus: [], unitLimit: 1, expiresAt: "2020-01-01T00:00:00Z", features: [] });
+  setEntitlements(db, { paid: false, planName: "Бесплатный", skus: [], unitLimit: 1, expiresAt: "2020-01-01T00:00:00Z", features: [] });
 
-  assert.equal(db.unitAllowance(), 1);
-  const status = db.unitAllowanceStatus();
+  assert.equal(unitAllowance(db), 1);
+  const status = unitAllowanceStatus(db);
   assert.equal(status.unlimited, false);
   assert.equal(status.allowance, 1);
 });
@@ -90,7 +91,7 @@ test("over-allowance is reported rather than refused", async (t) => {
   db.createProperty({ placeId: place.id, name: "Первый", capacity: 4, basePriceMinor: 1000, depositMinor: 0, currency: "AZN", kind: "cottage", status: "active" });
   db.createProperty({ placeId: place.id, name: "Второй", capacity: 4, basePriceMinor: 1000, depositMinor: 0, currency: "AZN", kind: "cottage", status: "active" });
 
-  const status = db.unitAllowanceStatus();
+  const status = unitAllowanceStatus(db);
   assert.equal(status.active, 2, "both units were created locally");
   assert.equal(status.allowance, 1);
   assert.equal(status.over, true, "the over-allowance state is reported");
@@ -155,7 +156,7 @@ test("a widened account policy lets the client book further ahead", async (t) =>
     /21 день/, "the default window should refuse a booking 40 days out");
 
   // The account widens its window. This is what the server reports and the client caches.
-  db.setBookingPolicy({ maximumAdvanceDays: 60, maximumStayMonths: 6, timeZone: "Asia/Baku" });
+  setBookingPolicy(db, { maximumAdvanceDays: 60, maximumStayMonths: 6, timeZone: "Asia/Baku" });
 
   const created = db.createReservation(booking(unit.id, checkIn, checkOut));
   assert.ok(created, "a booking inside the account's window must be accepted");
@@ -166,7 +167,7 @@ test("a narrowed account policy refuses dates the default would allow", async (t
   const db = await freshDatabase(t);
   const unit = seedUnit(db);
 
-  db.setBookingPolicy({ maximumAdvanceDays: 7, maximumStayMonths: 1, timeZone: "Asia/Baku" });
+  setBookingPolicy(db, { maximumAdvanceDays: 7, maximumStayMonths: 1, timeZone: "Asia/Baku" });
 
   // Ten days out: inside the shipped default, outside this account's window.
   assert.throws(() => db.createReservation(booking(unit.id, daysFromToday(db, 10), daysFromToday(db, 12))),
@@ -180,11 +181,11 @@ test("the policy survives a restart, so an offline device keeps the right window
 
   const first = new RentKeeperDatabase({ filePath, backupDir: dir, seed: false });
   await first.init();
-  first.setBookingPolicy({ maximumAdvanceDays: 90, maximumStayMonths: 12, timeZone: "UTC" });
+  setBookingPolicy(first, { maximumAdvanceDays: 90, maximumStayMonths: 12, timeZone: "UTC" });
 
   const second = new RentKeeperDatabase({ filePath, backupDir: dir, seed: false });
   await second.init();
-  assert.equal(second.bookingPolicy().maximumAdvanceDays, 90, "the cached window must persist");
+  assert.equal(bookingPolicy(second).maximumAdvanceDays, 90, "the cached window must persist");
 
   // And a booking inside it is accepted after the restart, which is the point of caching it:
   // the rule still works with no server to ask.
@@ -202,7 +203,7 @@ test("a cached licence survives a restart, so an offline licensed device stays l
 
   const first = new RentKeeperDatabase({ filePath, backupDir: dir, seed: false });
   await first.init();
-  first.setEntitlements({
+  setEntitlements(first, {
     paid: true, planName: "Пожизненная лицензия", skus: ["app_perpetual"],
     unitLimit: null, expiresAt: null, features: ["paid_tier"],
   });
@@ -212,7 +213,7 @@ test("a cached licence survives a restart, so an offline licensed device stays l
   const second = new RentKeeperDatabase({ filePath, backupDir: dir, seed: false });
   await second.init();
   assert.equal(entitlements(second)?.paid, true, "the licence must survive a restart");
-  assert.equal(second.unitAllowance(), null, "and it must still lift the cap");
+  assert.equal(unitAllowance(second), null, "and it must still lift the cap");
 });
 
 
@@ -235,7 +236,7 @@ function queuedSettings(db, key) {
 test("the licence cache is never queued for sync", async (t) => {
   const db = await freshDatabase(t);
 
-  db.setEntitlements({
+  setEntitlements(db, {
     paid: true, planName: "Пожизненная лицензия", skus: ["app_perpetual"],
     unitLimit: null, expiresAt: null, features: ["paid_tier"],
   });
@@ -254,7 +255,7 @@ test("the device id is never queued for sync", async (t) => {
 
   // Every install has its own id. Replicating it would make all devices claim the same writer,
   // destroying the only record of which device made a change.
-  db.upsertSetting("device_id", "some-other-device");
+  upsertSetting(db, "device_id", "some-other-device");
   assert.equal(queuedSettings(db, "device_id").length, 0);
 });
 
@@ -263,7 +264,7 @@ test("a real account setting IS queued, so the guard is not a blanket refusal", 
 
   // The denylist has to be a denylist. If this method stopped queueing anything, the three
   // tests above would pass while sync silently stopped carrying settings at all.
-  db.upsertSetting("booking_policy", JSON.stringify({ maximumAdvanceDays: 30 }));
+  upsertSetting(db, "booking_policy", JSON.stringify({ maximumAdvanceDays: 30 }));
   assert.equal(queuedSettings(db, "booking_policy").length, 1,
     "an account-level setting must still replicate");
 });
@@ -273,9 +274,9 @@ test("a full sync leaves no per-device setting stuck in the queue", async (t) =>
 
   // Reproduces the observed failure: fetching the licence during startup re-queued it, so a
   // sync could never drain the outbox — pending stayed at 1 forever.
-  db.setEntitlements({ paid: false, planName: "Бесплатный", skus: [], unitLimit: 1, expiresAt: null, features: [] });
-  db.upsertSetting("interface_language", "ru");
-  db.upsertSetting("booking_policy", JSON.stringify({ maximumAdvanceDays: 21 }));
+  setEntitlements(db, { paid: false, planName: "Бесплатный", skus: [], unitLimit: 1, expiresAt: null, features: [] });
+  upsertSetting(db, "interface_language", "ru");
+  upsertSetting(db, "booking_policy", JSON.stringify({ maximumAdvanceDays: 21 }));
 
   const queuedKeys = db.query(
     `SELECT s.setting_key FROM sync_outbox o JOIN app_settings s ON s.id = o.row_id
