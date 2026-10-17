@@ -1,4 +1,5 @@
 // Flexible pricing: seasons, length discounts, and what the guest is actually charged.
+const { listProperties } = require("../src/domain/reports.cjs");
 //
 // The arithmetic itself is pinned by fixtures/pricing-cases.json in both languages
 // (tests/pricing.test.cjs and server/internal/domain/pricing_test.go). This file covers the part
@@ -127,7 +128,7 @@ test("правила цен, которые нельзя посчитать од
     /Сезоны пересекаются/,
   );
   // The refusal must not leave a half-written unit behind.
-  assert.equal(database.listProperties().filter((item) => item.name === "Дом у моря").length, 0);
+  assert.equal(listProperties(database).filter((item) => item.name === "Дом у моря").length, 0);
 });
 
 test("подразделение без правил считается по базовой цене, как и раньше", async (t) => {

@@ -17,4 +17,21 @@ function integer(value, label, min = 0, max = Number.MAX_SAFE_INTEGER) {
   return result;
 }
 
-module.exports = { integer };
+function validDate(value, label) {
+  const result = String(value ?? "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(result)) {
+    throw new Error(`${label}: неверная дата`);
+  }
+  const [year, month, day] = result.split("-").map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (
+    parsed.getUTCFullYear() !== year ||
+    parsed.getUTCMonth() !== month - 1 ||
+    parsed.getUTCDate() !== day
+  ) {
+    throw new Error(`${label}: неверная дата`);
+  }
+  return result;
+}
+
+module.exports = { integer, validDate };

@@ -1,4 +1,5 @@
 "use strict";
+const { entitlements } = require("../src/domain/reports.cjs");
 
 // Entitlement tests for the desktop client.
 //
@@ -30,7 +31,7 @@ test("a device with no cached licence assumes the free tier", async (t) => {
 
   // The conservative direction: a device that has never synced must not assume it is
   // licensed, or a fresh install would hand out the paid tier before the server has spoken.
-  assert.equal(db.entitlements(), null);
+  assert.equal(entitlements(db), null);
   assert.equal(db.unitAllowance(), 1);
   assert.equal(db.unitAllowanceStatus().unlimited, false);
 });
@@ -47,7 +48,7 @@ test("a cached perpetual licence lifts the cap", async (t) => {
     features: ["paid_tier"],
   });
 
-  const cached = db.entitlements();
+  const cached = entitlements(db);
   assert.equal(cached.paid, true);
   assert.equal(cached.unitLimit, null, "null means unlimited and must survive the cache");
   assert.equal(db.unitAllowance(), null, "a licensed account has no cap");
@@ -58,13 +59,13 @@ test("a corrupt entitlement cache does not hand out the paid tier", async (t) =>
   const db = await freshDatabase(t);
 
   db.upsertSetting("entitlements", "{not json");
-  assert.equal(db.entitlements(), null, "an unreadable cache reads as no cache");
+  assert.equal(entitlements(db), null, "an unreadable cache reads as no cache");
   assert.equal(db.unitAllowance(), 1, "and the free cap applies");
 
   // A cache claiming paid but omitting unitLimit must also not read as unlimited: a missing
   // field would be a giveaway, whereas falling back to the cap is merely cautious.
   db.upsertSetting("entitlements", JSON.stringify({ paid: true }));
-  const parsed = db.entitlements();
+  const parsed = entitlements(db);
   assert.equal(parsed.unitLimit, 1, "a paid cache with no limit field falls back to the cap");
 });
 
@@ -210,7 +211,7 @@ test("a cached licence survives a restart, so an offline licensed device stays l
   // the app offline is handed the free tier.
   const second = new RentKeeperDatabase({ filePath, backupDir: dir, seed: false });
   await second.init();
-  assert.equal(second.entitlements()?.paid, true, "the licence must survive a restart");
+  assert.equal(entitlements(second)?.paid, true, "the licence must survive a restart");
   assert.equal(second.unitAllowance(), null, "and it must still lift the cap");
 });
 
@@ -240,7 +241,7 @@ test("the licence cache is never queued for sync", async (t) => {
   });
 
   // It IS stored locally — that is the whole point of the cache.
-  assert.equal(db.entitlements()?.paid, true);
+  assert.equal(entitlements(db)?.paid, true);
 
   // But it must not be sent. Syncing it would let one device's cache overwrite another's, so a
   // licensed device could inherit a stale "not paid" value and be treated as unlicensed.

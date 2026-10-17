@@ -17,6 +17,11 @@ const { RentKeeperDatabase } = require("../src/database.cjs");
 // Removing a name nobody calls is the refactor working. Removing one somebody calls is the failure
 // this exists to prevent, and the two look identical in a diff.
 //
+// It changed a second time, when the read models moved to `src/domain/reports.cjs`: `dashboard`,
+// `entitlements`, `listReservations`, `documentRequisites`, `calendar`, `listProperties` and
+// `listPlaces` are no longer on the class. As before, every caller outside `database.cjs` was
+// migrated first and the names were removed from this list afterwards.
+//
 // So the surface is written down. It was captured from the RUNTIME prototype, not from a scan of
 // the source: the first draft of this list came from reading the file and was missing eight
 // members, because an accessor and a differently declared method do not look like the pattern the
@@ -28,20 +33,16 @@ const EXPECTED = [
   "archiveProperty",
   "audit",
   "bookingPolicy",
-  "calendar",
   "cancelReservation",
   "close",
   "createBackup",
   "createPlace",
   "createProperty",
   "createReservation",
-  "dashboard",
   "deleteReservation",
-  "documentRequisites",
   "earlyCheckout",
   "enqueueSync",
   "ensureDeviceId",
-  "entitlements",
   "failedSyncCount",
   "getLanguage",
   "getPlace",
@@ -53,9 +54,6 @@ const EXPECTED = [
   "insertRow",
   "insertRowRaw",
   "listBackups",
-  "listPlaces",
-  "listProperties",
-  "listReservations",
   "pendingSyncCount",
   "pendingSyncEntries",
   "persist",
