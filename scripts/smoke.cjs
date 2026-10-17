@@ -1,4 +1,5 @@
 const fs = require("node:fs");
+const { createBackup, listBackups } = require("../src/domain/backups.cjs");
 const { dashboard } = require("../src/domain/reports.cjs");
 const os = require("node:os");
 const path = require("node:path");
@@ -43,7 +44,7 @@ async function main() {
       notes: "",
     });
     const summary = dashboard(database);
-    const backup = database.createBackup();
+    const backup = createBackup(database);
     console.log(JSON.stringify({
       ok: true,
       propertyId: property.id,
