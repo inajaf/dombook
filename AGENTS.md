@@ -516,32 +516,40 @@ scripts/merge-verified.sh <pr>      # refuses without a passing verdict for the 
   them. `enforce_admins` is on, so this binds the owner too. Reversible with
   `gh api -X DELETE repos/inajaf/dombook/branches/main/protection`.
 
-## Splitting `database.cjs`: where the seams actually are
+## How `database.cjs` was split, and what it taught
 
-The schema work already moved to `src/domain/migrations.cjs` (2024 lines to 1506). What remains is
-NOT a set of loose groups, and a round was spent proving that, so read this before trying again.
+Finished. The file went from 2024 lines to 1048, and what is left is the storage primitives plus the
+domain commands. This section stays because the method generalises, and because two of its lessons
+cost a round each.
 
-`enqueueSync` is a store **primitive**, not part of an outbox group. It is 18 lines, it reads the
-row back from the database to build the payload, and fourteen write methods call it. Everything
-else in the file that looks like a group routes through it. `upsertSetting` calls it, so the whole
-settings and entitlements group sits behind it. Treat `enqueueSync`, `insertRow`, `insertRowRaw`,
-`audit`, `persist` and the `query`/`run`/`scalar`/`transaction` set as the storage layer, held in
-place until that layer itself is extracted.
+The groups now living under `src/domain/`: `migrations.cjs` (schema and the pre-UUID rebuild),
+`reports.cjs` (everything a screen reads), `settings.cjs` (booking policy, language, licence cache),
+`backups.cjs` (the files and their limit), `clock.cjs` and `fields.cjs` (two helpers both layers
+needed). The class keeps `query`, `run`, `scalar`, `transaction`, `persist`, `insertRow`,
+`insertRowRaw`, `enqueueSync`, `audit`, `init`, `close` and the booking commands.
 
-The four outbox methods (`enqueueSync`, `pendingSyncEntries`, `acknowledgeSync`,
-`recordSyncFailure`) are one-line delegations to `src/main/outbox.cjs`, which the store already
-imports. Deleting them looks like a free win and is not: `enqueueSync` is the one that is not a
-delegation, and `src/main.cjs` calls `database?.failedSyncCount?.()` with optional chaining, so
-removing the method silently reports zero stuck rows instead of failing. That attempt was measured,
-made, and reverted.
+**`enqueueSync` is a store primitive, not outbox vocabulary.** It is 18 lines that read the row back
+from the database to build the payload, and fourteen write methods call it. Everything that looked
+like a separable group routed through it, which is why the settings group looked impossible to move
+until the right question was asked: passing a storage primitive through the interface is the seam,
+not a shim. A module that reached for `createReservation` instead would be the split going wrong.
 
-What moves cleanly today, and is worth one small PR: `bookingPolicy` and `getLanguage` are pure
-reads over one setting, and `createBackup`/`listBackups`/`pruneBackups` are file operations over
-`this.filePath` and `this.backupDir`. That is roughly 70 lines, not the 400 the line target needs.
+**Measure before choosing a group, and measure the right thing.** A coupling scan of `this.X` per
+method cannot tell a one-line delegation from a method with behaviour, and it found neither the
+signature differences nor the accessors. The five outbox wrappers looked like a group and were
+delegations to `src/main/outbox.cjs`: delete them instead of moving them. What actually found the
+read models was ranking all 62 members by size and by domain-call count in one pass.
 
-The remaining work is therefore a **storage-layer extraction**: a small class that owns the handle
-and the primitives, with the domain operations left on top of it. That is a redesign, not a series
-of moves, and it wants a pin of its own. Do not start it by slicing groups.
+**Never compute line ranges and delete them in reverse.** That broke three times, each time cutting
+into a neighbouring method, because overlapping ranges cannot be removed that way. Partition the file
+into members where every line belongs to exactly one and the ranges cannot overlap. The partition
+removed exactly the 183 lines the measurement predicted, first try.
+
+**A removed method behind optional chaining fails silently.** `database?.pendingSyncCount?.()`
+returns `undefined`, the `?? 0` turns it into zero, and the app reports an empty queue while rows sit
+in it. Every unit test passed; `e2e-sync.mjs` failed four checks and named them. Writing the rule down
+in this file did not prevent the next occurrence. The suite did. That is the Law of Failure's own
+ordering applied to itself.
 
 ## The Law of Failure (and where documentation sits in it)
 
