@@ -1,7 +1,8 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const { nowIso } = require("./domain/clock.cjs");
+const { nowIso, todayIso } = require("./domain/clock.cjs");
+const { integer } = require("./domain/fields.cjs");
 const { migrate } = require("./domain/migrations.cjs");
 const initSqlJs = require("sql.js");
 const {
@@ -103,10 +104,6 @@ function normalizeMeterReadings(raw) {
 }
 
 
-function todayIso() {
-  return todayInTimeZone();
-}
-
 function requiredText(value, label, max = 200) {
   const result = String(value ?? "").trim();
   if (!result) throw new Error(`${label}: обязательное поле`);
@@ -117,14 +114,6 @@ function requiredText(value, label, max = 200) {
 function optionalText(value, max = 2000) {
   const result = String(value ?? "").trim();
   if (result.length > max) throw new Error(`Текст: максимум ${max} символов`);
-  return result;
-}
-
-function integer(value, label, min = 0, max = Number.MAX_SAFE_INTEGER) {
-  const result = Number(value);
-  if (!Number.isInteger(result) || result < min || result > max) {
-    throw new Error(`${label}: укажите целое число от ${min} до ${max}`);
-  }
   return result;
 }
 
