@@ -15,6 +15,7 @@ const path = require("node:path");
 
 const { RentKeeperDatabase } = require("../src/database.cjs");
 const outbox = require("../src/main/outbox.cjs");
+const { acknowledge, pendingCount, recordFailure } = outbox;
 const { createSyncEngine, shouldAdopt, toLocal, toRemote } = require("../src/main/sync.cjs");
 
 /** A throwaway database directory, removed when the test finishes. */
@@ -86,7 +87,7 @@ test("a local write queues itself for sync", async (t) => {
   const queued = db.query("SELECT table_name, row_id FROM sync_outbox WHERE table_name = 'places'");
   assert.equal(queued.length, 1, "the place should be queued");
   assert.equal(queued[0].row_id, place.id, "the queued row should be the one that was created");
-  assert.ok(db.pendingSyncCount() >= 1);
+  assert.ok(pendingCount(db) >= 1);
 });
 
 test("editing a row repeatedly queues it once, in its latest state", async (t) => {
@@ -112,7 +113,7 @@ test("a queued change survives the database being reopened", async (t) => {
   const first = new RentKeeperDatabase({ filePath, backupDir: path.join(dir, "backups"), seed: false });
   await first.init();
   const place = first.createPlace({ name: "Переживший перезапуск", address: "", hasFoodService: false });
-  const queuedBefore = first.pendingSyncCount();
+  const queuedBefore = pendingCount(first, );
   assert.ok(queuedBefore > 0);
 
   // Reopen, as the app does on every launch.
@@ -121,7 +122,7 @@ test("a queued change survives the database being reopened", async (t) => {
 
   const entries = second.query("SELECT row_id FROM sync_outbox WHERE row_id = ?", [place.id]);
   assert.equal(entries.length, 1, "a change made offline must survive a restart, or it is lost forever");
-  assert.equal(second.pendingSyncCount(), queuedBefore);
+  assert.equal(pendingCount(second, ), queuedBefore);
 });
 
 test("acknowledging keeps a newer change made during the push", async (t) => {
@@ -135,7 +136,7 @@ test("acknowledging keeps a newer change made during the push", async (t) => {
   db.updatePlace(place.id, { name: "Изменено во время отправки", address: "", hasFoodService: false });
 
   // The server confirms the version that was sent.
-  db.acknowledgeSync([{ ...entry, sentUpdatedAt: entry.updated_at }]);
+  acknowledge(db, [{ ...entry, sentUpdatedAt: entry.updated_at }]);
 
   const remaining = db.query("SELECT payload_json FROM sync_outbox WHERE row_id = ?", [place.id]);
   assert.equal(remaining.length, 1, "the edit made during the push must not be acknowledged away");
@@ -180,12 +181,12 @@ test("a failed attempt is recorded and the entry stays queued", async (t) => {
   const place = db.createPlace({ name: "Застрявшая запись", address: "", hasFoodService: false });
   const entry = db.query("SELECT * FROM sync_outbox WHERE row_id = ?", [place.id])[0];
 
-  db.recordSyncFailure(entry, "сервер недоступен");
+  recordFailure(db, entry, "сервер недоступен");
 
   const after = db.query("SELECT attempts, last_error FROM sync_outbox WHERE row_id = ?", [place.id])[0];
   assert.equal(after.attempts, 1);
   assert.match(after.last_error, /недоступен/);
-  assert.equal(db.pendingSyncCount() >= 1, true, "a failed entry must remain queued so the work is not lost");
+  assert.equal(pendingCount(db) >= 1, true, "a failed entry must remain queued so the work is not lost");
 });
 
 test("outbox helpers ignore rows that are not syncable", async (t) => {
@@ -342,7 +343,7 @@ test("the cursor only advances after the changes are stored", async (t) => {
 test("a failed sync keeps every queued change", async (t) => {
   const db = await freshDatabase(t);
   const place = db.createPlace({ name: "Не отправленный", address: "", hasFoodService: false });
-  const before = db.pendingSyncCount();
+  const before = pendingCount(db);
 
   const transport = stubTransport({ fail: new Error("сеть недоступна") });
   const engine = makeEngine(db, transport);
@@ -350,7 +351,7 @@ test("a failed sync keeps every queued change", async (t) => {
 
   assert.equal(result.ok, false, "a network failure must be reported");
   assert.match(result.error, /недоступна/);
-  assert.equal(db.pendingSyncCount(), before, "a failed sync must not drop queued work");
+  assert.equal(pendingCount(db), before, "a failed sync must not drop queued work");
 
   // And the queued row is still the one that was made.
   const still = db.query("SELECT row_id FROM sync_outbox WHERE row_id = ?", [place.id]);

@@ -3,24 +3,16 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const { nowIso } = require("./domain/clock.cjs");
 const { integer, validDate } = require("./domain/fields.cjs");
+const { upsertSetting, bookingPolicy, getLanguage } = require("./domain/settings.cjs");
 const {
-  entitlements, listReservations, documentRequisites, listProperties, listPlaces,
+  listReservations, documentRequisites, listProperties, listPlaces,
 } = require("./domain/reports.cjs");
 const { migrate } = require("./domain/migrations.cjs");
 const initSqlJs = require("sql.js");
-const {
-  enqueue: enqueueOutbox,
-  pending,
-  pendingCount,
-  acknowledge,
-  recordFailure,
-  // Entries the server refused for good. Reported, never silently dropped.
-  failed,
-} = require("./main/outbox.cjs");
+const { enqueue: enqueueOutbox } = require("./main/outbox.cjs");
 const {
   assertBookingDates,
   bookingLimits,
-  resolvePolicy,
   wholeMonthsBetween,
   todayInTimeZone,
 } = require("./domain/booking/booking-policy.cjs");
@@ -39,11 +31,6 @@ const {
  * These three must not: a licence cache, a device identity, and a read cursor are all
  * per-device facts, and sharing them produces wrong answers rather than merely noisy ones.
  */
-const DEVICE_PRIVATE_SETTINGS = new Set([
-  "entitlements",
-  "device_id",
-  "sync_cursor",
-]);
 
 const ALLOWED_RESERVATION_STATUSES = new Set([
   "hold",
@@ -68,7 +55,6 @@ const ALLOWED_DEPOSIT_STATUSES = new Set([
 ]);
 
 const ALLOWED_MEAL_TYPES = new Set(["breakfast", "lunch", "dinner"]);
-const ALLOWED_INTERFACE_LANGUAGES = new Set(["ru", "az", "en"]);
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -237,129 +223,6 @@ class RentKeeperDatabase {
    * a validation rule that needed the network would make booking impossible without one.
    * The shipped defaults apply until the server has been heard from.
    */
-  bookingPolicy() {
-    const stored = this.scalar(
-      "SELECT setting_value FROM app_settings WHERE setting_key = 'booking_policy'",
-    );
-    if (!stored) return resolvePolicy(null);
-    try {
-      return resolvePolicy(JSON.parse(stored));
-    } catch {
-      // A corrupt cache must not brick booking: an unreadable policy degrades to the
-      // shipped default, which is a real window rather than a lockout.
-      return resolvePolicy(null);
-    }
-  }
-
-  /**
-   * Record the policy the server reported.
-   *
-   * Stored through the ordinary settings path so it syncs like any other setting and
-   * survives a restart.
-   */
-  setBookingPolicy(policy) {
-    const resolved = resolvePolicy(policy);
-    this.upsertSetting("booking_policy", JSON.stringify({
-      maximumAdvanceDays: resolved.maximumAdvanceDays,
-      maximumStayMonths: resolved.maximumStayMonths,
-      timeZone: resolved.timeZone,
-    }));
-    // Persist immediately. `upsertSetting` only writes to the in-memory database, and the file
-    // is rewritten by the mutating methods that wrap themselves in `transaction`. Without this
-    // the cached window lives only until the next restart — which is precisely the situation
-    // the cache exists for, since an offline device restarts with no way to re-fetch it.
-    this.persist();
-    return resolved;
-  }
-
-  /**
-   * The account's entitlements, as most recently reported by the server.
-   *
-   * Cached locally for the same reason the booking policy is: the application must work
-   * offline, and a licence check that needed the network would make the app unusable on a
-   * train. The server stays authoritative — it re-checks on every write that matters — so
-   * this cache can only ever be too permissive for a short window, never permanently.
-   */
-  setEntitlements(next) {
-    this.upsertSetting("entitlements", JSON.stringify({ ...next, cachedAt: nowIso() }));
-    // Persisted for the same reason as the booking policy: a licence cached only in memory
-    // would be lost on restart, and a licensed user opening the app offline would be treated
-    // as unlicensed.
-    this.persist();
-    return entitlements(this);
-  }
-
-  /**
-   * How many active units this account may hold, or null for unlimited.
-   *
-   * With no cached entitlement the free cap applies. That is the conservative direction: a
-   * device that has never synced must not assume it is licensed.
-   */
-  unitAllowance() {
-    const stored = entitlements(this);
-    if (!stored) return 1;
-    return stored.paid ? stored.unitLimit : 1;
-  }
-
-  /**
-   * Whether the account is over its unit allowance, for the upgrade prompt.
-   *
-   * ADVISORY ONLY — this deliberately does not refuse writes.
-   *
-   * The server enforces the limit, and it is the only place that can: it holds the licence,
-   * it sees every device, and it already has a database trigger closing the race. Refusing
-   * locally would break the two cases the product depends on. A licensed user whose cache
-   * has expired, or who is offline on a new device, would be locked out of their own data —
-   * and the demo dataset, which the application seeds on first run, would fail to load.
-   *
-   * So the client creates the unit and lets the server refuse it, and the refusal is shown
-   * rather than hidden. That is the honest failure: the user learns the limit at the moment
-   * it applies, with their data intact and nothing lost.
-   */
-  unitAllowanceStatus() {
-    const allowance = this.unitAllowance();
-    const active = listProperties(this, { includeArchived: true })
-      .filter((item) => item.status === "active" && !item.deleted_at).length;
-    if (allowance === null) {
-      return { unlimited: true, allowance: null, active, remaining: null, over: false };
-    }
-    return {
-      unlimited: false,
-      allowance,
-      active,
-      remaining: Math.max(0, allowance - active),
-      over: active > allowance,
-    };
-  }
-
-  /** How many local changes are waiting to reach the server. */
-  pendingSyncCount() {
-    return pendingCount(this);
-  }
-
-  /**
-   * Queued changes the server has refused for good.
-   *
-   * They stay in the outbox rather than being dropped — the user's data is theirs, and a
-   * silent discard is the worst outcome. But they will never drain, so the count is reported
-   * separately instead of leaving the "unsynced" badge stuck at a number nobody can explain.
-   */
-  failedSyncCount() {
-    return failed(this).length;
-  }
-
-  /** Pending entries, for the sync engine to push. */
-  pendingSyncEntries(limit = 500) {
-    return pending(this, limit);
-  }
-
-  acknowledgeSync(entries) {
-    return acknowledge(this, entries);
-  }
-
-  recordSyncFailure(entry, message) {
-    return recordFailure(this, entry, message);
-  }
   ensureDeviceId() {
     const existing = this.scalar("SELECT setting_value FROM app_settings WHERE setting_key = 'device_id'");
     if (existing) {
@@ -367,7 +230,7 @@ class RentKeeperDatabase {
       return;
     }
     this.writerId = crypto.randomUUID();
-    this.upsertSetting("device_id", this.writerId);
+    upsertSetting(this, "device_id", this.writerId);
     this.persist();
   }
 
@@ -779,7 +642,7 @@ class RentKeeperDatabase {
       // locally while the server — which reads the real policy — would have accepted it. The
       // two have to judge by the same rule, or the client invents a limit the account does
       // not have.
-      policy: this.bookingPolicy(),
+      policy: bookingPolicy(this),
       kind: bookingKind,
     });
     const actualCheckOutDate = existing?.actual_check_out_date || null;
@@ -1139,8 +1002,8 @@ class RentKeeperDatabase {
       backupDir: this.backupDir,
       databaseSize: fs.existsSync(this.filePath) ? fs.statSync(this.filePath).size : 0,
       // Reported from the cached server policy so the UI shows the account's real window.
-      bookingPolicy: bookingLimits(null, this.todayProvider(), this.bookingPolicy()),
-      language: this.getLanguage(),
+      bookingPolicy: bookingLimits(null, this.todayProvider(), bookingPolicy(this)),
+      language: getLanguage(this),
       documentRequisites: documentRequisites(this),
     };
   }
@@ -1162,64 +1025,12 @@ class RentKeeperDatabase {
       key,
       typeof input?.[key] === "string" ? input[key].trim().slice(0, 300) : value,
     ]));
-    this.upsertSetting("document_requisites", JSON.stringify(next));
+    upsertSetting(this, "document_requisites", JSON.stringify(next));
     // Persisted here for the same reason setBookingPolicy does it: upsertSetting only writes to
     // the in-memory database, and requisites that vanish on restart would have to be retyped
     // before every contract.
     this.persist();
     return next;
-  }
-
-  getLanguage() {
-    const language = this.scalar(
-      "SELECT setting_value FROM app_settings WHERE setting_key = 'interface_language'",
-    );
-    return ALLOWED_INTERFACE_LANGUAGES.has(language) ? language : "ru";
-  }
-
-  upsertSetting(key, value) {
-    const timestamp = nowIso();
-    this.run(
-      `INSERT INTO app_settings(id, setting_key, setting_value, created_at, updated_at, version, last_writer)
-       VALUES (?, ?, ?, ?, ?, 1, ?)
-       ON CONFLICT(setting_key) DO UPDATE SET
-         setting_value = excluded.setting_value,
-         updated_at = excluded.updated_at,
-         version = version + 1,
-         last_writer = excluded.last_writer`,
-      [crypto.randomUUID(), key, value, timestamp, timestamp, this.writerId],
-    );
-    // Per-device settings are stored but never queued for sending.
-    //
-    // `app_settings` is a replicated table, so anything written here travels to every device
-    // that shares the account. Three of these keys must not:
-    //
-    //   entitlements — each device fetches its own licence from the server. Syncing it makes
-    //     one device's cache overwrite another's, so a licensed device can inherit a stale
-    //     "not paid" cache and be treated as unlicensed.
-    //   device_id    — identifies THIS installation. Replicating it makes every device claim
-    //     the same writer, which destroys the only record of which device made a change.
-    //   sync_cursor  — a per-device read position. A device that inherited another's cursor
-    //     would skip every change made before it.
-    //
-    // They are written through `db.run` rather than this method by the sync engine itself, but
-    // the guard lives here so a future caller cannot reintroduce the problem.
-    if (DEVICE_PRIVATE_SETTINGS.has(key)) return;
-
-    // Settings are keyed by setting_key rather than id, so the row is looked up by key.
-    const stored = this.query("SELECT id FROM app_settings WHERE setting_key = ?", [key])[0];
-    if (stored) this.enqueueSync("app_settings", stored.id);
-  }
-
-  setLanguage(language) {
-    const normalized = String(language ?? "").trim().toLowerCase();
-    if (!ALLOWED_INTERFACE_LANGUAGES.has(normalized)) {
-      throw new Error("Доступные языки интерфейса: ru, az, en");
-    }
-    this.upsertSetting("interface_language", normalized);
-    this.audit("settings", null, "language_changed", { language: normalized });
-    this.persist();
-    return normalized;
   }
 
   close() {

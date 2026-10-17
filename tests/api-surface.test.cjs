@@ -26,17 +26,25 @@ const { RentKeeperDatabase } = require("../src/database.cjs");
 // `createBackup`, `pruneBackups` and `listBackups` are no longer on the class. Every caller was
 // migrated first, as before.
 //
+// It changed a fourth time, when the account's configuration moved to `src/domain/settings.cjs`:
+// the eight settings and entitlement methods are no longer on the class, and every caller outside
+// `database.cjs` was migrated first.
+//
+// It changed a fifth time, and this one was the point of the exercise: `pendingSyncCount`,
+// `failedSyncCount`, `pendingSyncEntries`, `acknowledgeSync` and `recordSyncFailure` were one-line
+// delegations to `src/main/outbox.cjs` that the class already imported. They were wrappers, not
+// behaviour, and `principle-minimize-reader-load` says a one-caller wrapper is deleted rather than
+// moved. Callers now reach the module.
+//
 // So the surface is written down. It was captured from the RUNTIME prototype, not from a scan of
 // the source: the first draft of this list came from reading the file and was missing eight
 // members, because an accessor and a differently declared method do not look like the pattern the
 // scan was looking for. That is the same blindness the pin exists to catch, one level up. It is expected to change when the API changes on purpose, and
 // the change belongs in this list in the same commit.
 const EXPECTED = [
-  "acknowledgeSync",
   "archivePlace",
   "archiveProperty",
   "audit",
-  "bookingPolicy",
   "cancelReservation",
   "close",
   "createPlace",
@@ -46,8 +54,6 @@ const EXPECTED = [
   "earlyCheckout",
   "enqueueSync",
   "ensureDeviceId",
-  "failedSyncCount",
-  "getLanguage",
   "getPlace",
   "getProperty",
   "getReservation",
@@ -56,11 +62,8 @@ const EXPECTED = [
   "insertNights",
   "insertRow",
   "insertRowRaw",
-  "pendingSyncCount",
-  "pendingSyncEntries",
   "persist",
   "query",
-  "recordSyncFailure",
   "replaceReservationMeals",
   "reset",
   "restorePlace",
@@ -68,18 +71,12 @@ const EXPECTED = [
   "run",
   "scalar",
   "seedDemoData",
-  "setBookingPolicy",
   "setDocumentRequisites",
-  "setEntitlements",
-  "setLanguage",
   "systemInfo",
   "transaction",
-  "unitAllowance",
-  "unitAllowanceStatus",
   "updatePlace",
   "updateProperty",
   "updateReservation",
-  "upsertSetting",
   "validatePlace",
   "validateProperty",
   "validatePropertyRateRules",

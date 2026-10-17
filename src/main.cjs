@@ -1,5 +1,9 @@
 const { app, BrowserWindow, dialog, ipcMain, Menu, shell, safeStorage } = require("electron");
+const {
+  bookingPolicy, getLanguage, setBookingPolicy, setEntitlements, setLanguage, unitAllowanceStatus,
+} = require("./domain/settings.cjs");
 const { createBackup, listBackups } = require("./domain/backups.cjs");
+const { failed, pendingCount } = require("./main/outbox.cjs");
 const path = require("node:path");
 const fs = require("node:fs/promises");
 // The synchronous API, needed for the one-time data migration below: it must finish before
@@ -204,20 +208,20 @@ function registerIpc() {
         // the value was present.
         const response = await authApi.bookingPolicy();
         const policy = response?.data ?? response ?? {};
-        database.setBookingPolicy(policy);
-        return { ...policy, ...database.bookingPolicy() };
+        setBookingPolicy(database, policy);
+        return { ...policy, ...bookingPolicy(database) };
       } catch (error) {
         // Offline is a normal state, not a failure: report the cached window so the UI keeps
         // working and say that it is cached.
-        return { ...database.bookingPolicy(), stale: true, error: error?.message ?? String(error) };
+        return { ...bookingPolicy(database), stale: true, error: error?.message ?? String(error) };
       }
     });
 
     handle("bookingPolicy:set", async (payload) => {
       const response = await authApi.setBookingPolicy(payload ?? {});
       const policy = response?.data ?? response ?? {};
-      database.setBookingPolicy(policy);
-      return { ...policy, ...database.bookingPolicy() };
+      setBookingPolicy(database, policy);
+      return { ...policy, ...bookingPolicy(database) };
     });
 
 
@@ -227,8 +231,8 @@ function registerIpc() {
         // envelope would have made `paid` undefined so a licensed account read as unlicensed.
         const response = await authApi.entitlements();
         const entitlements = response?.data ?? response ?? {};
-        database.setEntitlements(entitlements);
-        return { ...entitlements, stale: false, allowance: database.unitAllowanceStatus() };
+        setEntitlements(database, entitlements);
+        return { ...entitlements, stale: false, allowance: unitAllowanceStatus(database) };
       } catch (error) {
         // Offline is expected, not an error: report the cached copy and say it is cached.
         const cached = entitlements(database);
@@ -236,7 +240,7 @@ function registerIpc() {
           ...(cached ?? { paid: false, planName: "Бесплатный", unitLimit: 1, features: [] }),
           stale: true,
           error: error?.message ?? String(error),
-          allowance: database.unitAllowanceStatus(),
+          allowance: unitAllowanceStatus(database),
         };
       }
     });
@@ -246,11 +250,11 @@ function registerIpc() {
       return syncEngine.sync();
     });
     handle("sync:status", async () => {
-      const pending = database?.pendingSyncCount?.() ?? 0;
+      const pending = database ? pendingCount(database) : 0;
       // Entries the server refused for good. They stay queued so nothing is lost, but they
       // will never drain, and a user watching "N unsynced" forever would reasonably think the
       // app was broken. Reported separately so the UI can say what is actually wrong.
-      const stuck = database?.failedSyncCount?.() ?? 0;
+      const stuck = database ? failed(database).length : 0;
       return {
         pending,
         stuck,
@@ -488,7 +492,7 @@ function registerIpc() {
     handle("backups:create", () => createBackup(database));
     handle("system:info", () => database.systemInfo());
     handle("system:setLanguage", (payload) => {
-      const language = database.setLanguage(payload?.language);
+      const language = setLanguage(database, payload?.language);
       createMenu(language);
       return language;
     });
@@ -647,7 +651,7 @@ function registerIpc() {
     });
   }
 
-  function createMenu(language = database?.getLanguage() || "ru") {
+  function createMenu(language = (database ? getLanguage(database) : "ru") || "ru") {
     const labels = {
       ru: {
         file: "Файл",
