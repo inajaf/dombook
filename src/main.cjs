@@ -3,6 +3,7 @@ const {
   bookingPolicy, getLanguage, setBookingPolicy, setEntitlements, setLanguage, unitAllowanceStatus,
 } = require("./domain/settings.cjs");
 const { createBackup, listBackups } = require("./domain/backups.cjs");
+const { failed, pendingCount } = require("./main/outbox.cjs");
 const path = require("node:path");
 const fs = require("node:fs/promises");
 // The synchronous API, needed for the one-time data migration below: it must finish before
@@ -249,11 +250,11 @@ function registerIpc() {
       return syncEngine.sync();
     });
     handle("sync:status", async () => {
-      const pending = database?.pendingSyncCount?.() ?? 0;
+      const pending = database ? pendingCount(database) : 0;
       // Entries the server refused for good. They stay queued so nothing is lost, but they
       // will never drain, and a user watching "N unsynced" forever would reasonably think the
       // app was broken. Reported separately so the UI can say what is actually wrong.
-      const stuck = database?.failedSyncCount?.() ?? 0;
+      const stuck = database ? failed(database).length : 0;
       return {
         pending,
         stuck,

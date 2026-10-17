@@ -9,15 +9,7 @@ const {
 } = require("./domain/reports.cjs");
 const { migrate } = require("./domain/migrations.cjs");
 const initSqlJs = require("sql.js");
-const {
-  enqueue: enqueueOutbox,
-  pending,
-  pendingCount,
-  acknowledge,
-  recordFailure,
-  // Entries the server refused for good. Reported, never silently dropped.
-  failed,
-} = require("./main/outbox.cjs");
+const { enqueue: enqueueOutbox } = require("./main/outbox.cjs");
 const {
   assertBookingDates,
   bookingLimits,
@@ -231,33 +223,6 @@ class RentKeeperDatabase {
    * a validation rule that needed the network would make booking impossible without one.
    * The shipped defaults apply until the server has been heard from.
    */
-  pendingSyncCount() {
-    return pendingCount(this);
-  }
-
-  /**
-   * Queued changes the server has refused for good.
-   *
-   * They stay in the outbox rather than being dropped — the user's data is theirs, and a
-   * silent discard is the worst outcome. But they will never drain, so the count is reported
-   * separately instead of leaving the "unsynced" badge stuck at a number nobody can explain.
-   */
-  failedSyncCount() {
-    return failed(this).length;
-  }
-
-  /** Pending entries, for the sync engine to push. */
-  pendingSyncEntries(limit = 500) {
-    return pending(this, limit);
-  }
-
-  acknowledgeSync(entries) {
-    return acknowledge(this, entries);
-  }
-
-  recordSyncFailure(entry, message) {
-    return recordFailure(this, entry, message);
-  }
   ensureDeviceId() {
     const existing = this.scalar("SELECT setting_value FROM app_settings WHERE setting_key = 'device_id'");
     if (existing) {
